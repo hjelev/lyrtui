@@ -73,19 +73,29 @@ pub struct RadioNav {
 #[derive(Debug, Clone)]
 pub struct ContextMenu {
     pub selected: usize,
+    pub parent_label: Option<String>,
 }
 
 impl ContextMenu {
-    pub fn new() -> Self {
-        Self { selected: 0 }
+    pub fn new(parent_label: Option<String>) -> Self {
+        Self { selected: 0, parent_label }
     }
 
-    pub fn option_count() -> usize {
-        4
+    pub fn option_count(&self) -> usize {
+        if self.parent_label.is_some() { 5 } else { 4 }
     }
 
-    pub fn options() -> [&'static str; 4] {
-        ["Play now", "Play next", "Add to end of queue", "Add to favourites"]
+    pub fn options(&self) -> Vec<String> {
+        let mut opts = vec![
+            "Play now".to_string(),
+            "Play next".to_string(),
+            "Add to end of queue".to_string(),
+            "Add to favourites".to_string(),
+        ];
+        if let Some(label) = &self.parent_label {
+            opts.push(label.clone());
+        }
+        opts
     }
 }
 

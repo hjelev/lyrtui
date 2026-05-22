@@ -48,6 +48,7 @@ If the server is not on `localhost:9000`, press `c` to open the configuration me
   - **Play next** — insert after the current track
   - **Add to end of queue** — append to the queue
   - **Add to favourites** — save to LMS favourites
+  - **Add [album/folder] to queue** — add the whole parent album or radio/app/favourites folder (shown when applicable)
 - **Double-click** on a playable item — play immediately (skips the menu)
 - **Left click** on a navigable item (artist, album, radio folder) — navigate into it (unchanged)
 - **Right click** anywhere — go back (same as `Esc` / `h`)
@@ -61,7 +62,7 @@ The action menu can be navigated with `↑`/`↓` (or `j`/`k`), confirmed with `
 |-----|--------|
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
-| `Enter` / `l` / `→` | Select / enter / focus main |
+| `Enter` / `l` | Select / navigate; opens action menu on playable items |
 | `Esc` / `h` / `←` | Back / focus sidebar |
 | `Space` | Play / pause |
 | `n` | Next track |

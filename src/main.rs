@@ -230,13 +230,15 @@ async fn handle_mouse_event(
     // Context menu intercepts all left clicks
     if app.context_menu.is_some() {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let menu_area = ui::compute_context_menu_rect(terminal_area);
+            let option_count = app.context_menu.as_ref().unwrap().option_count();
+            let menu_area = ui::compute_context_menu_rect(terminal_area, option_count);
             if point_in(col, row, menu_area) {
                 let opt_top = menu_area.y + 1;
                 let opt_bot = menu_area.y + menu_area.height.saturating_sub(2);
                 if row >= opt_top && row < opt_bot {
                     let opt_idx = (row - opt_top) as usize;
-                    if opt_idx < ContextMenu::option_count() {
+                    let count = app.context_menu.as_ref().unwrap().option_count();
+                    if opt_idx < count {
                         app.context_menu.as_mut().unwrap().selected = opt_idx;
                         execute_context_menu_action(app, client, tx).await;
                     }
@@ -284,7 +286,7 @@ async fn handle_mouse_event(
                         if is_double || !is_main_item_playable(app) {
                             handle_action(app, Action::Select, client, tx).await;
                         } else {
-                            app.context_menu = Some(ContextMenu::new());
+                            app.context_menu = Some(ContextMenu::new(compute_parent_label(app)));
                         }
                     }
                 }
@@ -310,10 +312,31 @@ async fn handle_mouse_event(
     }
 }
 
+fn compute_parent_label(app: &App) -> Option<String> {
+    match &app.main_view {
+        MainView::Library(LibraryView::Tracks { album_id: Some(id) }) => {
+            let name = app.albums.iter()
+                .find(|a| json_id_to_string(&a.id) == *id)
+                .map(|a| a.album.clone())
+                .unwrap_or_else(|| "album".to_string());
+            Some(format!("Add \"{}\" to queue", name))
+        }
+        MainView::Radio if !app.radio_items.is_empty() => {
+            Some(format!("Add \"{}\" folder to queue", app.radio_title))
+        }
+        MainView::Apps if !app.app_items.is_empty() => {
+            Some(format!("Add \"{}\" folder to queue", app.app_title))
+        }
+        MainView::Favourites if !app.fav_items.is_empty() => {
+            Some(format!("Add \"{}\" folder to queue", app.fav_title))
+        }
+        _ => None,
+    }
+}
+
 fn is_main_item_playable(app: &App) -> bool {
     match &app.main_view {
         MainView::Library(LibraryView::Tracks { .. }) => !app.tracks.is_empty(),
-        MainView::Queue => !app.queue.is_empty(),
         MainView::Radio => app.radio_items.get(app.main_selected).map(|i| i.is_playable()).unwrap_or(false),
         MainView::Apps => app.app_items.get(app.main_selected).map(|i| i.is_playable()).unwrap_or(false),
         MainView::Favourites => app.fav_items.get(app.main_selected).map(|i| i.is_playable()).unwrap_or(false),
@@ -333,7 +356,7 @@ async fn handle_context_menu_key(
             if menu.selected > 0 { menu.selected -= 1; }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if menu.selected < ContextMenu::option_count() - 1 { menu.selected += 1; }
+            if menu.selected < menu.option_count() - 1 { menu.selected += 1; }
         }
         KeyCode::Enter => {
             execute_context_menu_action(app, client, tx).await;
@@ -356,6 +379,7 @@ async fn execute_context_menu_action(
         1 => handle_insert_next(app, client, tx).await,
         2 => handle_add_to_queue(app, client, tx).await,
         3 => handle_add_to_favorites(app, client, tx).await,
+        4 => handle_add_parent_to_queue(app, client, tx).await,
         _ => {}
     }
 }
@@ -593,6 +617,8 @@ async fn handle_action(
                     }
                     None => {}
                 }
+            } else if is_main_item_playable(app) {
+                app.context_menu = Some(ContextMenu::new(compute_parent_label(app)));
             } else {
                 handle_main_select(app, client, tx).await;
             }
@@ -925,6 +951,75 @@ async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
             }
         }
         MainView::Help => {}
+    }
+}
+
+async fn handle_add_parent_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
+    let Some(pid) = app.active_player.clone() else {
+        app.status_message = Some("No active player".to_string());
+        return;
+    };
+
+    match app.main_view.clone() {
+        MainView::Library(LibraryView::Tracks { album_id: Some(id) }) => {
+            let name = app.albums.iter()
+                .find(|a| json_id_to_string(&a.id) == id)
+                .map(|a| a.album.clone())
+                .unwrap_or_else(|| "album".to_string());
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                if c.add_album_to_queue(&pid, &id).await.is_ok() {
+                    let _ = t.send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name))).await;
+                }
+            });
+        }
+        MainView::Radio => {
+            let urls: Vec<String> = app.radio_items.iter().filter_map(|i| i.url.clone()).collect();
+            let title = app.radio_title.clone();
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                let mut added = 0usize;
+                for url in &urls {
+                    if c.add_url_to_queue(&pid, url).await.is_ok() { added += 1; }
+                }
+                if added > 0 {
+                    let _ = t.send(AppMsg::StatusMsg(format!("Added {} items from \"{}\" to queue", added, title))).await;
+                }
+            });
+        }
+        MainView::Apps => {
+            let urls: Vec<String> = app.app_items.iter().filter_map(|i| i.url.clone()).collect();
+            let title = app.app_title.clone();
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                let mut added = 0usize;
+                for url in &urls {
+                    if c.add_url_to_queue(&pid, url).await.is_ok() { added += 1; }
+                }
+                if added > 0 {
+                    let _ = t.send(AppMsg::StatusMsg(format!("Added {} items from \"{}\" to queue", added, title))).await;
+                }
+            });
+        }
+        MainView::Favourites => {
+            let urls: Vec<String> = app.fav_items.iter().filter_map(|i| i.url.clone()).collect();
+            let title = app.fav_title.clone();
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                let mut added = 0usize;
+                for url in &urls {
+                    if c.add_url_to_queue(&pid, url).await.is_ok() { added += 1; }
+                }
+                if added > 0 {
+                    let _ = t.send(AppMsg::StatusMsg(format!("Added {} items from \"{}\" to queue", added, title))).await;
+                }
+            });
+        }
+        _ => {}
     }
 }
 

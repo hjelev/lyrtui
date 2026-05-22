@@ -1,4 +1,4 @@
-use crate::app::{App, ConfigModal, ConnectionState, ContextMenu, LibraryView, MainView};
+use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -638,14 +638,14 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, w, height)
 }
 
-pub fn compute_context_menu_rect(area: Rect) -> Rect {
-    centered_rect_abs(44, 7, area)
+pub fn compute_context_menu_rect(area: Rect, option_count: usize) -> Rect {
+    centered_rect_abs(44, (option_count + 3) as u16, area)
 }
 
 fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
     let Some(menu) = &app.context_menu else { return };
 
-    let popup = compute_context_menu_rect(area);
+    let popup = compute_context_menu_rect(area, menu.option_count());
     f.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -662,8 +662,8 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(inner);
 
-    let options = ContextMenu::options();
-    let items: Vec<ListItem> = options.iter().map(|o| ListItem::new(*o)).collect();
+    let options = menu.options();
+    let items: Vec<ListItem> = options.iter().map(|o| ListItem::new(o.as_str())).collect();
 
     let mut state = ListState::default();
     state.select(Some(menu.selected));
