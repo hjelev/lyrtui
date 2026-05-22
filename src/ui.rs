@@ -9,6 +9,16 @@ use ratatui::{
     Frame,
 };
 use ratatui_image::{Resize, StatefulImage, protocol::StatefulProtocol};
+use std::collections::HashMap;
+
+const THUMB_W: u16 = 4; // image column width in cells
+const THUMB_SEP: u16 = 1; // gap between image and text
+
+struct RowItem {
+    thumb_url: Option<String>,
+    line1: Line<'static>,
+    line2: Line<'static>,
+}
 
 /// Returns (sidebar_area, main_area) for a given terminal area.
 pub fn compute_areas(area: Rect) -> (Rect, Rect) {
@@ -23,12 +33,14 @@ pub fn compute_areas(area: Rect) -> (Rect, Rect) {
     (panes[0], panes[1])
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     f: &mut Frame,
     app: &App,
     album_art: Option<&mut StatefulProtocol>,
     sidebar_state: &mut ListState,
     main_state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
     server_host: &str,
     server_port: u16,
 ) {
@@ -58,7 +70,7 @@ pub fn draw(
 
     draw_sidebar(f, app, sidebar_split[0], sidebar_state);
     draw_server_status(f, app, sidebar_split[1], server_host, server_port);
-    draw_main(f, app, panes[1], main_state);
+    draw_main(f, app, panes[1], main_state, thumbnails);
     draw_statusbar(f, app, status_area, album_art);
 
     if let Some(msg) = &app.status_message {
@@ -178,93 +190,86 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     f.render_stateful_widget(list, area, state);
 }
 
-fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
+fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     match &app.main_view {
-        MainView::Library(lib) => draw_library(f, app, area, lib, state),
-        MainView::Queue => draw_queue(f, app, area, state),
+        MainView::Library(lib) => draw_library(f, app, area, lib, state, thumbnails),
+        MainView::Queue => draw_queue(f, app, area, state, thumbnails),
         MainView::Players => draw_players(f, app, area, state),
-        MainView::Radio => draw_radio(f, app, area, state),
-        MainView::Apps => draw_apps(f, app, area, state),
-        MainView::Favourites => draw_favourites(f, app, area, state),
+        MainView::Radio => draw_radio(f, app, area, state, thumbnails),
+        MainView::Apps => draw_apps(f, app, area, state, thumbnails),
+        MainView::Favourites => draw_favourites(f, app, area, state, thumbnails),
         MainView::Help => draw_help(f, area),
     }
 }
 
-fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state: &mut ListState) {
-    let border_style = if !app.focus_sidebar {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
+fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+    let focused = !app.focus_sidebar;
     match view {
         LibraryView::Artists => {
-            let items: Vec<ListItem> = app
-                .artists
-                .iter()
-                .map(|a| ListItem::new(a.artist.as_str()))
-                .collect();
-            render_list(f, area, " Artists ", items, app.main_selected, !app.focus_sidebar, border_style, state);
+            let items = app.artists.iter().map(|a| RowItem {
+                thumb_url: None, // artist thumbnails fetched by main.rs
+                line1: Line::from(Span::raw(format!("  {}", a.artist))),
+                line2: Line::from(Span::styled("  artist", Style::default().fg(Color::DarkGray))),
+            }).collect();
+            draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, state, thumbnails);
         }
         LibraryView::Albums { .. } => {
-            let items: Vec<ListItem> = app
-                .albums
-                .iter()
-                .map(|a| {
-                    let label = if let Some(ref artist) = a.artist {
-                        format!("{} — {}", a.album, artist)
-                    } else {
-                        a.album.clone()
-                    };
-                    ListItem::new(label)
-                })
-                .collect();
-            render_list(f, area, " Albums ", items, app.main_selected, !app.focus_sidebar, border_style, state);
+            let items = app.albums.iter().map(|a| {
+                let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
+                RowItem {
+                    thumb_url: None,
+                    line1: Line::from(Span::raw(format!("  {}", a.album))),
+                    line2: Line::from(Span::styled(format!("  {}", sub), Style::default().fg(Color::DarkGray))),
+                }
+            }).collect();
+            draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, state, thumbnails);
         }
         LibraryView::Tracks { album_id } => {
             let title = if album_id.is_some() { " Tracks " } else { " All Tracks " };
-            let items: Vec<ListItem> = app
-                .tracks
-                .iter()
-                .enumerate()
-                .map(|(i, t)| {
-                    let dur = t.duration.map(format_duration).unwrap_or_default();
-                    let label = format!("{:>3}. {} {}", i + 1, t.title, dur);
-                    ListItem::new(label)
-                })
-                .collect();
-            render_list(f, area, title, items, app.main_selected, !app.focus_sidebar, border_style, state);
+            let items = app.tracks.iter().enumerate().map(|(i, t)| {
+                let dur = t.duration.map(format_duration).unwrap_or_default();
+                let artist = t.artist.as_deref().unwrap_or("");
+                RowItem {
+                    thumb_url: None,
+                    line1: Line::from(Span::raw(format!("  {:>3}. {}", i + 1, t.title))),
+                    line2: Line::from(Span::styled(
+                        format!("  {}  {}", artist, dur),
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                }
+            }).collect();
+            draw_two_row_list(f, area, title, items, app.main_selected, focused, state, thumbnails);
         }
     }
 }
 
-fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
-    let border_style = if !app.focus_sidebar {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
+fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+    let focused = !app.focus_sidebar;
     let playing_title = app.now_playing.as_ref().map(|n| n.title.as_str()).unwrap_or("");
 
-    let items: Vec<ListItem> = app
-        .queue
-        .iter()
-        .enumerate()
-        .map(|(i, t)| {
-            let is_current = t.title == playing_title && !playing_title.is_empty();
-            let marker = if is_current { "▶ " } else { "  " };
-            let label = format!("{}{:>3}. {}", marker, i + 1, t.title);
-            let style = if is_current {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-            ListItem::new(label).style(style)
-        })
-        .collect();
+    let items = app.queue.iter().enumerate().map(|(i, t)| {
+        let is_current = t.title == playing_title && !playing_title.is_empty();
+        let (l1_style, l2_style) = if is_current {
+            (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+             Style::default().fg(Color::Green))
+        } else {
+            (Style::default().fg(Color::White),
+             Style::default().fg(Color::DarkGray))
+        };
+        let marker = if is_current { "▶ " } else { "  " };
+        let artist_album = match (t.artist.as_deref(), t.album.as_deref()) {
+            (Some(ar), Some(al)) => format!("{} — {}", ar, al),
+            (Some(ar), None) => ar.to_string(),
+            _ => String::new(),
+        };
+        RowItem {
+            thumb_url: None,
+            line1: Line::from(Span::styled(format!("{}{:>3}. {}", marker, i + 1, t.title), l1_style)),
+            line2: Line::from(Span::styled(format!("    {}", artist_album), l2_style)),
+        }
+    }).collect();
 
-    render_list(f, area, " Queue ", items, app.main_selected, !app.focus_sidebar, border_style, state);
+    draw_two_row_list(f, area, " Queue ", items, app.main_selected, focused, state, thumbnails);
 }
 
 fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
@@ -296,113 +301,58 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     render_list(f, area, " Players  t:power ", items, app.main_selected, !app.focus_sidebar, border_style, state);
 }
 
-fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
-    let border_style = if !app.focus_sidebar {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    // Build a breadcrumb: "Radio > TuneIn > Pop" from the nav stack
-    let breadcrumb = if app.radio_nav_stack.is_empty() {
-        app.radio_title.clone()
-    } else {
-        let parts: Vec<&str> = app
-            .radio_nav_stack
-            .iter()
-            .map(|n| n.title.as_str())
-            .chain(std::iter::once(app.radio_title.as_str()))
-            .collect();
-        parts.join(" › ")
-    };
+fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+    let focused = !app.focus_sidebar;
+    let breadcrumb = breadcrumb_str(app.radio_nav_stack.iter().map(|n| n.title.as_str()), &app.radio_title);
     let title = format!(" Radio — {} ", breadcrumb);
-
-    let items: Vec<ListItem> = app
-        .radio_items
-        .iter()
-        .map(|item| {
-            let (icon, style) = if item.is_playable() {
-                ("▶ ", Style::default().fg(Color::Cyan))
-            } else {
-                ("▸ ", Style::default().fg(Color::White))
-            };
-            ListItem::new(format!("{}{}", icon, item.name)).style(style)
-        })
-        .collect();
-
-    render_list(f, area, &title, items, app.main_selected, !app.focus_sidebar, border_style, state);
+    let items = app.radio_items.iter().map(|item| {
+        let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
+        RowItem {
+            thumb_url: item.artwork_url.clone(),
+            line1: Line::from(Span::styled(format!("  {}{}", icon, item.name), Style::default().fg(fg))),
+            line2: Line::from(Span::styled(
+                format!("  {}", if item.is_playable() { "stream" } else { "folder" }),
+                Style::default().fg(Color::DarkGray),
+            )),
+        }
+    }).collect();
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails);
 }
 
-fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
-    let border_style = if !app.focus_sidebar {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let breadcrumb = if app.app_nav_stack.is_empty() {
-        app.app_title.clone()
-    } else {
-        let parts: Vec<&str> = app
-            .app_nav_stack
-            .iter()
-            .map(|n| n.title.as_str())
-            .chain(std::iter::once(app.app_title.as_str()))
-            .collect();
-        parts.join(" › ")
-    };
+fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+    let focused = !app.focus_sidebar;
+    let breadcrumb = breadcrumb_str(app.app_nav_stack.iter().map(|n| n.title.as_str()), &app.app_title);
     let title = format!(" Apps — {} ", breadcrumb);
-
-    let items: Vec<ListItem> = app
-        .app_items
-        .iter()
-        .map(|item| {
-            let (icon, style) = if item.is_playable() {
-                ("▶ ", Style::default().fg(Color::Cyan))
-            } else {
-                ("▸ ", Style::default().fg(Color::White))
-            };
-            ListItem::new(format!("{}{}", icon, item.name)).style(style)
-        })
-        .collect();
-
-    render_list(f, area, &title, items, app.main_selected, !app.focus_sidebar, border_style, state);
+    let items = app.app_items.iter().map(|item| {
+        let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
+        RowItem {
+            thumb_url: item.artwork_url.clone(),
+            line1: Line::from(Span::styled(format!("  {}{}", icon, item.name), Style::default().fg(fg))),
+            line2: Line::from(Span::styled(
+                format!("  {}", if item.is_playable() { "stream" } else { "folder" }),
+                Style::default().fg(Color::DarkGray),
+            )),
+        }
+    }).collect();
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails);
 }
 
-fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
-    let border_style = if !app.focus_sidebar {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let breadcrumb = if app.fav_nav_stack.is_empty() {
-        app.fav_title.clone()
-    } else {
-        let parts: Vec<&str> = app
-            .fav_nav_stack
-            .iter()
-            .map(|n| n.title.as_str())
-            .chain(std::iter::once(app.fav_title.as_str()))
-            .collect();
-        parts.join(" › ")
-    };
+fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+    let focused = !app.focus_sidebar;
+    let breadcrumb = breadcrumb_str(app.fav_nav_stack.iter().map(|n| n.title.as_str()), &app.fav_title);
     let title = format!(" ★ {} ", breadcrumb);
-
-    let items: Vec<ListItem> = app
-        .fav_items
-        .iter()
-        .map(|item| {
-            let (icon, style) = if item.is_playable() {
-                ("▶ ", Style::default().fg(Color::Cyan))
-            } else {
-                ("▸ ", Style::default().fg(Color::White))
-            };
-            ListItem::new(format!("{}{}", icon, item.name)).style(style)
-        })
-        .collect();
-
-    render_list(f, area, &title, items, app.main_selected, !app.focus_sidebar, border_style, state);
+    let items = app.fav_items.iter().map(|item| {
+        let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
+        RowItem {
+            thumb_url: item.artwork_url.clone(),
+            line1: Line::from(Span::styled(format!("  {}{}", icon, item.name), Style::default().fg(fg))),
+            line2: Line::from(Span::styled(
+                format!("  {}", if item.is_playable() { "stream" } else { "folder" }),
+                Style::default().fg(Color::DarkGray),
+            )),
+        }
+    }).collect();
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails);
 }
 
 fn draw_help(f: &mut Frame, area: Rect) {
@@ -575,6 +525,124 @@ fn draw_disconnected_overlay(f: &mut Frame, area: Rect, state: &ConnectionState)
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD));
     f.render_widget(p, popup_area);
+}
+
+fn breadcrumb_str<'a>(stack: impl Iterator<Item = &'a str>, current: &'a str) -> String {
+    let parts: Vec<&str> = stack.chain(std::iter::once(current)).collect();
+    parts.join(" › ")
+}
+
+fn draw_thumb_placeholder(f: &mut Frame, rect: Rect) {
+    f.render_widget(
+        Paragraph::new(if rect.height >= 2 { "\n ♪" } else { " ♪" })
+            .style(Style::default().fg(Color::Rgb(60, 60, 80)).bg(Color::Rgb(25, 25, 35))),
+        rect,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_two_row_list(
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    items: Vec<RowItem>,
+    selected: usize,
+    focused: bool,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+) {
+    let border_style = if focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title(title);
+
+    if items.is_empty() {
+        state.select(None);
+        f.render_widget(
+            Paragraph::new("(empty)").block(block).style(Style::default().fg(Color::DarkGray)),
+            area,
+        );
+        return;
+    }
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let visible = ((inner.height / 2) as usize).max(1);
+
+    // Sync scroll so selected is always visible
+    let offset = {
+        let o = *state.offset_mut();
+        let new_o = if selected < o {
+            selected
+        } else if selected >= o + visible {
+            selected + 1 - visible
+        } else {
+            o
+        };
+        *state.offset_mut() = new_o;
+        new_o
+    };
+
+    let text_x = inner.x + THUMB_W + THUMB_SEP;
+    let text_w = inner.width.saturating_sub(THUMB_W + THUMB_SEP);
+
+    for (vis_i, item_i) in (offset..).zip(0usize..) {
+        if vis_i >= items.len() { break; }
+        let y = inner.y + (item_i as u16) * 2;
+        if y + 1 >= inner.y + inner.height { break; }
+
+        let item = &items[vis_i];
+        let is_sel = vis_i == selected;
+
+        // Thumbnail
+        let thumb_rect = Rect::new(inner.x, y, THUMB_W, 2);
+        match item.thumb_url.as_ref().and_then(|u| thumbnails.get_mut(u)) {
+            Some(proto) => {
+                let img = StatefulImage::default().resize(Resize::Fit(None));
+                f.render_stateful_widget(img, thumb_rect, proto);
+            }
+            None => draw_thumb_placeholder(f, thumb_rect),
+        }
+
+        // Text: two lines
+        let (fg1, fg2) = if is_sel && focused {
+            (Color::Yellow, Color::DarkGray)
+        } else if is_sel {
+            (Color::White, Color::Gray)
+        } else {
+            (Color::White, Color::DarkGray)
+        };
+        let mod1 = if is_sel && focused { Modifier::BOLD } else { Modifier::empty() };
+
+        // Prefix the first line with a selection arrow
+        let line1 = if is_sel && focused {
+            let mut spans = vec![Span::styled("▶ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))];
+            // strip leading "  " from item line1 if present
+            for span in item.line1.spans.iter() {
+                let content = span.content.trim_start_matches("  ");
+                spans.push(Span::styled(content.to_string(), span.style.fg(fg1).add_modifier(mod1)));
+            }
+            Line::from(spans)
+        } else {
+            item.line1.clone().patch_style(Style::default().fg(fg1))
+        };
+
+        f.render_widget(
+            Paragraph::new(line1),
+            Rect::new(text_x, y, text_w, 1),
+        );
+        f.render_widget(
+            Paragraph::new(item.line2.clone().patch_style(Style::default().fg(fg2))),
+            Rect::new(text_x, y + 1, text_w, 1),
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

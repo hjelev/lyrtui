@@ -212,6 +212,8 @@ pub enum AppMsg {
     AppItemsLoaded(Vec<RadioItem>),
     FavItemsLoaded(Vec<RadioItem>),
     ArtworkLoaded(Vec<u8>),
+    ThumbnailLoaded(String, Vec<u8>), // url, bytes
+    ThumbnailFailed(String),          // url
     StatusMsg(String),
     #[allow(dead_code)]
     Error(String),

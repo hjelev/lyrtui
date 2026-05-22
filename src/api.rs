@@ -63,6 +63,8 @@ pub struct RadioItem {
     pub cmd: Option<String>,
     /// Opaque item id used to navigate into this item.
     pub item_id: Option<String>,
+    /// Thumbnail / cover art URL for this item, if provided by the server.
+    pub artwork_url: Option<String>,
 }
 
 impl RadioItem {
@@ -308,6 +310,7 @@ impl LmsClient {
     pub async fn get_apps(&self) -> Result<Vec<RadioItem>> {
         let result = self.rpc("", &[json!("apps"), json!(0), json!(100)]).await?;
         let items = result["appss_loop"].as_array().cloned().unwrap_or_default();
+        let base = self.server_base_url();
         Ok(items
             .into_iter()
             .map(|v| RadioItem {
@@ -316,6 +319,7 @@ impl LmsClient {
                 url: None,
                 cmd: v["cmd"].as_str().map(String::from),
                 item_id: None,
+                artwork_url: resolve_image_url(&v, &base),
             })
             .collect())
     }
@@ -327,6 +331,7 @@ impl LmsClient {
             .as_array()
             .cloned()
             .unwrap_or_default();
+        let base = self.server_base_url();
         Ok(items
             .into_iter()
             .map(|v| RadioItem {
@@ -335,6 +340,7 @@ impl LmsClient {
                 url: None,
                 cmd: v["cmd"].as_str().map(String::from),
                 item_id: None,
+                artwork_url: resolve_image_url(&v, &base),
             })
             .collect())
     }
@@ -364,18 +370,19 @@ impl LmsClient {
             .or_else(|| result["item_loop"].as_array())
             .cloned()
             .unwrap_or_default();
+        let base = self.server_base_url();
         Ok(items
             .into_iter()
             .map(|v| RadioItem {
                 name: v["name"].as_str().unwrap_or("").to_string(),
                 item_type: v["type"].as_str().unwrap_or("link").to_string(),
                 url: v["url"].as_str().map(String::from),
-                // inherit parent cmd if item doesn't declare its own
                 cmd: v["cmd"]
                     .as_str()
                     .map(String::from)
                     .or_else(|| Some(cmd.to_string())),
                 item_id: v["id"].as_str().map(String::from),
+                artwork_url: resolve_image_url(&v, &base),
             })
             .collect())
     }
@@ -450,5 +457,20 @@ impl LmsClient {
             return Err(anyhow!("no response from server"));
         }
         Ok(())
+    }
+}
+
+/// Extract an image URL from a JSON item value, resolving relative paths against `base`.
+fn resolve_image_url(v: &Value, base: &str) -> Option<String> {
+    let raw = v["image"].as_str()
+        .or_else(|| v["icon"].as_str())
+        .or_else(|| v["artwork_url"].as_str())?;
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.starts_with('/') {
+        Some(format!("{}{}", base, raw))
+    } else {
+        Some(raw.to_string())
     }
 }

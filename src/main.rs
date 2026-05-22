@@ -16,6 +16,7 @@ use events::{key_to_action, poll_event, Action, InputEvent};
 use ratatui::{backend::CrosstermBackend, layout::Rect, widgets::ListState, Terminal};
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 use std::{
+    collections::{HashMap, HashSet},
     io,
     sync::Arc,
     time::{Duration, Instant},
@@ -60,6 +61,9 @@ async fn run(
     let mut sidebar_state = ListState::default();
     let mut main_state = ListState::default();
     let mut last_main_click: Option<(Instant, usize)> = None;
+    let mut thumbnails: HashMap<String, StatefulProtocol> = HashMap::new();
+    let mut pending_thumbs: HashSet<String> = HashSet::new();
+    let mut failed_thumbs: HashSet<String> = HashSet::new();
 
     // Background: server health + player list polling
     {
@@ -95,16 +99,29 @@ async fn run(
     }
 
     loop {
-        terminal.draw(|f| ui::draw(f, &app, album_art.as_mut(), &mut sidebar_state, &mut main_state, &cfg.host, cfg.port))?;
+        terminal.draw(|f| ui::draw(f, &app, album_art.as_mut(), &mut sidebar_state, &mut main_state, &mut thumbnails, &cfg.host, cfg.port))?;
 
         // Drain all pending messages without blocking
         while let Ok(msg) = rx.try_recv() {
-            if let AppMsg::ArtworkLoaded(bytes) = msg {
-                if let Ok(img) = image::load_from_memory(&bytes) {
-                    album_art = Some(picker.new_resize_protocol(img));
+            match msg {
+                AppMsg::ArtworkLoaded(bytes) => {
+                    if let Ok(img) = image::load_from_memory(&bytes) {
+                        album_art = Some(picker.new_resize_protocol(img));
+                    }
                 }
-            } else {
-                handle_msg(&mut app, msg, &client, &tx).await;
+                AppMsg::ThumbnailLoaded(url, bytes) => {
+                    pending_thumbs.remove(&url);
+                    if let Ok(img) = image::load_from_memory(&bytes) {
+                        thumbnails.insert(url, picker.new_resize_protocol(img));
+                    } else {
+                        failed_thumbs.insert(url);
+                    }
+                }
+                AppMsg::ThumbnailFailed(url) => {
+                    pending_thumbs.remove(&url);
+                    failed_thumbs.insert(url);
+                }
+                other => handle_msg(&mut app, other, &client, &tx).await,
             }
         }
 
@@ -121,6 +138,35 @@ async fn run(
                         let _ = t.send(AppMsg::ArtworkLoaded(bytes)).await;
                     }
                 });
+            }
+        }
+
+        // Request thumbnails for currently visible items
+        {
+            let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
+            let inner_h = term_h.saturating_sub(13);
+            let visible = ((inner_h / 2) as usize).max(1);
+            let offset = main_state.offset();
+            let end = (offset + visible + 5).min(main_list_len(&app));
+            let base = client.server_base_url();
+            for idx in offset..end {
+                if let Some(url) = thumbnail_url_for(&app, idx, &base)
+                    && !thumbnails.contains_key(&url)
+                    && !pending_thumbs.contains(&url)
+                    && !failed_thumbs.contains(&url)
+                {
+                    pending_thumbs.insert(url.clone());
+                    let c = client.clone();
+                    let t = tx.clone();
+                    let u = url.clone();
+                    tokio::spawn(async move {
+                        if let Ok(bytes) = c.fetch_image_bytes(&u).await {
+                            let _ = t.send(AppMsg::ThumbnailLoaded(u, bytes)).await;
+                        } else {
+                            let _ = t.send(AppMsg::ThumbnailFailed(u)).await;
+                        }
+                    });
+                }
             }
         }
 
@@ -190,7 +236,9 @@ async fn handle_msg(
             app.status_message = Some(msg);
         }
         AppMsg::Error(e) => app.status_message = Some(e),
-        AppMsg::ArtworkLoaded(_) => {} // handled inline in the event loop
+        AppMsg::ArtworkLoaded(_) | AppMsg::ThumbnailLoaded(..) | AppMsg::ThumbnailFailed(_) => {
+            // handled inline in the event loop
+        }
     }
 }
 
@@ -273,7 +321,8 @@ async fn handle_mouse_event(
                 let inner_bot = main_area.y + main_area.height.saturating_sub(1);
                 if row >= inner_top && row < inner_bot {
                     let rel = (row - inner_top) as usize;
-                    let idx = main_state.offset() + rel;
+                    let row_h = if uses_two_row_layout(&app.main_view) { 2 } else { 1 };
+                    let idx = main_state.offset() + rel / row_h;
                     if idx < main_list_len(app) {
                         let is_double = last_main_click
                             .as_ref()
@@ -312,6 +361,35 @@ async fn handle_mouse_event(
     }
 }
 
+fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
+    match &app.main_view {
+        MainView::Library(LibraryView::Artists) => {
+            app.artists.get(idx).map(|a| {
+                format!("{}/music/{}/artist.jpg", base, json_id_to_string(&a.id))
+            })
+        }
+        MainView::Library(LibraryView::Albums { .. }) => {
+            app.albums.get(idx).map(|a| {
+                format!("{}/music/{}/cover.jpg", base, json_id_to_string(&a.id))
+            })
+        }
+        MainView::Library(LibraryView::Tracks { .. }) => {
+            app.tracks.get(idx).and_then(|t| {
+                t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, json_id_to_string(id)))
+            })
+        }
+        MainView::Queue => {
+            app.queue.get(idx).and_then(|t| {
+                t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, json_id_to_string(id)))
+            })
+        }
+        MainView::Radio => app.radio_items.get(idx).and_then(|i| i.artwork_url.clone()),
+        MainView::Apps => app.app_items.get(idx).and_then(|i| i.artwork_url.clone()),
+        MainView::Favourites => app.fav_items.get(idx).and_then(|i| i.artwork_url.clone()),
+        _ => None,
+    }
+}
+
 fn compute_parent_label(app: &App) -> Option<String> {
     match &app.main_view {
         MainView::Library(LibraryView::Tracks { album_id: Some(id) }) => {
@@ -332,6 +410,10 @@ fn compute_parent_label(app: &App) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn uses_two_row_layout(view: &MainView) -> bool {
+    !matches!(view, MainView::Players | MainView::Help)
 }
 
 fn is_main_item_playable(app: &App) -> bool {
