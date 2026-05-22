@@ -56,6 +56,12 @@ async fn run(
     let mut cfg = cfg;
     let (tx, mut rx) = mpsc::channel::<AppMsg>(64);
     let mut app = App::new(cfg.default_player.clone());
+    // Compute Now Playing panel height: art column is 18 cols; height = ceil(18 * fw / fh) + 2 borders.
+    {
+        let fs = picker.font_size();
+        let art_rows = (18u16 * fs.width).div_ceil(fs.height);
+        app.status_height = art_rows;
+    }
     let mut album_art: Option<StatefulProtocol> = None;
     let mut last_artwork_url: Option<String> = None;
     let mut sidebar_state = ListState::default();
@@ -271,7 +277,7 @@ async fn handle_mouse_event(
     main_state: &ListState,
     last_main_click: &mut Option<(Instant, usize)>,
 ) {
-    let (sidebar_area, main_area) = ui::compute_areas(terminal_area);
+    let (sidebar_area, main_area) = ui::compute_areas(terminal_area, app.status_height);
     let col = mouse.column;
     let row = mouse.row;
 

@@ -4,7 +4,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph,
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph,
+        Scrollbar, ScrollbarOrientation, ScrollbarState,
     },
     Frame,
 };
@@ -14,6 +15,22 @@ use std::collections::HashMap;
 const THUMB_W: u16 = 4; // image column width in cells
 const THUMB_SEP: u16 = 1; // gap between image and text
 
+/// Pill cursor styles: returns (primary_line_style, secondary_line_style).
+/// Focused uses a solid accent color; unfocused uses a dimmed variant.
+fn cursor_styles(focused: bool) -> (Style, Style) {
+    if focused {
+        (
+            Style::default().bg(Color::Rgb(45, 100, 170)).fg(Color::Rgb(220, 235, 255)).add_modifier(Modifier::BOLD),
+            Style::default().bg(Color::Rgb(45, 100, 170)).fg(Color::Rgb(160, 195, 230)),
+        )
+    } else {
+        (
+            Style::default().bg(Color::Rgb(50, 50, 68)).fg(Color::Rgb(190, 190, 210)),
+            Style::default().bg(Color::Rgb(50, 50, 68)).fg(Color::Rgb(140, 140, 160)),
+        )
+    }
+}
+
 struct RowItem {
     thumb_url: Option<String>,
     line1: Line<'static>,
@@ -21,10 +38,10 @@ struct RowItem {
 }
 
 /// Returns (sidebar_area, main_area) for a given terminal area.
-pub fn compute_areas(area: Rect) -> (Rect, Rect) {
+pub fn compute_areas(area: Rect, status_height: u16) -> (Rect, Rect) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(10), Constraint::Length(1)])
+        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
         .split(area);
     let panes = Layout::default()
         .direction(Direction::Horizontal)
@@ -46,10 +63,10 @@ pub fn draw(
 ) {
     let area = f.area();
 
-    // Outer layout: main content | status bar (10 rows) | notification line
+    // Outer layout: main content | status bar | notification line
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(10), Constraint::Length(1)])
+        .constraints([Constraint::Min(1), Constraint::Length(app.status_height), Constraint::Length(1)])
         .split(area);
 
     let main_area = outer[0];
@@ -171,16 +188,12 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let items: Vec<ListItem> = app
         .sidebar_items
         .iter()
-        .map(|item| ListItem::new(app.sidebar_label(item)))
+        .map(|item| ListItem::new(format!("  {}", app.sidebar_label(item))))
         .collect();
 
     state.select(Some(app.sidebar_selected));
 
-    let (hl_style, hl_symbol) = if app.focus_sidebar {
-        (Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD), "▶ ")
-    } else {
-        (Style::default(), "  ")
-    };
+    let (hl_style, hl_symbol) = (cursor_styles(app.focus_sidebar).0, "");
 
     let list = List::new(items)
         .block(block)
@@ -294,7 +307,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            ListItem::new(format!("{}{}{}", marker, p.name, power_tag)).style(style)
+            ListItem::new(format!("  {}{}{}", marker, p.name, power_tag)).style(style)
         })
         .collect();
 
@@ -436,10 +449,10 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         return;
     };
 
-    // Split: art column (18 cols) | info column
+    // Split: art column (18 cols) | 1-col gap | info column
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(18), Constraint::Min(1)])
+        .constraints([Constraint::Length(18), Constraint::Length(1), Constraint::Min(1)])
         .split(inner);
 
     if let Some(proto) = album_art {
@@ -447,7 +460,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         f.render_stateful_widget(img, cols[0], proto);
     }
 
-    // Info panel: title / artist / album / [spacer] / progress / time
+    // Info panel: title / artist / album / [spacer] / progress+time overlay
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -455,10 +468,9 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
             Constraint::Length(1), // artist
             Constraint::Length(1), // album
             Constraint::Min(0),    // filler
-            Constraint::Length(1), // progress gauge
-            Constraint::Length(1), // time + volume
+            Constraint::Length(1), // progress bar with time overlay
         ])
-        .split(cols[1]);
+        .split(cols[2]);
 
     let play_icon = if np.is_playing { "▶" } else { "⏸" };
     let shuffle_icon = if np.shuffle > 0 { " ⇌" } else { "" };
@@ -488,27 +500,44 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     f.render_widget(Paragraph::new(album_line), rows[2]);
 
     let pct = if np.duration > 0.0 {
-        ((np.elapsed / np.duration) * 100.0) as u16
+        ((np.elapsed / np.duration) * 100.0).clamp(0.0, 100.0) as usize
     } else {
         0
     };
-    let gauge = Gauge::default()
-        .gauge_style(Style::default().fg(Color::Yellow))
-        .percent(pct.min(100));
-    f.render_widget(gauge, rows[4]);
+    let bar_w = rows[4].width as usize;
+    let filled = pct * bar_w / 100;
 
     let time = format!(
-        "{} / {}  vol:{}",
+        "{} / {}",
         format_duration(np.elapsed),
         format_duration(np.duration),
-        np.volume
     );
-    f.render_widget(
-        Paragraph::new(time)
-            .alignment(Alignment::Right)
-            .style(Style::default().fg(Color::DarkGray)),
-        rows[5],
-    );
+    let tw = time.chars().count();
+
+    // Right-align time text over the progress bar; blend colors at the fill boundary
+    let text_start = bar_w.saturating_sub(tw);
+    let pure_filled = text_start.min(filled);
+    let pure_unfilled = text_start.saturating_sub(filled);
+    let over_filled = filled.saturating_sub(text_start).min(tw);
+    let _over_unfilled = tw.saturating_sub(over_filled);
+
+    let text_bytes: Vec<char> = time.chars().collect();
+    let over_filled_text: String = text_bytes[..over_filled].iter().collect();
+    let over_unfilled_text: String = text_bytes[over_filled..].iter().collect();
+
+    let bar = Line::from(vec![
+        Span::styled("█".repeat(pure_filled), Style::default().fg(Color::Yellow)),
+        Span::styled("░".repeat(pure_unfilled), Style::default().fg(Color::Rgb(55, 55, 70))),
+        Span::styled(
+            over_filled_text,
+            Style::default().bg(Color::Yellow).fg(Color::Black).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            over_unfilled_text,
+            Style::default().bg(Color::Rgb(55, 55, 70)).fg(Color::Rgb(210, 215, 225)),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(bar), rows[4]);
 }
 
 fn draw_disconnected_overlay(f: &mut Frame, area: Rect, state: &ConnectionState) {
@@ -532,13 +561,6 @@ fn breadcrumb_str<'a>(stack: impl Iterator<Item = &'a str>, current: &'a str) ->
     parts.join(" › ")
 }
 
-fn draw_thumb_placeholder(f: &mut Frame, rect: Rect) {
-    f.render_widget(
-        Paragraph::new(if rect.height >= 2 { "\n ♪" } else { " ♪" })
-            .style(Style::default().fg(Color::Rgb(60, 60, 80)).bg(Color::Rgb(25, 25, 35))),
-        rect,
-    );
-}
 
 #[allow(clippy::too_many_arguments)]
 fn draw_two_row_list(
@@ -575,6 +597,7 @@ fn draw_two_row_list(
     f.render_widget(block, area);
 
     let visible = ((inner.height / 2) as usize).max(1);
+    let needs_scroll = items.len() > visible;
 
     // Sync scroll so selected is always visible
     let offset = {
@@ -601,47 +624,54 @@ fn draw_two_row_list(
         let item = &items[vis_i];
         let is_sel = vis_i == selected;
 
-        // Thumbnail
+        let (s1, s2) = if is_sel { cursor_styles(focused) } else { (Style::default(), Style::default()) };
+
         let thumb_rect = Rect::new(inner.x, y, THUMB_W, 2);
+        let thumb_bg = if is_sel {
+            if focused { Color::Rgb(45, 100, 170) } else { Color::Rgb(50, 50, 68) }
+        } else {
+            Color::Rgb(25, 25, 35)
+        };
         match item.thumb_url.as_ref().and_then(|u| thumbnails.get_mut(u)) {
             Some(proto) => {
                 let img = StatefulImage::default().resize(Resize::Fit(None));
                 f.render_stateful_widget(img, thumb_rect, proto);
             }
-            None => draw_thumb_placeholder(f, thumb_rect),
+            None => {
+                f.render_widget(
+                    Paragraph::new(if thumb_rect.height >= 2 { "\n ♪" } else { " ♪" })
+                        .style(Style::default().fg(Color::Rgb(80, 80, 110)).bg(thumb_bg)),
+                    thumb_rect,
+                );
+            }
         }
 
-        // Text: two lines
-        let (fg1, fg2) = if is_sel && focused {
-            (Color::Yellow, Color::DarkGray)
-        } else if is_sel {
-            (Color::White, Color::Gray)
-        } else {
-            (Color::White, Color::DarkGray)
-        };
-        let mod1 = if is_sel && focused { Modifier::BOLD } else { Modifier::empty() };
-
-        // Prefix the first line with a selection arrow
-        let line1 = if is_sel && focused {
-            let mut spans = vec![Span::styled("▶ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))];
-            // strip leading "  " from item line1 if present
-            for span in item.line1.spans.iter() {
-                let content = span.content.trim_start_matches("  ");
-                spans.push(Span::styled(content.to_string(), span.style.fg(fg1).add_modifier(mod1)));
-            }
-            Line::from(spans)
-        } else {
-            item.line1.clone().patch_style(Style::default().fg(fg1))
-        };
-
         f.render_widget(
-            Paragraph::new(line1),
+            Paragraph::new(item.line1.clone()).style(s1),
             Rect::new(text_x, y, text_w, 1),
         );
         f.render_widget(
-            Paragraph::new(item.line2.clone().patch_style(Style::default().fg(fg2))),
+            Paragraph::new(item.line2.clone()).style(s2),
             Rect::new(text_x, y + 1, text_w, 1),
         );
+    }
+
+    if needs_scroll {
+        // Place on the right border column; skip the two corner cells
+        let scroll_area = Rect::new(
+            area.x + area.width.saturating_sub(1),
+            area.y + 1,
+            1,
+            area.height.saturating_sub(2),
+        );
+        let mut ss = ScrollbarState::new(items.len().saturating_sub(visible))
+            .position(offset);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("║")
+            .track_symbol(Some("│"))
+            .begin_symbol(None)
+            .end_symbol(None);
+        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
     }
 }
 
@@ -674,18 +704,34 @@ fn render_list(
 
     state.select(Some(selected));
 
-    let (hl_style, hl_symbol) = if focused {
-        (Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD), "▶ ")
-    } else {
-        (Style::default(), "  ")
-    };
+    let item_count = items.len();
+    let inner = block.inner(area);
+    let visible = inner.height as usize;
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(hl_style)
-        .highlight_symbol(hl_symbol);
+        .highlight_style(cursor_styles(focused).0)
+        .highlight_symbol("");
 
     f.render_stateful_widget(list, area, state);
+
+    if item_count > visible {
+        let scroll_area = Rect::new(
+            area.x + area.width.saturating_sub(1),
+            area.y + 1,
+            1,
+            area.height.saturating_sub(2),
+        );
+        let offset = state.offset();
+        let mut ss = ScrollbarState::new(item_count.saturating_sub(visible))
+            .position(offset);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("║")
+            .track_symbol(Some("│"))
+            .begin_symbol(None)
+            .end_symbol(None);
+        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+    }
 }
 
 fn format_duration(secs: f64) -> String {

@@ -136,6 +136,8 @@ pub struct App {
     pub status_message: Option<String>,
     pub config_modal: Option<ConfigModal>,
     pub context_menu: Option<ContextMenu>,
+    /// Height (in terminal rows) of the Now Playing panel, computed from font metrics.
+    pub status_height: u16,
 }
 
 impl App {
@@ -176,6 +178,7 @@ impl App {
             status_message: None,
             config_modal: None,
             context_menu: None,
+            status_height: 11, // overwritten in run() from picker font metrics
         }
     }
 
