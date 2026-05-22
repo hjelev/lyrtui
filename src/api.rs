@@ -1,0 +1,454 @@
+#![allow(dead_code)]
+
+use anyhow::{anyhow, Result};
+use reqwest::Client;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::sync::RwLock;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Player {
+    pub playerid: String,
+    pub name: String,
+    #[serde(rename = "isplaying")]
+    pub is_playing: u8,
+    #[serde(default)]
+    pub power: u8,
+}
+
+#[derive(Debug, Clone)]
+pub struct NowPlaying {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub duration: f64,
+    pub elapsed: f64,
+    pub volume: u8,
+    pub is_playing: bool,
+    pub shuffle: u8,
+    pub repeat: u8,
+    pub artwork_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Track {
+    pub id: Option<Value>,
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub duration: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Artist {
+    pub id: Value,
+    pub artist: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Album {
+    pub id: Value,
+    pub album: String,
+    pub artist: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RadioItem {
+    pub name: String,
+    /// "audio", "playlist", "link", "outline", "text", …
+    pub item_type: String,
+    /// Stream URL, present on playable items when `want_url:1` is requested.
+    pub url: Option<String>,
+    /// The XMLBrowser command for this subtree (e.g. "tunein", "picks").
+    pub cmd: Option<String>,
+    /// Opaque item id used to navigate into this item.
+    pub item_id: Option<String>,
+}
+
+impl RadioItem {
+    /// An item is playable if it carries a stream URL.
+    pub fn is_playable(&self) -> bool {
+        self.url.is_some()
+    }
+    /// An item is navigable if it has no URL to play but can be browsed into.
+    pub fn is_navigable(&self) -> bool {
+        self.url.is_none() && self.item_type != "text"
+    }
+}
+
+pub struct LmsClient {
+    client: Client,
+    base_url: RwLock<String>,
+}
+
+impl LmsClient {
+    pub fn new(base_url: String) -> Self {
+        Self {
+            client: Client::new(),
+            base_url: RwLock::new(base_url),
+        }
+    }
+
+    /// Update the server URL in-place; background tasks pick it up on their next iteration.
+    pub fn update_base_url(&self, url: String) {
+        *self.base_url.write().unwrap() = url;
+    }
+
+    pub fn server_base_url(&self) -> String {
+        let url = self.base_url.read().unwrap().clone();
+        url.trim_end_matches("/jsonrpc.js").to_string()
+    }
+
+    async fn rpc(&self, player_id: &str, params: &[Value]) -> Result<Value> {
+        // Clone the URL before any await so we don't hold the lock across an await point.
+        let url = self.base_url.read().unwrap().clone();
+        let body = json!({
+            "id": 1,
+            "method": "slim.request",
+            "params": [player_id, params]
+        });
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?
+            .json::<Value>()
+            .await?;
+        Ok(resp["result"].clone())
+    }
+
+    pub async fn get_players(&self) -> Result<Vec<Player>> {
+        let result = self.rpc("", &[json!("players"), json!(0), json!(100)]).await?;
+        let count = result["count"].as_u64().unwrap_or(0);
+        if count == 0 {
+            return Ok(vec![]);
+        }
+        let players: Vec<Player> = serde_json::from_value(result["players_loop"].clone())?;
+        Ok(players)
+    }
+
+    pub async fn get_now_playing(&self, player_id: &str) -> Result<NowPlaying> {
+        let result = self
+            .rpc(
+                player_id,
+                &[
+                    json!("status"),
+                    json!("-"),
+                    json!(1),
+                    json!("tags:adltuK"),
+                ],
+            )
+            .await?;
+
+        let track = result["playlist_loop"]
+            .as_array()
+            .and_then(|a| a.first())
+            .cloned()
+            .unwrap_or(json!({}));
+
+        let base = self.server_base_url();
+        let artwork_url = if let Some(url) = track["artwork_url"].as_str().filter(|s| !s.is_empty()) {
+            // Relative URLs (e.g. /imageproxy/...) need the server base prepended.
+            if url.starts_with('/') {
+                Some(format!("{}{}", base, url))
+            } else {
+                Some(url.to_string())
+            }
+        } else {
+            // Fall back to the standard local-library cover endpoint.
+            let track_id: Option<String> = track["id"]
+                .as_str()
+                .map(String::from)
+                .or_else(|| track["id"].as_u64().map(|n| n.to_string()))
+                .or_else(|| track["id"].as_i64().map(|n| n.to_string()));
+            track_id.map(|id| format!("{}/music/{}/cover.jpg", base, id))
+        };
+
+        Ok(NowPlaying {
+            title: track["title"].as_str().unwrap_or("").to_string(),
+            artist: track["artist"].as_str().unwrap_or("").to_string(),
+            album: track["album"].as_str().unwrap_or("").to_string(),
+            duration: track["duration"].as_f64().unwrap_or(0.0),
+            elapsed: result["time"].as_f64().unwrap_or(0.0),
+            volume: result["mixer volume"].as_f64().unwrap_or(0.0) as u8,
+            is_playing: result["mode"].as_str() == Some("play"),
+            shuffle: result["playlist shuffle"].as_u64().unwrap_or(0) as u8,
+            repeat: result["playlist repeat"].as_u64().unwrap_or(0) as u8,
+            artwork_url,
+        })
+    }
+
+    pub async fn get_queue(&self, player_id: &str) -> Result<Vec<Track>> {
+        let result = self
+            .rpc(player_id, &[json!("status"), json!(0), json!(500), json!("tags:adlt")])
+            .await?;
+        let tracks = result["playlist_loop"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        Ok(tracks
+            .into_iter()
+            .map(|v| serde_json::from_value(v).unwrap_or(Track {
+                id: None,
+                title: "Unknown".into(),
+                artist: None,
+                album: None,
+                duration: None,
+            }))
+            .collect())
+    }
+
+    pub async fn get_artists(&self) -> Result<Vec<Artist>> {
+        let result = self.rpc("", &[json!("artists"), json!(0), json!(10000)]).await?;
+        let artists: Vec<Artist> = serde_json::from_value(
+            result["artists_loop"].clone(),
+        )
+        .unwrap_or_default();
+        Ok(artists)
+    }
+
+    pub async fn get_albums(&self, artist_id: Option<&str>) -> Result<Vec<Album>> {
+        let mut params = vec![json!("albums"), json!(0), json!(10000), json!("tags:al")];
+        if let Some(id) = artist_id {
+            params.push(json!(format!("artist_id:{}", id)));
+        }
+        let result = self.rpc("", &params).await?;
+        let albums: Vec<Album> = serde_json::from_value(
+            result["albums_loop"].clone(),
+        )
+        .unwrap_or_default();
+        Ok(albums)
+    }
+
+    pub async fn get_all_tracks(&self) -> Result<Vec<Track>> {
+        let result = self
+            .rpc("", &[json!("tracks"), json!(0), json!(10000), json!("tags:adlt")])
+            .await?;
+        let tracks: Vec<Track> =
+            serde_json::from_value(result["titles_loop"].clone()).unwrap_or_default();
+        Ok(tracks)
+    }
+
+    pub async fn get_tracks(&self, album_id: &str) -> Result<Vec<Track>> {
+        let result = self
+            .rpc(
+                "",
+                &[
+                    json!("tracks"),
+                    json!(0),
+                    json!(10000),
+                    json!(format!("album_id:{}", album_id)),
+                    json!("tags:adlt"),
+                ],
+            )
+            .await?;
+        let tracks: Vec<Track> = serde_json::from_value(
+            result["titles_loop"].clone(),
+        )
+        .unwrap_or_default();
+        Ok(tracks)
+    }
+
+    // Playback controls
+    pub async fn play(&self, player_id: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("play")]).await?;
+        Ok(())
+    }
+
+    pub async fn pause(&self, player_id: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("pause")]).await?;
+        Ok(())
+    }
+
+    pub async fn next(&self, player_id: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("index"), json!("+1")]).await?;
+        Ok(())
+    }
+
+    pub async fn prev(&self, player_id: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("index"), json!("-1")]).await?;
+        Ok(())
+    }
+
+    pub async fn set_volume(&self, player_id: &str, volume: u8) -> Result<()> {
+        self.rpc(player_id, &[json!("mixer"), json!("volume"), json!(volume)]).await?;
+        Ok(())
+    }
+
+    pub async fn set_power(&self, player_id: &str, on: bool) -> Result<()> {
+        self.rpc(player_id, &[json!("power"), json!(if on { 1 } else { 0 })]).await?;
+        Ok(())
+    }
+
+    pub async fn play_track(&self, player_id: &str, track_id: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:load"), json!(format!("track_id:{}", track_id))],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn play_album(&self, player_id: &str, album_id: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:load"), json!(format!("album_id:{}", album_id))],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn play_track_index(&self, player_id: &str, index: usize) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("index"), json!(index)]).await?;
+        Ok(())
+    }
+
+    /// Returns the list of installed apps (Spotify, Deezer, etc.).
+    pub async fn get_apps(&self) -> Result<Vec<RadioItem>> {
+        let result = self.rpc("", &[json!("apps"), json!(0), json!(100)]).await?;
+        let items = result["appss_loop"].as_array().cloned().unwrap_or_default();
+        Ok(items
+            .into_iter()
+            .map(|v| RadioItem {
+                name: v["name"].as_str().unwrap_or("").to_string(),
+                item_type: "link".to_string(),
+                url: None,
+                cmd: v["cmd"].as_str().map(String::from),
+                item_id: None,
+            })
+            .collect())
+    }
+
+    /// Returns the list of available radio services/plugins (TuneIn, etc.).
+    pub async fn get_radio_services(&self) -> Result<Vec<RadioItem>> {
+        let result = self.rpc("", &[json!("radios"), json!(0), json!(100)]).await?;
+        let items = result["radioss_loop"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        Ok(items
+            .into_iter()
+            .map(|v| RadioItem {
+                name: v["name"].as_str().unwrap_or("").to_string(),
+                item_type: "link".to_string(),
+                url: None,
+                cmd: v["cmd"].as_str().map(String::from),
+                item_id: None,
+            })
+            .collect())
+    }
+
+    /// Browse into a radio service or subfolder.
+    /// `cmd` is the XMLBrowser plugin command (e.g. "tunein").
+    /// `item_id` is the opaque id to navigate into, or None for the top of that service.
+    pub async fn browse_radio(
+        &self,
+        player_id: &str,
+        cmd: &str,
+        item_id: Option<&str>,
+    ) -> Result<Vec<RadioItem>> {
+        let mut params = vec![
+            json!(cmd),
+            json!("items"),
+            json!(0),
+            json!(200),
+            json!("want_url:1"),
+        ];
+        if let Some(id) = item_id {
+            params.push(json!(format!("item_id:{}", id)));
+        }
+        let result = self.rpc(player_id, &params).await?;
+        let items = result["loop_loop"]
+            .as_array()
+            .or_else(|| result["item_loop"].as_array())
+            .cloned()
+            .unwrap_or_default();
+        Ok(items
+            .into_iter()
+            .map(|v| RadioItem {
+                name: v["name"].as_str().unwrap_or("").to_string(),
+                item_type: v["type"].as_str().unwrap_or("link").to_string(),
+                url: v["url"].as_str().map(String::from),
+                // inherit parent cmd if item doesn't declare its own
+                cmd: v["cmd"]
+                    .as_str()
+                    .map(String::from)
+                    .or_else(|| Some(cmd.to_string())),
+                item_id: v["id"].as_str().map(String::from),
+            })
+            .collect())
+    }
+
+    /// Play a raw stream URL immediately on the given player.
+    pub async fn play_url(&self, player_id: &str, url: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("play"), json!(url)]).await?;
+        Ok(())
+    }
+
+    pub async fn add_track_to_queue(&self, player_id: &str, track_id: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("track_id:{}", track_id))],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn add_album_to_queue(&self, player_id: &str, album_id: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("album_id:{}", album_id))],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn add_artist_to_queue(&self, player_id: &str, artist_id: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("artist_id:{}", artist_id))],
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn add_url_to_queue(&self, player_id: &str, url: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("add"), json!(url)]).await?;
+        Ok(())
+    }
+
+    pub async fn insert_track_next(&self, player_id: &str, track_id: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:insert"), json!(format!("track_id:{}", track_id))],
+        ).await?;
+        Ok(())
+    }
+
+    pub async fn insert_url_next(&self, player_id: &str, url: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("insert"), json!(url)]).await?;
+        Ok(())
+    }
+
+    pub async fn add_to_favorites(&self, player_id: &str, url: &str, title: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("favorites"), json!("add"), json!(format!("url:{}", url)), json!(format!("title:{}", title))],
+        ).await?;
+        Ok(())
+    }
+
+    pub async fn fetch_image_bytes(&self, url: &str) -> Result<Vec<u8>> {
+        let bytes = self.client.get(url).send().await?.bytes().await?;
+        Ok(bytes.to_vec())
+    }
+
+    pub async fn server_status(&self) -> Result<()> {
+        let result = self.rpc("", &[json!("serverstatus"), json!(0), json!(0)]).await?;
+        if result.is_null() {
+            return Err(anyhow!("no response from server"));
+        }
+        Ok(())
+    }
+}
