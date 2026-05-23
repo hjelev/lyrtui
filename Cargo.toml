@@ -1,7 +1,8 @@
 [package]
 name = "lmstui"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
+repository = "https://github.com/hjelev/lyrtui"
 
 [dependencies]
 ratatui = "0.30"
@@ -15,3 +16,8 @@ toml = "0.8"
 dirs = "5"
 ratatui-image = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
 image = "0.25"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
