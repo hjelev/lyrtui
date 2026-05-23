@@ -38,7 +38,7 @@ brew install hjelev/tap/lyrtui
 
 ### Build from source
 ```sh
-git clone https://github.com/yourname/lyrtui
+git clone https://github.com/hjelev/lyrtui
 cd lyrtui
 cargo build --release
 # binary at: target/release/lyrtui
