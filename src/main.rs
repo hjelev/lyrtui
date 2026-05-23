@@ -2,6 +2,7 @@ mod api;
 mod app;
 mod background;
 mod config;
+mod discovery;
 mod events;
 mod handlers;
 mod ui;
@@ -30,7 +31,19 @@ const TICK_RATE: Duration = Duration::from_millis(250);
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cfg = config::Config::load()?;
+    let mut cfg = config::Config::load()?;
+
+    // Run discovery if this is a first run (no config file) or auto_discover is on.
+    let config_file_exists = config::config_path().exists();
+    if (!config_file_exists || cfg.auto_discover)
+        && let Some(discovered_ip) = discovery::discover_lms(
+            &cfg.broadcast_mask,
+            Duration::from_secs(2),
+        )
+    {
+        cfg.host = discovered_ip;
+    }
+
     let credentials = cfg.username.as_ref()
         .zip(cfg.password.as_ref())
         .map(|(u, p)| (u.clone(), p.clone()));
@@ -152,7 +165,7 @@ async fn run(
                             // - not too light (washed out / near white)
                             let picked = colors.iter().find(|c| {
                                 let luma = (c.r as u32 * 299 + c.g as u32 * 587 + c.b as u32 * 114) / 1000;
-                                luma >= 70 && luma <= 210
+                                (70..=210).contains(&luma)
                             }).or_else(|| colors.first());
                             if let Some(c) = picked {
                                 app.accent_color = Some([c.r, c.g, c.b]);
@@ -240,6 +253,8 @@ async fn run(
                             &cfg.host, cfg.port,
                             cfg.username.as_deref(), cfg.password.as_deref(),
                             cfg.use_nerd_icons,
+                            cfg.auto_discover,
+                            &cfg.broadcast_mask,
                         ));
                     } else if handlers::handle_action(&mut app, action, &client, &tx).await {
                         break;

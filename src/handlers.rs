@@ -58,6 +58,13 @@ pub async fn handle_mouse_event(
                 } else if point_in(col, row, field_rects[4]) {
                     modal.selected_field = 4;
                     modal.use_nerd_icons = !modal.use_nerd_icons;
+                } else if point_in(col, row, field_rects[5]) {
+                    modal.selected_field = 5;
+                    modal.auto_discover = !modal.auto_discover;
+                } else if point_in(col, row, field_rects[6]) {
+                    modal.selected_field = 6;
+                    modal.editing = true;
+                    modal.error = None;
                 }
             } else {
                 app.config_modal = None;
@@ -939,6 +946,7 @@ pub fn handle_config_key(
                     1 => { if c.is_ascii_digit() { modal.port.push(c); } }
                     2 => modal.username.push(c),
                     3 => modal.password.push(c),
+                    6 => modal.broadcast_mask.push(c),
                     _ => {}
                 }
             }
@@ -949,6 +957,7 @@ pub fn handle_config_key(
                     1 => { modal.port.pop(); }
                     2 => { modal.username.pop(); }
                     3 => { modal.password.pop(); }
+                    6 => { modal.broadcast_mask.pop(); }
                     _ => {}
                 }
             }
@@ -964,27 +973,31 @@ pub fn handle_config_key(
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field < 4 {
+                if modal.selected_field < 6 {
                     modal.selected_field += 1;
                 }
             }
             KeyCode::Enter | KeyCode::Char('i') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field == 4 {
-                    modal.use_nerd_icons = !modal.use_nerd_icons;
-                } else {
-                    modal.editing = true;
-                    modal.error = None;
+                match modal.selected_field {
+                    4 => modal.use_nerd_icons = !modal.use_nerd_icons,
+                    5 => modal.auto_discover = !modal.auto_discover,
+                    _ => {
+                        modal.editing = true;
+                        modal.error = None;
+                    }
                 }
             }
             KeyCode::Char(' ') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field == 4 {
-                    modal.use_nerd_icons = !modal.use_nerd_icons;
+                match modal.selected_field {
+                    4 => modal.use_nerd_icons = !modal.use_nerd_icons,
+                    5 => modal.auto_discover = !modal.auto_discover,
+                    _ => {}
                 }
             }
             KeyCode::Char('s') => {
-                let (host, port_str, username, password, use_nerd_icons) = {
+                let (host, port_str, username, password, use_nerd_icons, auto_discover, broadcast_mask) = {
                     let modal = app.config_modal.as_ref().unwrap();
                     (
                         modal.host.trim().to_string(),
@@ -992,17 +1005,24 @@ pub fn handle_config_key(
                         modal.username.trim().to_string(),
                         modal.password.clone(),
                         modal.use_nerd_icons,
+                        modal.auto_discover,
+                        modal.broadcast_mask.trim().to_string(),
                     )
                 };
                 if host.is_empty() {
                     app.config_modal.as_mut().unwrap().error =
                         Some("Host cannot be empty".to_string());
+                } else if broadcast_mask.is_empty() {
+                    app.config_modal.as_mut().unwrap().error =
+                        Some("Broadcast mask cannot be empty".to_string());
                 } else {
                     match port_str.parse::<u16>() {
                         Ok(port) if port > 0 => {
                             cfg.host = host;
                             cfg.port = port;
                             cfg.use_nerd_icons = use_nerd_icons;
+                            cfg.auto_discover = auto_discover;
+                            cfg.broadcast_mask = broadcast_mask;
                             cfg.username = if username.is_empty() { None } else { Some(username.clone()) };
                             cfg.password = if password.is_empty() { None } else { Some(password.clone()) };
                             match cfg.save() {
