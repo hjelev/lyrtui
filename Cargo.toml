@@ -18,6 +18,7 @@ toml = "0.8"
 dirs = "5"
 ratatui-image = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
 image = "0.25"
+color-thief = "0.2"
 
 # The profile that 'dist' will build with
 [profile.dist]

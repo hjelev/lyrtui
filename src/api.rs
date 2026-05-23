@@ -21,6 +21,7 @@ pub struct NowPlaying {
     pub title: String,
     pub artist: String,
     pub album: String,
+    pub year: Option<u32>,
     pub duration: f64,
     pub elapsed: f64,
     pub volume: u8,
@@ -175,7 +176,7 @@ impl LmsClient {
                     json!("status"),
                     json!("-"),
                     json!(1),
-                    json!("tags:adltuK"),
+                    json!("tags:adltuKy"),
                 ],
             )
             .await?;
@@ -206,6 +207,10 @@ impl LmsClient {
             title: track["title"].as_str().unwrap_or("").to_string(),
             artist: track["artist"].as_str().unwrap_or("").to_string(),
             album: track["album"].as_str().unwrap_or("").to_string(),
+            year: track["year"].as_u64()
+                .or_else(|| track["year"].as_str().and_then(|s| s.parse().ok()))
+                .filter(|&y| y > 0)
+                .map(|y| y as u32),
             duration: track["duration"].as_f64().unwrap_or(0.0),
             elapsed: result["time"].as_f64().unwrap_or(0.0),
             volume: result["mixer volume"].as_f64().unwrap_or(0.0) as u8,
@@ -237,7 +242,7 @@ impl LmsClient {
                     }
                 } else {
                     let cover_id = extract_id_str(&v["artwork_track_id"])
-                        .or_else(|| id.as_ref().and_then(|i| extract_id_str(i)));
+                        .or_else(|| id.as_ref().and_then(extract_id_str));
                     cover_id.map(|id| format!("{}/music/{}/cover.jpg", base, id))
                 };
                 Track {

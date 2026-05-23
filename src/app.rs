@@ -184,6 +184,8 @@ pub struct App {
     pub search_input_active: bool,
 
     pub use_nerd_icons: bool,
+    pub full_art_mode: bool,
+    pub accent_color: Option<[u8; 3]>,
 }
 
 impl App {
@@ -236,6 +238,8 @@ impl App {
             search_results: vec![],
             search_input_active: false,
             use_nerd_icons: false,
+            full_art_mode: false,
+            accent_color: None,
         }
     }
 

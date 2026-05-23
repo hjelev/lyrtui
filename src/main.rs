@@ -145,6 +145,19 @@ async fn run(
             match msg {
                 AppMsg::ArtworkLoaded(bytes) => {
                     if let Ok(img) = image::load_from_memory(&bytes) {
+                        let rgb = img.to_rgb8();
+                        if let Ok(colors) = color_thief::get_palette(rgb.as_raw(), color_thief::ColorFormat::Rgb, 10, 5) {
+                            // Pick the first palette color with usable brightness:
+                            // - not too dark (unreadable on dark bg, and black text unreadable on it as bg)
+                            // - not too light (washed out / near white)
+                            let picked = colors.iter().find(|c| {
+                                let luma = (c.r as u32 * 299 + c.g as u32 * 587 + c.b as u32 * 114) / 1000;
+                                luma >= 70 && luma <= 210
+                            }).or_else(|| colors.first());
+                            if let Some(c) = picked {
+                                app.accent_color = Some([c.r, c.g, c.b]);
+                            }
+                        }
                         album_art = Some(picker.new_resize_protocol(img));
                     }
                 }
@@ -169,6 +182,7 @@ async fn run(
         if current_url != last_artwork_url {
             last_artwork_url = current_url.clone();
             album_art = None;
+            app.accent_color = None;
             if let Some(url) = current_url {
                 let c = client.clone();
                 let t = tx.clone();

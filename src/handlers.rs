@@ -89,6 +89,31 @@ pub async fn handle_mouse_event(
         return;
     }
 
+    // Full art mode intercepts all mouse events
+    if app.full_art_mode {
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let exit_rect = ui::compute_full_art_footer_exit_rect(terminal_area);
+            if point_in(col, row, exit_rect) {
+                app.full_art_mode = false;
+                return;
+            }
+            let ctrl_rects = ui::compute_full_art_control_rects(terminal_area);
+            let ctrl_hit = ctrl_rects.iter().enumerate().find(|(_, r)| point_in(col, row, **r));
+            if let Some((btn_idx, _)) = ctrl_hit {
+                let action = match btn_idx {
+                    0 => Action::Prev,
+                    1 => Action::PlayPause,
+                    2 => Action::Stop,
+                    3 => Action::Next,
+                    4 => Action::ToggleShuffle,
+                    _ => Action::ToggleRepeat,
+                };
+                handle_action(app, action, client, tx).await;
+            }
+        }
+        return;
+    }
+
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Right) => {
             handle_action(app, Action::Back, client, tx).await;
@@ -875,6 +900,10 @@ pub async fn handle_action(
                     let _ = c.set_repeat(&pid, new_val).await;
                 });
             }
+        }
+
+        Action::ToggleFullArtMode => {
+            app.full_art_mode = !app.full_art_mode;
         }
 
         Action::OpenConfig | Action::None => {}

@@ -41,6 +41,7 @@ pub enum Action {
     Stop,
     ToggleShuffle,
     ToggleRepeat,
+    ToggleFullArtMode,
     None,
 }
 
@@ -64,6 +65,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyCode::Char('x'), _) => Action::ClearQueue,
         (KeyCode::Char('s'), _) => Action::ToggleShuffle,
         (KeyCode::Char('r'), _) => Action::ToggleRepeat,
+        (KeyCode::Char('`'), _) => Action::ToggleFullArtMode,
         _ => Action::None,
     }
 }

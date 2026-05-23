@@ -1,4 +1,4 @@
-use crate::api::FolderItemType;
+use crate::api::{FolderItemType, NowPlaying};
 use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView, SearchResultItem, SidebarItem};
 use serde_json::Value;
 use ratatui::{
@@ -119,59 +119,63 @@ pub fn draw(
 ) {
     let area = f.area();
 
-    // Outer layout: main content | status bar | notification line
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(app.status_height), Constraint::Length(1)])
-        .split(area);
-
-    let main_area = outer[0];
-    let status_area = outer[1];
-    let notif_area = outer[2];
-
-    // Split main into sidebar | content
-    let panes = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(20), Constraint::Min(1)])
-        .split(main_area);
-
-    // Split sidebar column into navigation (shrinks) + server status (fixed 6 rows)
-    let sidebar_split = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(6)])
-        .split(panes[0]);
-
-    let base = format!("http://{}:{}", server_host, server_port);
-    draw_sidebar(f, app, sidebar_split[0], sidebar_state);
-    draw_server_status(f, app, sidebar_split[1], server_host, server_port);
-    draw_main(f, app, panes[1], main_state, thumbnails, &base);
-    draw_statusbar(f, app, status_area, album_art);
-
-    if let Some(msg) = &app.status_message {
-        let p = Paragraph::new(msg.as_str())
-            .style(Style::default().fg(Color::Green));
-        f.render_widget(p, notif_area);
+    if app.full_art_mode {
+        draw_full_art_mode(f, app, area, album_art);
     } else {
-        let footer = if matches!(app.main_view, MainView::Players) {
-            hint_line(&[
-                ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
-                ("t", "power"), ("Spc", "play/pause"), ("n/p", "next/prev"),
-                ("+/-", "vol"), ("c", "config"), ("q", "quit"),
-            ])
-        } else if matches!(app.main_view, MainView::Search) {
-            if app.search_input_active {
-                hint_line(&[("Type", "query"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")])
-            } else {
-                hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("i//", "edit query"), ("Esc", "back"), ("q", "quit")])
-            }
+        // Outer layout: main content | status bar | notification line
+        let outer = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(app.status_height), Constraint::Length(1)])
+            .split(area);
+
+        let main_area = outer[0];
+        let status_area = outer[1];
+        let notif_area = outer[2];
+
+        // Split main into sidebar | content
+        let panes = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(20), Constraint::Min(1)])
+            .split(main_area);
+
+        // Split sidebar column into navigation (shrinks) + server status (fixed 6 rows)
+        let sidebar_split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(6)])
+            .split(panes[0]);
+
+        let base = format!("http://{}:{}", server_host, server_port);
+        draw_sidebar(f, app, sidebar_split[0], sidebar_state);
+        draw_server_status(f, app, sidebar_split[1], server_host, server_port);
+        draw_main(f, app, panes[1], main_state, thumbnails, &base);
+        draw_statusbar(f, app, status_area, album_art);
+
+        if let Some(msg) = &app.status_message {
+            let p = Paragraph::new(msg.as_str())
+                .style(Style::default().fg(Color::Green));
+            f.render_widget(p, notif_area);
         } else {
-            hint_line(&[
-                ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
-                ("a", "add to queue"), ("Spc", "play/pause"), ("n/p", "next/prev"),
-                ("+/-", "vol"), ("c", "config"), ("q", "quit"),
-            ])
-        };
-        f.render_widget(Paragraph::new(footer), notif_area);
+            let footer = if matches!(app.main_view, MainView::Players) {
+                hint_line(&[
+                    ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
+                    ("t", "power"), ("Spc", "play/pause"), ("n/p", "next/prev"),
+                    ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
+                ])
+            } else if matches!(app.main_view, MainView::Search) {
+                if app.search_input_active {
+                    hint_line(&[("Type", "query"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")])
+                } else {
+                    hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("i//", "edit query"), ("Esc", "back"), ("q", "quit")])
+                }
+            } else {
+                hint_line(&[
+                    ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
+                    ("a", "add to queue"), ("Spc", "play/pause"), ("n/p", "next/prev"),
+                    ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
+                ])
+            };
+            f.render_widget(Paragraph::new(footer), notif_area);
+        }
     }
 
     if app.connection != ConnectionState::Connected {
@@ -338,16 +342,25 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .border_style(border_style)
         .title(" My Music ");
 
-    let entries = [
-        ("Artists", "your music library by artist"),
-        ("Albums",  "all albums"),
-        ("Tracks",  "all tracks"),
-        ("Folders", "browse by folder"),
-    ];
+    let entries: [(&str, &str, &str); 4] = if app.use_nerd_icons {
+        [
+            ("\u{F0C0}", "Artists", "your music library by artist"), // nf-fa-users
+            ("\u{F025}", "Albums",  "all albums"),                   // nf-fa-headphones
+            ("\u{F001}", "Tracks",  "all tracks"),                   // nf-fa-music
+            ("\u{F07B}", "Folders", "browse by folder"),             // nf-fa-folder
+        ]
+    } else {
+        [
+            ("▸", "Artists", "your music library by artist"),
+            ("▸", "Albums",  "all albums"),
+            ("▸", "Tracks",  "all tracks"),
+            ("▸", "Folders", "browse by folder"),
+        ]
+    };
 
-    let items: Vec<ListItem> = entries.iter().map(|(label, sub)| {
+    let items: Vec<ListItem> = entries.iter().map(|(icon, label, sub)| {
         ListItem::new(Line::from(vec![
-            Span::styled("  ▸  ", Style::default().fg(Color::Cyan)),
+            Span::styled(format!("  {}  ", icon), Style::default().fg(Color::Cyan)),
             Span::raw(label.to_string()),
             Span::styled(format!("  — {}", sub), Style::default().fg(Color::DarkGray)),
         ]))
@@ -878,18 +891,43 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         f.render_stateful_widget(img, cols[0], proto);
     }
 
-    // Info panel: title / artist / album / controls / [spacer] / progress+time overlay
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // title
-            Constraint::Length(1), // artist
-            Constraint::Length(1), // album
-            Constraint::Length(1), // playback controls
-            Constraint::Min(0),    // filler
-            Constraint::Length(1), // progress bar with time overlay
-        ])
-        .split(cols[2]);
+    draw_now_playing_info(f, app, np, cols[2], false);
+}
+
+fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, bigscreen: bool) {
+    let rows = if bigscreen {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // [0] title
+                Constraint::Length(1), // [1] artist
+                Constraint::Length(1), // [2] album
+                Constraint::Length(1), // [3] empty line
+                Constraint::Length(1), // [4] player + volume
+                Constraint::Length(1), // [5] empty line
+                Constraint::Length(1), // [6] playback controls
+                Constraint::Length(1), // [7] spacer
+                Constraint::Length(1), // [8] progress bar
+                Constraint::Min(0),    // [9] remaining space
+            ])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // [0] title
+                Constraint::Length(1), // [1] artist
+                Constraint::Length(1), // [2] album
+                Constraint::Length(1), // [3] playback controls
+                Constraint::Length(1), // [4] spacer
+                Constraint::Length(1), // [5] progress bar
+                Constraint::Min(0),    // [6] remaining space
+            ])
+            .split(area)
+    };
+    let ctrl_row = if bigscreen { 6 } else { 3 };
+    let progress_row = if bigscreen { 8 } else { 5 };
+    let indent: &str = if bigscreen { " " } else { "" };
 
     let play_icon = if app.use_nerd_icons {
         if np.is_playing { "\u{F04B}" } else { "\u{F04C}" }  // nf-fa-play / nf-fa-pause
@@ -920,27 +958,50 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     };
 
     let title_line = Line::from(vec![
+        Span::raw(indent),
         Span::styled(format!("{} ", play_icon), Style::default().fg(Color::Green)),
         Span::styled(np.title.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         Span::styled(format!("{}{}", shuffle_icon, repeat_icon), Style::default().fg(Color::DarkGray)),
     ]);
     f.render_widget(Paragraph::new(title_line), rows[0]);
 
-    let artist_line = Line::from(Span::styled(
-        format!("  {}", np.artist),
-        Style::default().fg(Color::Gray),
-    ));
+    let artist_line = Line::from(vec![
+        Span::raw(indent),
+        Span::styled("  by ", Style::default().fg(Color::DarkGray)),
+        Span::styled(np.artist.clone(), Style::default().fg(Color::Gray)),
+    ]);
     f.render_widget(Paragraph::new(artist_line), rows[1]);
 
-    let album_line = Line::from(Span::styled(
-        format!("  {}", np.album),
-        Style::default().fg(Color::DarkGray),
-    ));
+    let album_text = match np.year {
+        Some(y) => format!("  {} ({})", np.album, y),
+        None => format!("  {}", np.album),
+    };
+    let album_line = Line::from(vec![
+        Span::raw(indent),
+        Span::styled("  from ", Style::default().fg(Color::Rgb(80, 80, 100))),
+        Span::styled(album_text.trim_start().to_string(), Style::default().fg(Color::DarkGray)),
+    ]);
     f.render_widget(Paragraph::new(album_line), rows[2]);
+
+    if bigscreen {
+        let player_name = app.active_player.as_ref()
+            .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
+            .map(|p| p.name.as_str())
+            .unwrap_or("—");
+        let vol_icon = if app.use_nerd_icons { "\u{F028}" } else { "♪" };  // nf-fa-volume-up
+        let player_vol_line = Line::from(vec![
+            Span::styled(format!(" {} ", vol_icon), Style::default().fg(Color::DarkGray)),
+            Span::styled(player_name.to_string(), Style::default().fg(Color::Gray)),
+            Span::styled(format!("  {}%", np.volume), Style::default().fg(Color::DarkGray)),
+        ]);
+        f.render_widget(Paragraph::new(player_vol_line), rows[4]);
+    }
 
     // Playback control buttons: Prev | Play/Pause | Stop | Next  Shuffle | Repeat
     {
-        let ctrl = rows[3];
+        let ctrl = rows[ctrl_row];
+        let ctrl_x = ctrl.x + if bigscreen { 1 } else { 0 };
+        let ctrl_max_x = ctrl.x + ctrl.width;
         let play_pause_icon = if app.use_nerd_icons {
             if np.is_playing { "\u{F04C}" } else { "\u{F04B}" }  // nf-fa-pause / nf-fa-play
         } else if np.is_playing {
@@ -956,8 +1017,8 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         let sep: u16 = 2;
         let media_icons = [prev_icon, play_pause_icon, stop_icon, next_icon];
         for (i, icon) in media_icons.iter().enumerate() {
-            let x = ctrl.x + (i as u16) * (btn_w + gap);
-            if x + btn_w > ctrl.x + ctrl.width { break; }
+            let x = ctrl_x + (i as u16) * (btn_w + gap);
+            if x + btn_w > ctrl_max_x { break; }
             f.render_widget(
                 Paragraph::new(format!(" {} ", icon))
                     .style(Style::default().fg(Color::Rgb(160, 200, 255)).bg(Color::Rgb(28, 32, 45))),
@@ -965,8 +1026,8 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
             );
         }
         let shuf_icon = if app.use_nerd_icons { "\u{F074}" } else { "⇌" };  // nf-fa-random
-        let shuffle_x = ctrl.x + 4 * (btn_w + gap) + sep;
-        if shuffle_x + btn_w <= ctrl.x + ctrl.width {
+        let shuffle_x = ctrl_x + 4 * (btn_w + gap) + sep;
+        if shuffle_x + btn_w <= ctrl_max_x {
             let (sfg, sbg) = if np.shuffle > 0 {
                 (Color::Cyan, Color::Rgb(20, 45, 60))
             } else {
@@ -978,18 +1039,17 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
             );
         }
         let repeat_x = shuffle_x + btn_w + gap;
-        if repeat_x + btn_w <= ctrl.x + ctrl.width {
-            // 0 = off, 1 = repeat single track, 2 = repeat queue, 3 = don't stop the music
+        if repeat_x + btn_w <= ctrl_max_x {
             let (rfg, rbg, rep_btn) = match np.repeat {
                 1 => (
                     Color::Yellow,
                     Color::Rgb(45, 40, 10),
-                    if app.use_nerd_icons { format!(" \u{F01E}1") } else { " ↺1".to_string() },
+                    if app.use_nerd_icons { " \u{F01E}1".to_string() } else { " ↺1".to_string() },
                 ),
                 2 => (
                     Color::Cyan,
                     Color::Rgb(20, 45, 60),
-                    if app.use_nerd_icons { format!(" \u{F01E} ") } else { " ↺ ".to_string() },
+                    if app.use_nerd_icons { " \u{F01E} ".to_string() } else { " ↺ ".to_string() },
                 ),
                 3 => (
                     Color::Green,
@@ -999,7 +1059,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
                 _ => (
                     Color::Rgb(80, 80, 100),
                     Color::Rgb(28, 32, 45),
-                    if app.use_nerd_icons { format!(" \u{F01E} ") } else { " ↺ ".to_string() },
+                    if app.use_nerd_icons { " \u{F01E} ".to_string() } else { " ↺ ".to_string() },
                 ),
             };
             f.render_widget(
@@ -1014,7 +1074,10 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     } else {
         0
     };
-    let bar_w = rows[5].width.saturating_sub(1) as usize;
+    let prog = rows[progress_row];
+    let prog_x = prog.x + if bigscreen { 1 } else { 0 };
+    let prog_w = prog.width.saturating_sub(if bigscreen { 2 } else { 1 });
+    let bar_w = prog_w as usize;
     let filled = pct * bar_w / 100;
 
     let time = format!(
@@ -1035,20 +1098,72 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     let over_filled_text: String = text_bytes[..over_filled].iter().collect();
     let over_unfilled_text: String = text_bytes[over_filled..].iter().collect();
 
+    let accent = app.accent_color
+        .map(|[r, g, b]| Color::Rgb(r, g, b))
+        .unwrap_or(Color::Yellow);
     let bar = Line::from(vec![
-        Span::styled("█".repeat(pure_filled), Style::default().fg(Color::Yellow)),
+        Span::styled("█".repeat(pure_filled), Style::default().fg(accent)),
         Span::styled("░".repeat(pure_unfilled), Style::default().fg(Color::Rgb(55, 55, 70))),
         Span::styled(
             over_filled_text,
-            Style::default().bg(Color::Yellow).fg(Color::Black).add_modifier(Modifier::BOLD),
+            Style::default().bg(accent).fg(Color::Black).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             over_unfilled_text,
             Style::default().bg(Color::Rgb(55, 55, 70)).fg(Color::Rgb(210, 215, 225)),
         ),
     ]);
-    let progress_rect = Rect::new(rows[5].x, rows[5].y, rows[5].width.saturating_sub(1), rows[5].height);
+    let progress_rect = Rect::new(prog_x, prog.y, prog_w, prog.height);
     f.render_widget(Paragraph::new(bar), progress_rect);
+}
+
+fn draw_full_art_mode(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    album_art: Option<&mut StatefulProtocol>,
+) {
+    // Outer: content row | footer
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(area);
+
+    let content_area = outer[0];
+    let footer_area = outer[1];
+
+    // Content: image (50%) | now-playing info (50%)
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(content_area);
+
+    let image_area = cols[0];
+    let info_area = cols[1];
+
+    if let Some(proto) = album_art {
+        let img = StatefulImage::<StatefulProtocol>::default().resize(Resize::Fit(None));
+        f.render_stateful_widget(img, image_area, proto);
+    } else {
+        let placeholder = Paragraph::new("♪")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        f.render_widget(placeholder, image_area);
+    }
+
+    if let Some(np) = &app.now_playing {
+        draw_now_playing_info(f, app, np, info_area, true);
+    } else {
+        let msg = Paragraph::new("No player selected — press → then navigate to Players")
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(msg, info_area);
+    }
+
+    let footer = hint_line(&[
+        ("`", "exit art"), ("Spc", "play/pause"), ("n/p", "next/prev"),
+        ("+/-", "vol"), ("c", "config"), ("q", "quit"),
+    ]);
+    f.render_widget(Paragraph::new(footer), footer_area);
 }
 
 fn draw_disconnected_overlay(f: &mut Frame, area: Rect, state: &ConnectionState) {
@@ -1211,6 +1326,41 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, w, height)
 }
 
+/// Returns the six clickable button rects in the big-screen (full art) controls row: [Prev, PlayPause, Stop, Next, Shuffle, Repeat].
+pub fn compute_full_art_control_rects(area: Rect) -> [Rect; 6] {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(area);
+    let content_area = outer[0];
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(content_area);
+    let info_area = cols[1];
+    // ctrl_row is rows[6] in the bigscreen layout (each preceding row is Length(1))
+    let ctrl_y = info_area.y + 6;
+    let ctrl_x = info_area.x + 1; // bigscreen indent
+    let btn_w: u16 = 3;
+    let gap: u16 = 1;
+    let sep: u16 = 2;
+    std::array::from_fn(|i| {
+        let x = if i < 4 {
+            ctrl_x + (i as u16) * (btn_w + gap)
+        } else {
+            ctrl_x + 4 * (btn_w + gap) + sep + ((i - 4) as u16) * (btn_w + gap)
+        };
+        Rect::new(x, ctrl_y, btn_w, 1)
+    })
+}
+
+/// Returns the rect covering the "`:exit art`" footer hint at the bottom-left of big-screen mode.
+pub fn compute_full_art_footer_exit_rect(area: Rect) -> Rect {
+    let footer_y = area.y + area.height.saturating_sub(1);
+    // "`" (1) + ":exit art" (9) = 10 chars; add 2 for padding
+    Rect::new(area.x, footer_y, 12, 1)
+}
+
 pub fn compute_context_menu_rect(area: Rect, option_count: usize) -> Rect {
     centered_rect_abs(44, (option_count + 3) as u16, area)
 }
@@ -1368,8 +1518,13 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
             Style::default().fg(Color::White)
         };
 
+        let label_style = if is_selected {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
         let line = Line::from(vec![
-            Span::styled(format!("  {:>8}: ", label), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("  {:>8}: ", label), label_style),
             Span::styled(display, val_style),
         ]);
         f.render_widget(Paragraph::new(line), rows[i + 1]);
@@ -1393,8 +1548,13 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
         } else {
             Style::default().fg(Color::White)
         };
+        let nerd_label_style = if is_selected {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
         let line = Line::from(vec![
-            Span::styled("  Nerd icons: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Nerd icons: ", nerd_label_style),
             Span::styled(checkbox, label_style),
         ]);
         f.render_widget(Paragraph::new(line), rows[6]);
