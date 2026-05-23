@@ -30,12 +30,19 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 
 ## Installation
 
+### Install prebuilt binaries via Homebrew
+
+```sh
+brew install hjelev/tap/lyrtui
+```
+
 ```sh
 git clone https://github.com/yourname/lyrtui
 cd lyrtui
 cargo build --release
 # binary at: target/release/lyrtui
 ```
+or use the installer from the releases page
 
 ## Usage
 
