@@ -2,6 +2,10 @@
 
 A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (formerly Logitech Media Server / Squeezebox Server), written in Rust.
 
+## Screenshot
+
+![Shell Buddy screenshot](screenshot.png)
+
 ## Features
 
 - Browse your music library: Artists → Albums → Tracks, or jump straight to All Tracks
