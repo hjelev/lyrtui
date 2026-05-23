@@ -21,33 +21,45 @@ pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sen
 
 pub fn trigger_search(
     query: String,
-    app_items: Vec<RadioItem>,
+    app_services: Vec<RadioItem>,
+    player_id: String,
     client: Arc<LmsClient>,
     tx: mpsc::Sender<AppMsg>,
 ) {
-    let q_lower = query.to_lowercase();
     tokio::spawn(async move {
         let mut results = Vec::new();
 
-        if let Ok((artists, albums, tracks, playlists)) = client.search_library(&query).await {
-            for a in artists {
-                results.push(SearchResultItem::Artist(a));
-            }
-            for a in albums {
-                results.push(SearchResultItem::Album(a));
-            }
-            for t in tracks {
-                results.push(SearchResultItem::Track(t));
-            }
-            for p in playlists {
-                results.push(SearchResultItem::Playlist(p));
+        // Spawn library search and all app searches concurrently
+        let lib_handle = {
+            let client = client.clone();
+            let query = query.clone();
+            tokio::spawn(async move { client.search_library(&query).await })
+        };
+
+        let mut app_handles = Vec::new();
+        for svc in &app_services {
+            if let Some(cmd) = svc.cmd.clone() {
+                let client = client.clone();
+                let query = query.clone();
+                let player_id = player_id.clone();
+                app_handles.push(tokio::spawn(async move {
+                    client.search_app(&player_id, &cmd, &query).await
+                }));
             }
         }
 
-        // Client-side filter on loaded app items (streaming services by name)
-        for item in app_items {
-            if item.name.to_lowercase().contains(&q_lower) {
-                results.push(SearchResultItem::AppItem(item));
+        if let Ok(Ok((artists, albums, tracks, playlists))) = lib_handle.await {
+            for a in artists   { results.push(SearchResultItem::Artist(a)); }
+            for a in albums    { results.push(SearchResultItem::Album(a)); }
+            for t in tracks    { results.push(SearchResultItem::Track(t)); }
+            for p in playlists { results.push(SearchResultItem::Playlist(p)); }
+        }
+
+        for handle in app_handles {
+            if let Ok(Ok(items)) = handle.await {
+                for item in items {
+                    results.push(SearchResultItem::AppItem(item));
+                }
             }
         }
 

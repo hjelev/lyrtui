@@ -631,7 +631,8 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
         Style::default().fg(Color::DarkGray)
     };
     let cursor = if app.search_input_active { "█" } else { "" };
-    let input_text = format!("  / {}{}", app.search_query, cursor);
+    let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" };  // nf-fa-search
+    let input_text = format!(" {} {}{}", search_icon, app.search_query, cursor);
     let input = Paragraph::new(input_text)
         .style(Style::default().fg(Color::White))
         .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(input_border_style));
@@ -809,7 +810,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
         shortcut("n",      "Next track"),
         shortcut("p",      "Previous track"),
         shortcut("s",      "Toggle shuffle"),
-        shortcut("r",      "Toggle repeat (queue)"),
+        shortcut("r",      "Cycle repeat (off → single → queue → ∞)"),
         shortcut("+ / =",  "Volume up"),
         shortcut("-",      "Volume down"),
     ];
@@ -904,14 +905,16 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     };
     let repeat_icon = if app.use_nerd_icons {
         match np.repeat {
-            1 => " \u{F01E}",   // nf-fa-repeat
-            2 => " \u{F01E}1",
+            1 => " \u{F01E}1",  // repeat single track
+            2 => " \u{F01E}",   // repeat queue
+            3 => " \u{221E}",   // don't stop the music
             _ => "",
         }
     } else {
         match np.repeat {
-            1 => " ↺",
-            2 => " ↺1",
+            1 => " ↺1",  // repeat single track
+            2 => " ↺",   // repeat queue
+            3 => " ∞",   // don't stop the music
             _ => "",
         }
     };
@@ -962,7 +965,6 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
             );
         }
         let shuf_icon = if app.use_nerd_icons { "\u{F074}" } else { "⇌" };  // nf-fa-random
-        let rep_icon  = if app.use_nerd_icons { "\u{F01E}" } else { "↺" };  // nf-fa-repeat
         let shuffle_x = ctrl.x + 4 * (btn_w + gap) + sep;
         if shuffle_x + btn_w <= ctrl.x + ctrl.width {
             let (sfg, sbg) = if np.shuffle > 0 {
@@ -977,13 +979,31 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         }
         let repeat_x = shuffle_x + btn_w + gap;
         if repeat_x + btn_w <= ctrl.x + ctrl.width {
-            let (rfg, rbg) = if np.repeat > 0 {
-                (Color::Cyan, Color::Rgb(20, 45, 60))
-            } else {
-                (Color::Rgb(80, 80, 100), Color::Rgb(28, 32, 45))
+            // 0 = off, 1 = repeat single track, 2 = repeat queue, 3 = don't stop the music
+            let (rfg, rbg, rep_btn) = match np.repeat {
+                1 => (
+                    Color::Yellow,
+                    Color::Rgb(45, 40, 10),
+                    if app.use_nerd_icons { format!(" \u{F01E}1") } else { " ↺1".to_string() },
+                ),
+                2 => (
+                    Color::Cyan,
+                    Color::Rgb(20, 45, 60),
+                    if app.use_nerd_icons { format!(" \u{F01E} ") } else { " ↺ ".to_string() },
+                ),
+                3 => (
+                    Color::Green,
+                    Color::Rgb(10, 40, 20),
+                    " ∞ ".to_string(),
+                ),
+                _ => (
+                    Color::Rgb(80, 80, 100),
+                    Color::Rgb(28, 32, 45),
+                    if app.use_nerd_icons { format!(" \u{F01E} ") } else { " ↺ ".to_string() },
+                ),
             };
             f.render_widget(
-                Paragraph::new(format!(" {} ", rep_icon)).style(Style::default().fg(rfg).bg(rbg)),
+                Paragraph::new(rep_btn).style(Style::default().fg(rfg).bg(rbg)),
                 Rect::new(repeat_x, ctrl.y, btn_w, 1),
             );
         }

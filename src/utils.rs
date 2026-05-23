@@ -31,10 +31,7 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
                 }
             })
         }
-        MainView::Queue => app.queue.get(idx).and_then(|t| {
-            t.id.as_ref()
-                .map(|id| format!("{}/music/{}/cover.jpg", base, json_id_to_string(id)))
-        }),
+        MainView::Queue => app.queue.get(idx).and_then(|t| t.artwork_url.clone()),
         MainView::Radio => app.radio_items.get(idx).and_then(|i| i.artwork_url.clone()),
         MainView::Apps => app.app_items.get(idx).and_then(|i| i.artwork_url.clone()),
         MainView::Favourites => app.fav_items.get(idx).and_then(|i| i.artwork_url.clone()),

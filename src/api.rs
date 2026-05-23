@@ -190,13 +190,11 @@ impl LmsClient {
                 Some(url.to_string())
             }
         } else {
-            // Fall back to the standard local-library cover endpoint.
-            let track_id: Option<String> = track["id"]
-                .as_str()
-                .map(String::from)
-                .or_else(|| track["id"].as_u64().map(|n| n.to_string()))
-                .or_else(|| track["id"].as_i64().map(|n| n.to_string()));
-            track_id.map(|id| format!("{}/music/{}/cover.jpg", base, id))
+            // artwork_track_id (from K tag) may differ from the track's own id when LMS
+            // picks a representative cover from the album.
+            let cover_id = extract_id_str(&track["artwork_track_id"])
+                .or_else(|| extract_id_str(&track["id"]));
+            cover_id.map(|id| format!("{}/music/{}/cover.jpg", base, id))
         };
 
         Ok(NowPlaying {
@@ -226,11 +224,6 @@ impl LmsClient {
             .into_iter()
             .map(|v| {
                 let id: Option<Value> = if v["id"].is_null() { None } else { Some(v["id"].clone()) };
-                let track_id_str = id.as_ref().and_then(|id| {
-                    id.as_str().map(String::from)
-                        .or_else(|| id.as_u64().map(|n| n.to_string()))
-                        .or_else(|| id.as_i64().map(|n| n.to_string()))
-                });
                 let artwork_url = if let Some(url) = v["artwork_url"].as_str().filter(|s| !s.is_empty()) {
                     if url.starts_with('/') {
                         Some(format!("{}{}", base, url))
@@ -238,7 +231,9 @@ impl LmsClient {
                         Some(url.to_string())
                     }
                 } else {
-                    track_id_str.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, id))
+                    let cover_id = extract_id_str(&v["artwork_track_id"])
+                        .or_else(|| id.as_ref().and_then(|i| extract_id_str(i)));
+                    cover_id.map(|id| format!("{}/music/{}/cover.jpg", base, id))
                 };
                 Track {
                     id,
@@ -562,6 +557,38 @@ impl LmsClient {
         Ok(())
     }
 
+    /// Search within a single LMS app/plugin using the XMLBrowser items API with a search filter.
+    pub async fn search_app(&self, player_id: &str, cmd: &str, query: &str) -> Result<Vec<RadioItem>> {
+        let result = self.rpc(player_id, &[
+            json!(cmd),
+            json!("items"),
+            json!(0),
+            json!(50),
+            json!(format!("search:{}", query)),
+            json!("want_url:1"),
+        ]).await?;
+        let items = result["loop_loop"]
+            .as_array()
+            .or_else(|| result["item_loop"].as_array())
+            .cloned()
+            .unwrap_or_default();
+        let base = self.server_base_url();
+        Ok(items
+            .into_iter()
+            .map(|v| RadioItem {
+                name: v["name"].as_str().unwrap_or("").to_string(),
+                item_type: v["type"].as_str().unwrap_or("link").to_string(),
+                url: v["url"].as_str().map(String::from),
+                cmd: v["cmd"].as_str().map(String::from).or_else(|| Some(cmd.to_string())),
+                item_id: v["id"].as_str().map(String::from),
+                artwork_url: resolve_image_url(&v, &base),
+                has_items: v["hasitems"].as_u64().unwrap_or(0) > 0,
+                is_audio: v["isaudio"].as_u64().unwrap_or(0) > 0,
+            })
+            .filter(|item| !item.name.is_empty())
+            .collect())
+    }
+
     pub async fn search_library(&self, query: &str) -> Result<(Vec<Artist>, Vec<Album>, Vec<Track>, Vec<Playlist>)> {
         let result = self.rpc("", &[
             json!("search"),
@@ -647,6 +674,15 @@ impl LmsClient {
         }
         Ok(())
     }
+}
+
+/// Extract a numeric LMS ID from a JSON value that may be a string, integer, or float.
+fn extract_id_str(v: &Value) -> Option<String> {
+    v.as_str()
+        .map(String::from)
+        .or_else(|| v.as_u64().map(|n| n.to_string()))
+        .or_else(|| v.as_i64().map(|n| n.to_string()))
+        .or_else(|| v.as_f64().map(|f| (f as i64).to_string()))
 }
 
 /// Extract an image URL from a JSON item value, resolving relative paths against `base`.

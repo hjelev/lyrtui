@@ -139,6 +139,7 @@ pub struct App {
     pub radio_title: String,
 
     // Apps data
+    pub app_services: Vec<RadioItem>,  // top-level app list, never mutated during navigation
     pub app_items: Vec<RadioItem>,
     pub app_nav_stack: Vec<RadioNav>,
     pub app_title: String,
@@ -195,6 +196,7 @@ impl App {
             radio_items: vec![],
             radio_nav_stack: vec![],
             radio_title: "Radio".to_string(),
+            app_services: vec![],
             app_items: vec![],
             app_nav_stack: vec![],
             app_title: "Apps".to_string(),

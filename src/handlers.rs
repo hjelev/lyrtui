@@ -856,7 +856,12 @@ pub async fn handle_action(
 
         Action::ToggleRepeat => {
             if let (Some(pid), Some(np)) = (app.active_player.clone(), app.now_playing.as_ref()) {
-                let new_val = if np.repeat > 0 { 0u8 } else { 1 };
+                let new_val = match np.repeat {
+                    0 => 1u8, // off → repeat single track
+                    1 => 2u8, // repeat single → repeat queue
+                    2 => 3u8, // repeat queue → don't stop the music
+                    _ => 0u8, // don't stop → off
+                };
                 let c = client.clone();
                 tokio::spawn(async move {
                     let _ = c.set_repeat(&pid, new_val).await;
@@ -1566,10 +1571,12 @@ pub async fn handle_search_input_key(
             if !app.search_query.is_empty() {
                 app.search_results = vec![];
                 app.main_selected = 0;
-                let app_items = app.app_items.clone();
+                let app_services = app.app_services.clone();
+                let player_id = app.active_player.clone().unwrap_or_default();
                 background::trigger_search(
                     app.search_query.clone(),
-                    app_items,
+                    app_services,
+                    player_id,
                     client.clone(),
                     tx.clone(),
                 );

@@ -254,7 +254,12 @@ async fn handle_msg(
 ) {
     use app::ConnectionState;
     match msg {
-        AppMsg::Connected => app.connection = ConnectionState::Connected,
+        AppMsg::Connected => {
+            app.connection = ConnectionState::Connected;
+            if app.status_message.as_deref() == Some("Reconnecting...") {
+                app.status_message = None;
+            }
+        }
         AppMsg::Disconnected => app.connection = ConnectionState::Disconnected,
         AppMsg::PlayersLoaded(players) => {
             if app.active_player.is_none()
@@ -283,6 +288,9 @@ async fn handle_msg(
             app.main_selected = 0;
         }
         AppMsg::AppItemsLoaded(items) => {
+            if app.app_nav_stack.is_empty() {
+                app.app_services = items.clone();
+            }
             app.app_items = items;
             app.main_selected = 0;
         }
