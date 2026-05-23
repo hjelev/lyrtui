@@ -344,6 +344,16 @@ impl LmsClient {
         Ok(())
     }
 
+    pub async fn set_shuffle(&self, player_id: &str, value: u8) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("shuffle"), json!(value)]).await?;
+        Ok(())
+    }
+
+    pub async fn set_repeat(&self, player_id: &str, value: u8) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("repeat"), json!(value)]).await?;
+        Ok(())
+    }
+
     pub async fn play_track(&self, player_id: &str, track_id: &str) -> Result<()> {
         self.rpc(
             player_id,

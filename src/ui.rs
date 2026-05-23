@@ -52,8 +52,8 @@ pub fn compute_areas(area: Rect, status_height: u16) -> (Rect, Rect) {
     (panes[0], panes[1])
 }
 
-/// Returns the four clickable button rects in the Now Playing controls row: [Prev, PlayPause, Stop, Next].
-pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w: u16) -> [Rect; 4] {
+/// Returns the six clickable button rects in the Now Playing controls row: [Prev, PlayPause, Stop, Next, Shuffle, Repeat].
+pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w: u16) -> [Rect; 6] {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
@@ -82,8 +82,13 @@ pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w
     let ctrl = rows[3];
     let btn_w: u16 = 3;
     let gap: u16 = 1;
+    let sep: u16 = 2; // extra gap before shuffle/repeat group
     std::array::from_fn(|i| {
-        let x = ctrl.x + (i as u16) * (btn_w + gap);
+        let x = if i < 4 {
+            ctrl.x + (i as u16) * (btn_w + gap)
+        } else {
+            ctrl.x + 4 * (btn_w + gap) + sep + ((i - 4) as u16) * (btn_w + gap)
+        };
         Rect::new(x, ctrl.y, btn_w, 1)
     })
 }
@@ -253,6 +258,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .map(|item| ListItem::new(format!("  {}", app.sidebar_label(item))))
         .collect();
 
+    let total = items.len();
+    let visible = area.height.saturating_sub(2) as usize;
+
     state.select(Some(app.sidebar_selected));
 
     let (hl_style, hl_symbol) = (cursor_styles(app.focus_sidebar).0, "");
@@ -263,6 +271,23 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .highlight_symbol(hl_symbol);
 
     f.render_stateful_widget(list, area, state);
+
+    if total > visible {
+        let offset = *state.offset_mut();
+        let scroll_area = Rect::new(
+            area.x + area.width.saturating_sub(1),
+            area.y + 1,
+            1,
+            area.height.saturating_sub(2),
+        );
+        let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("║")
+            .track_symbol(Some("│"))
+            .begin_symbol(None)
+            .end_symbol(None);
+        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+    }
 }
 
 fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
@@ -507,7 +532,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
     let breadcrumb = breadcrumb_str(app.radio_nav_stack.iter().map(|n| n.title.as_str()), &app.radio_title);
-    let title = format!(" Radio — {} ", breadcrumb);
+    let title = format!(" {} ", breadcrumb);
     let items = app.radio_items.iter().map(|item| {
         let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
         RowItem {
@@ -525,7 +550,7 @@ fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
 fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
     let breadcrumb = breadcrumb_str(app.app_nav_stack.iter().map(|n| n.title.as_str()), &app.app_title);
-    let title = format!(" Apps — {} ", breadcrumb);
+    let title = format!(" {} ", breadcrumb);
     let items = app.app_items.iter().map(|item| {
         let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
         RowItem {
@@ -763,6 +788,8 @@ fn draw_help(f: &mut Frame, area: Rect) {
         shortcut("Space",  "Play / pause"),
         shortcut("n",      "Next track"),
         shortcut("p",      "Previous track"),
+        shortcut("s",      "Toggle shuffle"),
+        shortcut("r",      "Toggle repeat (queue)"),
         shortcut("+ / =",  "Volume up"),
         shortcut("-",      "Volume down"),
     ];
@@ -870,20 +897,45 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     ));
     f.render_widget(Paragraph::new(album_line), rows[2]);
 
-    // Playback control buttons: Prev | Play/Pause | Stop | Next (left-aligned, compact)
+    // Playback control buttons: Prev | Play/Pause | Stop | Next  Shuffle | Repeat
     {
         let ctrl = rows[3];
         let play_pause_icon = if np.is_playing { "⏸" } else { "▶" };
-        let icons = ["⏮", play_pause_icon, "⏹", "⏭"];
-        let btn_w: u16 = 3; // " ⏮ "
+        let btn_w: u16 = 3;
         let gap: u16 = 1;
-        for (i, icon) in icons.iter().enumerate() {
+        let sep: u16 = 2;
+        let media_icons = ["⏮", play_pause_icon, "⏹", "⏭"];
+        for (i, icon) in media_icons.iter().enumerate() {
             let x = ctrl.x + (i as u16) * (btn_w + gap);
             if x + btn_w > ctrl.x + ctrl.width { break; }
             f.render_widget(
                 Paragraph::new(format!(" {} ", icon))
                     .style(Style::default().fg(Color::Rgb(160, 200, 255)).bg(Color::Rgb(28, 32, 45))),
                 Rect::new(x, ctrl.y, btn_w, 1),
+            );
+        }
+        let shuffle_x = ctrl.x + 4 * (btn_w + gap) + sep;
+        if shuffle_x + btn_w <= ctrl.x + ctrl.width {
+            let (sfg, sbg) = if np.shuffle > 0 {
+                (Color::Cyan, Color::Rgb(20, 45, 60))
+            } else {
+                (Color::Rgb(80, 80, 100), Color::Rgb(28, 32, 45))
+            };
+            f.render_widget(
+                Paragraph::new(" ⇌ ").style(Style::default().fg(sfg).bg(sbg)),
+                Rect::new(shuffle_x, ctrl.y, btn_w, 1),
+            );
+        }
+        let repeat_x = shuffle_x + btn_w + gap;
+        if repeat_x + btn_w <= ctrl.x + ctrl.width {
+            let (rfg, rbg) = if np.repeat > 0 {
+                (Color::Cyan, Color::Rgb(20, 45, 60))
+            } else {
+                (Color::Rgb(80, 80, 100), Color::Rgb(28, 32, 45))
+            };
+            f.render_widget(
+                Paragraph::new(" ↺ ").style(Style::default().fg(rfg).bg(rbg)),
+                Rect::new(repeat_x, ctrl.y, btn_w, 1),
             );
         }
     }

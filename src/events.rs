@@ -39,6 +39,8 @@ pub enum Action {
     AddToQueue,
     ClearQueue,
     Stop,
+    ToggleShuffle,
+    ToggleRepeat,
     None,
 }
 
@@ -60,6 +62,8 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyCode::Char('c'), _) => Action::OpenConfig,
         (KeyCode::Char('a'), _) => Action::AddToQueue,
         (KeyCode::Char('x'), _) => Action::ClearQueue,
+        (KeyCode::Char('s'), _) => Action::ToggleShuffle,
+        (KeyCode::Char('r'), _) => Action::ToggleRepeat,
         _ => Action::None,
     }
 }

@@ -72,7 +72,9 @@ pub async fn handle_mouse_event(
                     0 => Action::Prev,
                     1 => Action::PlayPause,
                     2 => Action::Stop,
-                    _ => Action::Next,
+                    3 => Action::Next,
+                    4 => Action::ToggleShuffle,
+                    _ => Action::ToggleRepeat,
                 };
                 handle_action(app, action, client, tx).await;
             } else if point_in(col, row, sidebar_area) {
@@ -814,6 +816,26 @@ pub async fn handle_action(
         Action::ClearQueue => {
             if app.active_player.is_some() && !app.queue.is_empty() {
                 app.confirm_clear_queue = true;
+            }
+        }
+
+        Action::ToggleShuffle => {
+            if let (Some(pid), Some(np)) = (app.active_player.clone(), app.now_playing.as_ref()) {
+                let new_val = if np.shuffle > 0 { 0u8 } else { 1 };
+                let c = client.clone();
+                tokio::spawn(async move {
+                    let _ = c.set_shuffle(&pid, new_val).await;
+                });
+            }
+        }
+
+        Action::ToggleRepeat => {
+            if let (Some(pid), Some(np)) = (app.active_player.clone(), app.now_playing.as_ref()) {
+                let new_val = if np.repeat > 0 { 0u8 } else { 1 };
+                let c = client.clone();
+                tokio::spawn(async move {
+                    let _ = c.set_repeat(&pid, new_val).await;
+                });
             }
         }
 
