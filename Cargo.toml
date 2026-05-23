@@ -3,6 +3,8 @@ name = "lmstui"
 version = "0.1.1"
 edition = "2024"
 repository = "https://github.com/hjelev/lyrtui"
+homepage = "https://github.com/hjelev/lyrtui"
+description = "TUI for Lyrion Music Server"
 
 [dependencies]
 ratatui = "0.30"
