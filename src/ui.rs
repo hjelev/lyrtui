@@ -1262,17 +1262,19 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
 
-/// Returns (popup_rect, [host_row, port_row, nerd_icons_row]).
-pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 3]) {
-    let popup = centered_rect_abs(54, 12, area);
+/// Returns (popup_rect, [host_row, port_row, username_row, password_row, nerd_icons_row]).
+pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 5]) {
+    let popup = centered_rect_abs(54, 15, area);
     let inner_x = popup.x + 1;
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
-    // row layout inside inner: [pad, host, port, divider, nerd, error, spacer, help]
-    let host_rect = Rect::new(inner_x, inner_y + 1, inner_w, 1);
-    let port_rect = Rect::new(inner_x, inner_y + 2, inner_w, 1);
-    let nerd_rect = Rect::new(inner_x, inner_y + 4, inner_w, 1);
-    (popup, [host_rect, port_rect, nerd_rect])
+    // row layout: [pad, host, port, username, password, divider, nerd, error, spacer, help]
+    let host_rect     = Rect::new(inner_x, inner_y + 1, inner_w, 1);
+    let port_rect     = Rect::new(inner_x, inner_y + 2, inner_w, 1);
+    let user_rect     = Rect::new(inner_x, inner_y + 3, inner_w, 1);
+    let pass_rect     = Rect::new(inner_x, inner_y + 4, inner_w, 1);
+    let nerd_rect     = Rect::new(inner_x, inner_y + 6, inner_w, 1);
+    (popup, [host_rect, port_rect, user_rect, pass_rect, nerd_rect])
 }
 
 fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
@@ -1313,7 +1315,7 @@ fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
 
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
     let area = f.area();
-    let popup = centered_rect_abs(54, 12, area);
+    let popup = centered_rect_abs(54, 15, area);
 
     f.render_widget(Clear, popup);
 
@@ -1326,23 +1328,32 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    // rows: top-pad | host | port | divider | nerd-icons | error | spacer | help
+    // rows: pad | host | port | username | password | divider | nerd-icons | error | spacer | help
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(1), // [0] top pad
+            Constraint::Length(1), // [1] host
+            Constraint::Length(1), // [2] port
+            Constraint::Length(1), // [3] username
+            Constraint::Length(1), // [4] password
+            Constraint::Length(1), // [5] divider
+            Constraint::Length(1), // [6] nerd-icons
+            Constraint::Length(1), // [7] error
+            Constraint::Min(0),    // [8] spacer
+            Constraint::Length(1), // [9] help
         ])
         .split(inner);
 
-    let fields: &[(&str, &str, usize)] = &[("Host", &modal.host, 0), ("Port", &modal.port, 1)];
-    for (i, (label, value, idx)) in fields.iter().enumerate() {
+    // Text input fields: (label, value, field_index, mask_value)
+    let pass_masked = "*".repeat(modal.password.len());
+    let text_fields: &[(&str, &str, usize)] = &[
+        ("Host",     &modal.host,     0),
+        ("Port",     &modal.port,     1),
+        ("Username", &modal.username, 2),
+        ("Password", &pass_masked,    3),
+    ];
+    for (i, (label, value, idx)) in text_fields.iter().enumerate() {
         let is_selected = modal.selected_field == *idx;
         let is_editing = is_selected && modal.editing;
 
@@ -1358,7 +1369,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
         };
 
         let line = Line::from(vec![
-            Span::styled(format!("  {:>4}: ", label), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("  {:>8}: ", label), Style::default().fg(Color::DarkGray)),
             Span::styled(display, val_style),
         ]);
         f.render_widget(Paragraph::new(line), rows[i + 1]);
@@ -1370,12 +1381,12 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
             "─".repeat(inner.width as usize),
             Style::default().fg(Color::DarkGray),
         )),
-        rows[3],
+        rows[5],
     );
 
     // Nerd icons toggle
     {
-        let is_selected = modal.selected_field == 2;
+        let is_selected = modal.selected_field == 4;
         let checkbox = if modal.use_nerd_icons { "[x]" } else { "[ ]" };
         let label_style = if is_selected {
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
@@ -1386,18 +1397,18 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
             Span::styled("  Nerd icons: ", Style::default().fg(Color::DarkGray)),
             Span::styled(checkbox, label_style),
         ]);
-        f.render_widget(Paragraph::new(line), rows[4]);
+        f.render_widget(Paragraph::new(line), rows[6]);
     }
 
     if let Some(err) = &modal.error {
         let p = Paragraph::new(err.as_str())
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Red));
-        f.render_widget(p, rows[5]);
+        f.render_widget(p, rows[7]);
     }
 
     let help = Paragraph::new(hint_line(&[
         ("Enter/i", "edit"), ("j/k", "switch field"), ("Space", "toggle"), ("s", "save"), ("Esc", "close"),
     ]));
-    f.render_widget(help, rows[7]);
+    f.render_widget(help, rows[9]);
 }

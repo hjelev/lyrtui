@@ -54,17 +54,21 @@ pub enum SearchResultItem {
 pub struct ConfigModal {
     pub host: String,
     pub port: String,
+    pub username: String,
+    pub password: String,
     pub use_nerd_icons: bool,
-    pub selected_field: usize, // 0 = host, 1 = port, 2 = use_nerd_icons
+    pub selected_field: usize, // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons
     pub editing: bool,
     pub error: Option<String>,
 }
 
 impl ConfigModal {
-    pub fn new(host: &str, port: u16, use_nerd_icons: bool) -> Self {
+    pub fn new(host: &str, port: u16, username: Option<&str>, password: Option<&str>, use_nerd_icons: bool) -> Self {
         Self {
             host: host.to_string(),
             port: port.to_string(),
+            username: username.unwrap_or("").to_string(),
+            password: password.unwrap_or("").to_string(),
             use_nerd_icons,
             selected_field: 0,
             editing: false,

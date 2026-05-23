@@ -113,13 +113,15 @@ impl RadioItem {
 pub struct LmsClient {
     client: Client,
     base_url: RwLock<String>,
+    credentials: RwLock<Option<(String, String)>>,
 }
 
 impl LmsClient {
-    pub fn new(base_url: String) -> Self {
+    pub fn new(base_url: String, credentials: Option<(String, String)>) -> Self {
         Self {
             client: Client::new(),
             base_url: RwLock::new(base_url),
+            credentials: RwLock::new(credentials),
         }
     }
 
@@ -128,27 +130,30 @@ impl LmsClient {
         *self.base_url.write().unwrap() = url;
     }
 
+    /// Update credentials in-place; background tasks pick them up on their next iteration.
+    pub fn update_credentials(&self, credentials: Option<(String, String)>) {
+        *self.credentials.write().unwrap() = credentials;
+    }
+
     pub fn server_base_url(&self) -> String {
         let url = self.base_url.read().unwrap().clone();
         url.trim_end_matches("/jsonrpc.js").to_string()
     }
 
     async fn rpc(&self, player_id: &str, params: &[Value]) -> Result<Value> {
-        // Clone the URL before any await so we don't hold the lock across an await point.
+        // Clone URL and credentials before any await so we don't hold locks across await points.
         let url = self.base_url.read().unwrap().clone();
+        let creds = self.credentials.read().unwrap().clone();
         let body = json!({
             "id": 1,
             "method": "slim.request",
             "params": [player_id, params]
         });
-        let resp = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await?
-            .json::<Value>()
-            .await?;
+        let mut req = self.client.post(&url).json(&body);
+        if let Some((user, pass)) = creds {
+            req = req.basic_auth(user, Some(pass));
+        }
+        let resp = req.send().await?.json::<Value>().await?;
         Ok(resp["result"].clone())
     }
 
@@ -663,7 +668,12 @@ impl LmsClient {
     }
 
     pub async fn fetch_image_bytes(&self, url: &str) -> Result<Vec<u8>> {
-        let bytes = self.client.get(url).send().await?.bytes().await?;
+        let creds = self.credentials.read().unwrap().clone();
+        let mut req = self.client.get(url);
+        if let Some((user, pass)) = creds {
+            req = req.basic_auth(user, Some(pass));
+        }
+        let bytes = req.send().await?.bytes().await?;
         Ok(bytes.to_vec())
     }
 

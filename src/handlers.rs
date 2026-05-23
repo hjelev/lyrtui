@@ -49,6 +49,14 @@ pub async fn handle_mouse_event(
                     modal.error = None;
                 } else if point_in(col, row, field_rects[2]) {
                     modal.selected_field = 2;
+                    modal.editing = true;
+                    modal.error = None;
+                } else if point_in(col, row, field_rects[3]) {
+                    modal.selected_field = 3;
+                    modal.editing = true;
+                    modal.error = None;
+                } else if point_in(col, row, field_rects[4]) {
+                    modal.selected_field = 4;
                     modal.use_nerd_icons = !modal.use_nerd_icons;
                 }
             } else {
@@ -893,18 +901,22 @@ pub fn handle_config_key(
             }
             KeyCode::Char(c) => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field == 0 {
-                    modal.host.push(c);
-                } else if c.is_ascii_digit() {
-                    modal.port.push(c);
+                match modal.selected_field {
+                    0 => modal.host.push(c),
+                    1 => { if c.is_ascii_digit() { modal.port.push(c); } }
+                    2 => modal.username.push(c),
+                    3 => modal.password.push(c),
+                    _ => {}
                 }
             }
             KeyCode::Backspace => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field == 0 {
-                    modal.host.pop();
-                } else {
-                    modal.port.pop();
+                match modal.selected_field {
+                    0 => { modal.host.pop(); }
+                    1 => { modal.port.pop(); }
+                    2 => { modal.username.pop(); }
+                    3 => { modal.password.pop(); }
+                    _ => {}
                 }
             }
             _ => {}
@@ -919,13 +931,13 @@ pub fn handle_config_key(
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field < 2 {
+                if modal.selected_field < 4 {
                     modal.selected_field += 1;
                 }
             }
             KeyCode::Enter | KeyCode::Char('i') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field == 2 {
+                if modal.selected_field == 4 {
                     modal.use_nerd_icons = !modal.use_nerd_icons;
                 } else {
                     modal.editing = true;
@@ -934,14 +946,20 @@ pub fn handle_config_key(
             }
             KeyCode::Char(' ') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field == 2 {
+                if modal.selected_field == 4 {
                     modal.use_nerd_icons = !modal.use_nerd_icons;
                 }
             }
             KeyCode::Char('s') => {
-                let (host, port_str, use_nerd_icons) = {
+                let (host, port_str, username, password, use_nerd_icons) = {
                     let modal = app.config_modal.as_ref().unwrap();
-                    (modal.host.trim().to_string(), modal.port.trim().to_string(), modal.use_nerd_icons)
+                    (
+                        modal.host.trim().to_string(),
+                        modal.port.trim().to_string(),
+                        modal.username.trim().to_string(),
+                        modal.password.clone(),
+                        modal.use_nerd_icons,
+                    )
                 };
                 if host.is_empty() {
                     app.config_modal.as_mut().unwrap().error =
@@ -952,9 +970,15 @@ pub fn handle_config_key(
                             cfg.host = host;
                             cfg.port = port;
                             cfg.use_nerd_icons = use_nerd_icons;
+                            cfg.username = if username.is_empty() { None } else { Some(username.clone()) };
+                            cfg.password = if password.is_empty() { None } else { Some(password.clone()) };
                             match cfg.save() {
                                 Ok(()) => {
                                     client.update_base_url(cfg.base_url());
+                                    let creds = cfg.username.as_ref()
+                                        .zip(cfg.password.as_ref())
+                                        .map(|(u, p)| (u.clone(), p.clone()));
+                                    client.update_credentials(creds);
                                     app.use_nerd_icons = use_nerd_icons;
                                     app.config_modal = None;
                                     app.connection = ConnectionState::Reconnecting;
