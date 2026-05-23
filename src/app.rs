@@ -1,4 +1,5 @@
 use crate::api::{Album, Artist, NowPlaying, Player, RadioItem, Track};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConnectionState {
@@ -126,16 +127,21 @@ pub struct App {
     pub fav_nav_stack: Vec<RadioNav>,
     pub fav_title: String,
 
+    // Per-player volumes (updated by background polling)
+    pub player_volumes: HashMap<String, u8>,
+
     // UI state
     pub sidebar_selected: usize,
     pub main_selected: usize,
     pub sidebar_items: Vec<SidebarItem>,
     pub main_view: MainView,
     pub focus_sidebar: bool,
+    pub players_focus_global: bool,
 
     pub status_message: Option<String>,
     pub config_modal: Option<ConfigModal>,
     pub context_menu: Option<ContextMenu>,
+    pub confirm_clear_queue: bool,
     /// Height (in terminal rows) of the Now Playing panel, computed from font metrics.
     pub status_height: u16,
 }
@@ -160,6 +166,7 @@ impl App {
             fav_items: vec![],
             fav_nav_stack: vec![],
             fav_title: "Favourites".to_string(),
+            player_volumes: HashMap::new(),
             sidebar_selected: 0,
             main_selected: 0,
             sidebar_items: vec![
@@ -175,9 +182,11 @@ impl App {
             ],
             main_view: MainView::Library(LibraryView::Artists),
             focus_sidebar: true,
+            players_focus_global: false,
             status_message: None,
             config_modal: None,
             context_menu: None,
+            confirm_clear_queue: false,
             status_height: 11, // overwritten in run() from picker font metrics
         }
     }
@@ -206,8 +215,8 @@ pub enum AppMsg {
     Connected,
     Disconnected,
     PlayersLoaded(Vec<Player>),
-    NowPlayingUpdated(NowPlaying),
-    QueueLoaded(Vec<Track>),
+    NowPlayingUpdated(String, NowPlaying), // player_id, data
+    QueueLoaded(String, Vec<Track>),       // player_id, data
     ArtistsLoaded(Vec<Artist>),
     AlbumsLoaded(Vec<Album>),
     TracksLoaded(Vec<Track>),
@@ -217,6 +226,7 @@ pub enum AppMsg {
     ArtworkLoaded(Vec<u8>),
     ThumbnailLoaded(String, Vec<u8>), // url, bytes
     ThumbnailFailed(String),          // url
+    PlayerVolumesLoaded(HashMap<String, u8>),
     StatusMsg(String),
     #[allow(dead_code)]
     Error(String),

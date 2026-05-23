@@ -37,6 +37,8 @@ pub enum Action {
     TogglePower,
     OpenConfig,
     AddToQueue,
+    ClearQueue,
+    Stop,
     None,
 }
 
@@ -46,7 +48,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => Action::NavUp,
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => Action::NavDown,
         (KeyCode::Enter, _) | (KeyCode::Char('l'), _) => Action::Select,
-        (KeyCode::Esc, _) | (KeyCode::Char('h'), _) => Action::Back,
+        (KeyCode::Esc, _) | (KeyCode::Char('h'), _) | (KeyCode::Backspace, _) => Action::Back,
         (KeyCode::Left, _) => Action::FocusSidebar,
         (KeyCode::Right, _) => Action::FocusMain,
         (KeyCode::Char(' '), _) => Action::PlayPause,
@@ -57,6 +59,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyCode::Char('t'), _) => Action::TogglePower,
         (KeyCode::Char('c'), _) => Action::OpenConfig,
         (KeyCode::Char('a'), _) => Action::AddToQueue,
+        (KeyCode::Char('x'), _) => Action::ClearQueue,
         _ => Action::None,
     }
 }

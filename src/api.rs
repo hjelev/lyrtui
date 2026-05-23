@@ -37,6 +37,8 @@ pub struct Track {
     pub artist: Option<String>,
     pub album: Option<String>,
     pub duration: Option<f64>,
+    #[serde(default)]
+    pub artwork_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -65,16 +67,26 @@ pub struct RadioItem {
     pub item_id: Option<String>,
     /// Thumbnail / cover art URL for this item, if provided by the server.
     pub artwork_url: Option<String>,
+    /// True when the server reports hasitems:1 — this item contains sub-items to browse.
+    pub has_items: bool,
+    /// True when the server reports isaudio:1 — this item is audio content (track or stream).
+    pub is_audio: bool,
 }
 
 impl RadioItem {
-    /// An item is playable if it carries a stream URL.
+    /// An item is playable when it carries a stream URL and is identified as audio content.
+    /// "link" type items may carry browse URLs (not streams), so we require isaudio:1 or
+    /// an explicit "audio"/"playlist" type to distinguish streams from browse links.
     pub fn is_playable(&self) -> bool {
         self.url.is_some()
+            && (self.is_audio || matches!(self.item_type.as_str(), "audio" | "playlist"))
     }
-    /// An item is navigable if it has no URL to play but can be browsed into.
+    /// An item is navigable when it has sub-items AND is not a direct audio leaf.
+    /// Spotty (and similar plugins) set hasitems:1 on tracks but also set isaudio:1 and
+    /// provide a stream URL — those are leaves, not folders. TuneIn folders have isaudio:0
+    /// even when they carry a browse URL, so they remain navigable.
     pub fn is_navigable(&self) -> bool {
-        self.url.is_none() && self.item_type != "text"
+        self.has_items && !(self.url.is_some() && self.is_audio)
     }
 }
 
@@ -183,21 +195,40 @@ impl LmsClient {
 
     pub async fn get_queue(&self, player_id: &str) -> Result<Vec<Track>> {
         let result = self
-            .rpc(player_id, &[json!("status"), json!(0), json!(500), json!("tags:adlt")])
+            .rpc(player_id, &[json!("status"), json!(0), json!(500), json!("tags:adltK")])
             .await?;
         let tracks = result["playlist_loop"]
             .as_array()
             .cloned()
             .unwrap_or_default();
+        let base = self.server_base_url();
         Ok(tracks
             .into_iter()
-            .map(|v| serde_json::from_value(v).unwrap_or(Track {
-                id: None,
-                title: "Unknown".into(),
-                artist: None,
-                album: None,
-                duration: None,
-            }))
+            .map(|v| {
+                let id: Option<Value> = if v["id"].is_null() { None } else { Some(v["id"].clone()) };
+                let track_id_str = id.as_ref().and_then(|id| {
+                    id.as_str().map(String::from)
+                        .or_else(|| id.as_u64().map(|n| n.to_string()))
+                        .or_else(|| id.as_i64().map(|n| n.to_string()))
+                });
+                let artwork_url = if let Some(url) = v["artwork_url"].as_str().filter(|s| !s.is_empty()) {
+                    if url.starts_with('/') {
+                        Some(format!("{}{}", base, url))
+                    } else {
+                        Some(url.to_string())
+                    }
+                } else {
+                    track_id_str.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, id))
+                };
+                Track {
+                    id,
+                    title: v["title"].as_str().unwrap_or("Unknown").to_string(),
+                    artist: v["artist"].as_str().map(String::from),
+                    album: v["album"].as_str().map(String::from),
+                    duration: v["duration"].as_f64(),
+                    artwork_url,
+                }
+            })
             .collect())
     }
 
@@ -263,6 +294,11 @@ impl LmsClient {
         Ok(())
     }
 
+    pub async fn stop(&self, player_id: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("stop")]).await?;
+        Ok(())
+    }
+
     pub async fn next(&self, player_id: &str) -> Result<()> {
         self.rpc(player_id, &[json!("playlist"), json!("index"), json!("+1")]).await?;
         Ok(())
@@ -276,6 +312,11 @@ impl LmsClient {
     pub async fn set_volume(&self, player_id: &str, volume: u8) -> Result<()> {
         self.rpc(player_id, &[json!("mixer"), json!("volume"), json!(volume)]).await?;
         Ok(())
+    }
+
+    pub async fn get_player_volume(&self, player_id: &str) -> Result<u8> {
+        let result = self.rpc(player_id, &[json!("status"), json!("-"), json!(0)]).await?;
+        Ok(result["mixer volume"].as_f64().unwrap_or(0.0) as u8)
     }
 
     pub async fn set_power(&self, player_id: &str, on: bool) -> Result<()> {
@@ -320,6 +361,8 @@ impl LmsClient {
                 cmd: v["cmd"].as_str().map(String::from),
                 item_id: None,
                 artwork_url: resolve_image_url(&v, &base),
+                has_items: true,
+                is_audio: false,
             })
             .collect())
     }
@@ -341,6 +384,8 @@ impl LmsClient {
                 cmd: v["cmd"].as_str().map(String::from),
                 item_id: None,
                 artwork_url: resolve_image_url(&v, &base),
+                has_items: true,
+                is_audio: false,
             })
             .collect())
     }
@@ -383,6 +428,8 @@ impl LmsClient {
                     .or_else(|| Some(cmd.to_string())),
                 item_id: v["id"].as_str().map(String::from),
                 artwork_url: resolve_image_url(&v, &base),
+                has_items: v["hasitems"].as_u64().unwrap_or(0) > 0,
+                is_audio: v["isaudio"].as_u64().unwrap_or(0) > 0,
             })
             .collect())
     }
@@ -417,6 +464,11 @@ impl LmsClient {
             &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("artist_id:{}", artist_id))],
         )
         .await?;
+        Ok(())
+    }
+
+    pub async fn clear_queue(&self, player_id: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("clear")]).await?;
         Ok(())
     }
 

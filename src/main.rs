@@ -81,7 +81,17 @@ async fn run(
                     Ok(_) => {
                         let _ = t.send(AppMsg::Connected).await;
                         if let Ok(players) = c.get_players().await {
+                            let pids: Vec<String> = players.iter().map(|p| p.playerid.clone()).collect();
                             let _ = t.send(AppMsg::PlayersLoaded(players)).await;
+                            let mut volumes = std::collections::HashMap::new();
+                            for pid in pids {
+                                if let Ok(vol) = c.get_player_volume(&pid).await {
+                                    volumes.insert(pid, vol);
+                                }
+                            }
+                            if !volumes.is_empty() {
+                                let _ = t.send(AppMsg::PlayerVolumesLoaded(volumes)).await;
+                            }
                         }
                     }
                     Err(_) => {
@@ -180,6 +190,8 @@ async fn run(
             InputEvent::Key(key) => {
                 if app.config_modal.is_some() {
                     handle_config_key(&mut app, key, &mut cfg, &client);
+                } else if app.confirm_clear_queue {
+                    handle_confirm_clear_queue_key(&mut app, key, &client, &tx).await;
                 } else if app.context_menu.is_some() {
                     handle_context_menu_key(&mut app, key, &client, &tx).await;
                 } else {
@@ -221,8 +233,16 @@ async fn handle_msg(
             }
             app.players = players;
         }
-        AppMsg::NowPlayingUpdated(np) => app.now_playing = Some(np),
-        AppMsg::QueueLoaded(q) => app.queue = q,
+        AppMsg::NowPlayingUpdated(pid, np) => {
+            if app.active_player.as_deref() == Some(pid.as_str()) {
+                app.now_playing = Some(np);
+            }
+        }
+        AppMsg::QueueLoaded(pid, q) => {
+            if app.active_player.as_deref() == Some(pid.as_str()) {
+                app.queue = q;
+            }
+        }
         AppMsg::ArtistsLoaded(a) => app.artists = a,
         AppMsg::AlbumsLoaded(a) => app.albums = a,
         AppMsg::TracksLoaded(t) => app.tracks = t,
@@ -238,6 +258,9 @@ async fn handle_msg(
             app.fav_items = items;
             app.main_selected = 0;
         }
+        AppMsg::PlayerVolumesLoaded(volumes) => {
+            app.player_volumes = volumes;
+        }
         AppMsg::StatusMsg(msg) => {
             app.status_message = Some(msg);
         }
@@ -252,10 +275,10 @@ fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sender<
     tokio::spawn(async move {
         loop {
             if let Ok(np) = client.get_now_playing(&pid).await {
-                let _ = tx.send(AppMsg::NowPlayingUpdated(np)).await;
+                let _ = tx.send(AppMsg::NowPlayingUpdated(pid.clone(), np)).await;
             }
             if let Ok(q) = client.get_queue(&pid).await {
-                let _ = tx.send(AppMsg::QueueLoaded(q)).await;
+                let _ = tx.send(AppMsg::QueueLoaded(pid.clone(), q)).await;
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
@@ -309,7 +332,18 @@ async fn handle_mouse_event(
             handle_action(app, Action::Back, client, tx).await;
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            if point_in(col, row, sidebar_area) {
+            // Check Now Playing control buttons first
+            let ctrl_rects = ui::compute_statusbar_control_rects(terminal_area, app.status_height);
+            let ctrl_hit = ctrl_rects.iter().enumerate().find(|(_, r)| point_in(col, row, **r));
+            if let Some((btn_idx, _)) = ctrl_hit {
+                let action = match btn_idx {
+                    0 => Action::Prev,
+                    1 => Action::PlayPause,
+                    2 => Action::Stop,
+                    _ => Action::Next,
+                };
+                handle_action(app, action, client, tx).await;
+            } else if point_in(col, row, sidebar_area) {
                 app.focus_sidebar = true;
                 let inner_top = sidebar_area.y + 1;
                 let inner_bot = sidebar_area.y + sidebar_area.height.saturating_sub(1);
@@ -425,9 +459,9 @@ fn uses_two_row_layout(view: &MainView) -> bool {
 fn is_main_item_playable(app: &App) -> bool {
     match &app.main_view {
         MainView::Library(LibraryView::Tracks { .. }) => !app.tracks.is_empty(),
-        MainView::Radio => app.radio_items.get(app.main_selected).map(|i| i.is_playable()).unwrap_or(false),
-        MainView::Apps => app.app_items.get(app.main_selected).map(|i| i.is_playable()).unwrap_or(false),
-        MainView::Favourites => app.fav_items.get(app.main_selected).map(|i| i.is_playable()).unwrap_or(false),
+        MainView::Radio => app.radio_items.get(app.main_selected).map(|i| i.is_playable() && !i.is_navigable()).unwrap_or(false),
+        MainView::Apps => app.app_items.get(app.main_selected).map(|i| i.is_playable() && !i.is_navigable()).unwrap_or(false),
+        MainView::Favourites => app.fav_items.get(app.main_selected).map(|i| i.is_playable() && !i.is_navigable()).unwrap_or(false),
         _ => false,
     }
 }
@@ -453,6 +487,31 @@ async fn handle_context_menu_key(
             app.context_menu = None;
         }
         _ => {}
+    }
+}
+
+async fn handle_confirm_clear_queue_key(
+    app: &mut App,
+    key: crossterm::event::KeyEvent,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Enter => {
+            app.confirm_clear_queue = false;
+            if let Some(pid) = app.active_player.clone() {
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.clear_queue(&pid).await.is_ok() {
+                        let _ = t.send(AppMsg::StatusMsg("Queue cleared".to_string())).await;
+                    }
+                });
+            }
+        }
+        _ => {
+            app.confirm_clear_queue = false;
+        }
     }
 }
 
@@ -624,12 +683,21 @@ async fn handle_action(
     match action {
         Action::Quit => return true,
 
-        Action::FocusSidebar => app.focus_sidebar = true,
+        Action::FocusSidebar => {
+            app.focus_sidebar = true;
+            app.players_focus_global = false;
+        }
         Action::FocusMain => app.focus_sidebar = false,
 
         Action::NavUp => {
             if app.focus_sidebar {
                 app.sidebar_selected = app.sidebar_selected.saturating_sub(1);
+            } else if let MainView::Players = &app.main_view {
+                if !app.players_focus_global && app.main_selected == 0 {
+                    app.players_focus_global = true;
+                } else if !app.players_focus_global {
+                    app.main_selected -= 1;
+                }
             } else {
                 app.main_selected = app.main_selected.saturating_sub(1);
             }
@@ -640,6 +708,16 @@ async fn handle_action(
                 let max = app.sidebar_items.len().saturating_sub(1);
                 if app.sidebar_selected < max {
                     app.sidebar_selected += 1;
+                }
+            } else if let MainView::Players = &app.main_view {
+                if app.players_focus_global {
+                    app.players_focus_global = false;
+                    app.main_selected = 0;
+                } else {
+                    let max = main_list_len(app).saturating_sub(1);
+                    if app.main_selected < max {
+                        app.main_selected += 1;
+                    }
                 }
             } else {
                 let max = main_list_len(app).saturating_sub(1);
@@ -652,6 +730,7 @@ async fn handle_action(
         Action::Select => {
             if app.focus_sidebar {
                 app.main_selected = 0;
+                app.players_focus_global = false;
                 match app.sidebar_items.get(app.sidebar_selected).cloned() {
                     Some(SidebarItem::Artists) => {
                         app.main_view = MainView::Library(LibraryView::Artists);
@@ -750,7 +829,10 @@ async fn handle_action(
                             app.focus_sidebar = true;
                         }
                     }
-                    _ => app.focus_sidebar = true,
+                    _ => {
+                        app.focus_sidebar = true;
+                        app.players_focus_global = false;
+                    }
                 }
             }
         }
@@ -772,6 +854,13 @@ async fn handle_action(
             }
         }
 
+        Action::Stop => {
+            if let Some(pid) = app.active_player.clone() {
+                let c = client.clone();
+                tokio::spawn(async move { let _ = c.stop(&pid).await; });
+            }
+        }
+
         Action::Prev => {
             if let Some(pid) = app.active_player.clone() {
                 let c = client.clone();
@@ -780,7 +869,24 @@ async fn handle_action(
         }
 
         Action::VolumeUp => {
-            if let Some(pid) = app.active_player.clone() {
+            if let MainView::Players = &app.main_view {
+                if app.players_focus_global {
+                    let targets: Vec<(String, u8)> = app.players.iter()
+                        .map(|p| (p.playerid.clone(), app.player_volumes.get(&p.playerid).copied().unwrap_or(50)))
+                        .collect();
+                    let c = client.clone();
+                    tokio::spawn(async move {
+                        for (pid, vol) in targets {
+                            let _ = c.set_volume(&pid, (vol + 5).min(100)).await;
+                        }
+                    });
+                } else if let Some(player) = app.players.get(app.main_selected) {
+                    let pid = player.playerid.clone();
+                    let vol = app.player_volumes.get(&pid).copied().unwrap_or(50);
+                    let c = client.clone();
+                    tokio::spawn(async move { let _ = c.set_volume(&pid, (vol + 5).min(100)).await; });
+                }
+            } else if let Some(pid) = app.active_player.clone() {
                 let vol = app.now_playing.as_ref().map(|n| n.volume).unwrap_or(50);
                 let c = client.clone();
                 tokio::spawn(async move { let _ = c.set_volume(&pid, (vol + 5).min(100)).await; });
@@ -788,7 +894,24 @@ async fn handle_action(
         }
 
         Action::VolumeDown => {
-            if let Some(pid) = app.active_player.clone() {
+            if let MainView::Players = &app.main_view {
+                if app.players_focus_global {
+                    let targets: Vec<(String, u8)> = app.players.iter()
+                        .map(|p| (p.playerid.clone(), app.player_volumes.get(&p.playerid).copied().unwrap_or(50)))
+                        .collect();
+                    let c = client.clone();
+                    tokio::spawn(async move {
+                        for (pid, vol) in targets {
+                            let _ = c.set_volume(&pid, vol.saturating_sub(5)).await;
+                        }
+                    });
+                } else if let Some(player) = app.players.get(app.main_selected) {
+                    let pid = player.playerid.clone();
+                    let vol = app.player_volumes.get(&pid).copied().unwrap_or(50);
+                    let c = client.clone();
+                    tokio::spawn(async move { let _ = c.set_volume(&pid, vol.saturating_sub(5)).await; });
+                }
+            } else if let Some(pid) = app.active_player.clone() {
                 let vol = app.now_playing.as_ref().map(|n| n.volume).unwrap_or(50);
                 let c = client.clone();
                 tokio::spawn(async move { let _ = c.set_volume(&pid, vol.saturating_sub(5)).await; });
@@ -797,6 +920,7 @@ async fn handle_action(
 
         Action::TogglePower => {
             if let MainView::Players = &app.main_view
+                && !app.players_focus_global
                 && let Some(player) = app.players.get(app.main_selected)
             {
                 let pid = player.playerid.clone();
@@ -809,6 +933,12 @@ async fn handle_action(
         Action::AddToQueue => {
             if !app.focus_sidebar {
                 handle_add_to_queue(app, client, tx).await;
+            }
+        }
+
+        Action::ClearQueue => {
+            if app.active_player.is_some() && !app.queue.is_empty() {
+                app.confirm_clear_queue = true;
             }
         }
 
@@ -959,7 +1089,9 @@ async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
             }
         }
         MainView::Players => {
-            if let Some(player) = app.players.get(app.main_selected) {
+            if !app.players_focus_global
+                && let Some(player) = app.players.get(app.main_selected)
+            {
                 let pid = player.playerid.clone();
                 app.active_player = Some(pid.clone());
                 start_now_playing_loop(pid, client.clone(), tx.clone());
@@ -967,14 +1099,8 @@ async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
         }
         MainView::Radio => {
             if let Some(item) = app.radio_items.get(app.main_selected).cloned() {
-                if item.is_playable() {
-                    if let (Some(pid), Some(url)) =
-                        (app.active_player.clone(), item.url)
-                    {
-                        let c = client.clone();
-                        tokio::spawn(async move { let _ = c.play_url(&pid, &url).await; });
-                    }
-                } else if item.is_navigable()
+                // Navigation takes priority: a container may carry a URL but must still be browsed.
+                if item.is_navigable()
                     && let Some(cmd) = item.cmd
                 {
                     let item_id = item.item_id;
@@ -988,17 +1114,20 @@ async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
                     app.radio_title = item.name;
                     app.main_selected = 0;
                     load_radio_items(pid, cmd, item_id, client.clone(), tx.clone());
+                } else if item.is_playable() {
+                    if let (Some(pid), Some(url)) =
+                        (app.active_player.clone(), item.url)
+                    {
+                        let c = client.clone();
+                        tokio::spawn(async move { let _ = c.play_url(&pid, &url).await; });
+                    }
                 }
             }
         }
         MainView::Apps => {
             if let Some(item) = app.app_items.get(app.main_selected).cloned() {
-                if item.is_playable() {
-                    if let (Some(pid), Some(url)) = (app.active_player.clone(), item.url) {
-                        let c = client.clone();
-                        tokio::spawn(async move { let _ = c.play_url(&pid, &url).await; });
-                    }
-                } else if item.is_navigable()
+                // Navigation takes priority: a container may carry a URL but must still be browsed.
+                if item.is_navigable()
                     && let Some(cmd) = item.cmd
                 {
                     let item_id = item.item_id;
@@ -1012,18 +1141,19 @@ async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
                     app.app_title = item.name;
                     app.main_selected = 0;
                     load_app_items(pid, cmd, item_id, client.clone(), tx.clone());
+                } else if item.is_playable() {
+                    if let (Some(pid), Some(url)) = (app.active_player.clone(), item.url) {
+                        let c = client.clone();
+                        tokio::spawn(async move { let _ = c.play_url(&pid, &url).await; });
+                    }
                 }
             }
         }
         MainView::Favourites => {
             if let Some(item) = app.fav_items.get(app.main_selected).cloned() {
-                if item.is_playable() {
-                    if let (Some(pid), Some(url)) = (app.active_player.clone(), item.url) {
-                        let c = client.clone();
-                        tokio::spawn(async move { let _ = c.play_url(&pid, &url).await; });
-                    }
-                } else if item.is_navigable()
-                    && let Some(item_id) = item.item_id
+                // Navigation takes priority: a container may carry a URL but must still be browsed.
+                if item.is_navigable()
+                    && let Some(item_id) = item.item_id.clone()
                 {
                     let pid = app.active_player.clone().unwrap_or_default();
                     let nav = RadioNav {
@@ -1035,6 +1165,11 @@ async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
                     app.fav_title = item.name;
                     app.main_selected = 0;
                     load_fav_items(pid, Some(item_id), client.clone(), tx.clone());
+                } else if item.is_playable() {
+                    if let (Some(pid), Some(url)) = (app.active_player.clone(), item.url) {
+                        let c = client.clone();
+                        tokio::spawn(async move { let _ = c.play_url(&pid, &url).await; });
+                    }
                 }
             }
         }

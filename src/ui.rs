@@ -1,4 +1,5 @@
 use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView};
+use serde_json::Value;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -50,6 +51,42 @@ pub fn compute_areas(area: Rect, status_height: u16) -> (Rect, Rect) {
     (panes[0], panes[1])
 }
 
+/// Returns the four clickable button rects in the Now Playing controls row: [Prev, PlayPause, Stop, Next].
+pub fn compute_statusbar_control_rects(area: Rect, status_height: u16) -> [Rect; 4] {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .split(area);
+    let status_inner = Rect::new(
+        outer[1].x + 1,
+        outer[1].y + 1,
+        outer[1].width.saturating_sub(2),
+        outer[1].height.saturating_sub(2),
+    );
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(18), Constraint::Length(1), Constraint::Min(1)])
+        .split(status_inner);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // title
+            Constraint::Length(1), // artist
+            Constraint::Length(1), // album
+            Constraint::Length(1), // controls
+            Constraint::Min(0),    // filler
+            Constraint::Length(1), // progress
+        ])
+        .split(cols[2]);
+    let ctrl = rows[3];
+    let btn_w: u16 = 3;
+    let gap: u16 = 1;
+    std::array::from_fn(|i| {
+        let x = ctrl.x + (i as u16) * (btn_w + gap);
+        Rect::new(x, ctrl.y, btn_w, 1)
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     f: &mut Frame,
@@ -79,15 +116,16 @@ pub fn draw(
         .constraints([Constraint::Length(20), Constraint::Min(1)])
         .split(main_area);
 
-    // Split sidebar column into navigation (shrinks) + server status (fixed 5 rows)
+    // Split sidebar column into navigation (shrinks) + server status (fixed 6 rows)
     let sidebar_split = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(5)])
+        .constraints([Constraint::Min(0), Constraint::Length(6)])
         .split(panes[0]);
 
+    let base = format!("http://{}:{}", server_host, server_port);
     draw_sidebar(f, app, sidebar_split[0], sidebar_state);
     draw_server_status(f, app, sidebar_split[1], server_host, server_port);
-    draw_main(f, app, panes[1], main_state, thumbnails);
+    draw_main(f, app, panes[1], main_state, thumbnails, &base);
     draw_statusbar(f, app, status_area, album_art);
 
     if let Some(msg) = &app.status_message {
@@ -119,6 +157,10 @@ pub fn draw(
         draw_config_modal(f, modal);
     }
 
+    if app.confirm_clear_queue {
+        draw_confirm_clear_queue(f, app.queue.len());
+    }
+
     if app.context_menu.is_some() {
         draw_context_menu(f, app, area);
     }
@@ -135,8 +177,21 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
+        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
         .split(inner);
+
+    // Active player
+    let player_name = app.active_player.as_ref()
+        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
+        .map(|p| p.name.as_str())
+        .unwrap_or("—");
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("▶ ", Style::default().fg(Color::DarkGray)),
+            Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
+        ])),
+        rows[0],
+    );
 
     // Volume
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
@@ -145,7 +200,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
             Span::styled("Vol ", Style::default().fg(Color::DarkGray)),
             Span::styled(format!("{vol}%"), Style::default().fg(Color::White)),
         ])),
-        rows[0],
+        rows[1],
     );
 
     // Connection state
@@ -159,7 +214,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
             Span::styled(dot, Style::default().fg(dot_color)),
             Span::styled(format!(" {label}"), Style::default().fg(Color::DarkGray)),
         ])),
-        rows[1],
+        rows[2],
     );
 
     // Server address
@@ -168,7 +223,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
             format!("{server_host}:{server_port}"),
             Style::default().fg(Color::DarkGray),
         )),
-        rows[2],
+        rows[3],
     );
 }
 
@@ -203,9 +258,9 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     f.render_stateful_widget(list, area, state);
 }
 
-fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
     match &app.main_view {
-        MainView::Library(lib) => draw_library(f, app, area, lib, state, thumbnails),
+        MainView::Library(lib) => draw_library(f, app, area, lib, state, thumbnails, base),
         MainView::Queue => draw_queue(f, app, area, state, thumbnails),
         MainView::Players => draw_players(f, app, area, state),
         MainView::Radio => draw_radio(f, app, area, state, thumbnails),
@@ -215,12 +270,12 @@ fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
     }
 }
 
-fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
     let focused = !app.focus_sidebar;
     match view {
         LibraryView::Artists => {
             let items = app.artists.iter().map(|a| RowItem {
-                thumb_url: None, // artist thumbnails fetched by main.rs
+                thumb_url: Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
                 line1: Line::from(Span::raw(format!("  {}", a.artist))),
                 line2: Line::from(Span::styled("  artist", Style::default().fg(Color::DarkGray))),
             }).collect();
@@ -230,7 +285,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
             let items = app.albums.iter().map(|a| {
                 let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
                 RowItem {
-                    thumb_url: None,
+                    thumb_url: Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&a.id))),
                     line1: Line::from(Span::raw(format!("  {}", a.album))),
                     line2: Line::from(Span::styled(format!("  {}", sub), Style::default().fg(Color::DarkGray))),
                 }
@@ -243,7 +298,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 let dur = t.duration.map(format_duration).unwrap_or_default();
                 let artist = t.artist.as_deref().unwrap_or("");
                 RowItem {
-                    thumb_url: None,
+                    thumb_url: t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, value_id_str(id))),
                     line1: Line::from(Span::raw(format!("  {:>3}. {}", i + 1, t.title))),
                     line2: Line::from(Span::styled(
                         format!("  {}  {}", artist, dur),
@@ -276,7 +331,7 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
             _ => String::new(),
         };
         RowItem {
-            thumb_url: None,
+            thumb_url: t.artwork_url.clone(),
             line1: Line::from(Span::styled(format!("{}{:>3}. {}", marker, i + 1, t.title), l1_style)),
             line2: Line::from(Span::styled(format!("    {}", artist_album), l2_style)),
         }
@@ -286,32 +341,83 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
 }
 
 fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
-    let border_style = if !app.focus_sidebar {
+    let focused = !app.focus_sidebar;
+    let border_style = if focused {
         Style::default().fg(Color::Yellow)
     } else {
         Style::default().fg(Color::DarkGray)
     };
 
-    let items: Vec<ListItem> = app
-        .players
-        .iter()
-        .map(|p| {
-            let active = app.active_player.as_deref() == Some(p.playerid.as_str());
-            let powered = p.power > 0;
-            let marker = if active { "● " } else { "○ " };
-            let power_tag = if powered { "" } else { " [off]" };
-            let style = if active {
-                Style::default().fg(Color::Green)
-            } else if powered {
-                Style::default().fg(Color::White)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-            ListItem::new(format!("  {}{}{}", marker, p.name, power_tag)).style(style)
-        })
-        .collect();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title(" Players ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
-    render_list(f, area, " Players  t:power ", items, app.main_selected, !app.focus_sidebar, border_style, state);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(inner);
+
+    // --- Global volume row ---
+    let global_avg: u8 = if app.players.is_empty() {
+        0
+    } else {
+        let sum: u32 = app.players.iter()
+            .map(|p| app.player_volumes.get(&p.playerid).copied().unwrap_or(0) as u32)
+            .sum();
+        (sum / app.players.len() as u32) as u8
+    };
+
+    let glob_focused = focused && app.players_focus_global;
+    let glob_bg = if glob_focused { Color::Rgb(45, 100, 170) } else { Color::Reset };
+    let glob_fg = if glob_focused { Color::Rgb(220, 235, 255) } else { Color::DarkGray };
+
+    let label = " ◎ Global  ";
+    let vol_str = format!(" {}%", global_avg);
+    let bar_w = (chunks[0].width as usize).saturating_sub(label.len() + vol_str.len());
+    let filled = if bar_w > 0 { (global_avg as usize * bar_w) / 100 } else { 0 };
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
+
+    let global_line = Line::from(vec![
+        Span::styled(label, Style::default().fg(glob_fg).bg(glob_bg)),
+        Span::styled(bar, Style::default().fg(if glob_focused { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) }).bg(glob_bg)),
+        Span::styled(&vol_str, Style::default().fg(if glob_focused { Color::White } else { Color::DarkGray }).bg(glob_bg)),
+    ]);
+    f.render_widget(Paragraph::new(global_line), chunks[0]);
+
+    // --- Player list ---
+    let items: Vec<ListItem> = app.players.iter().map(|p| {
+        let active = app.active_player.as_deref() == Some(p.playerid.as_str());
+        let powered = p.power > 0;
+        let marker = if active { "● " } else { "○ " };
+        let power_tag = if powered { "" } else { " [off]" };
+        let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
+        let name_fg = if active { Color::Green } else if powered { Color::White } else { Color::DarkGray };
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("  {}{}{}", marker, p.name, power_tag), Style::default().fg(name_fg)),
+            Span::styled(format!(" {}%", vol), Style::default().fg(Color::DarkGray)),
+        ]))
+    }).collect();
+
+    if items.is_empty() {
+        state.select(None);
+        f.render_widget(
+            Paragraph::new("(no players)").style(Style::default().fg(Color::DarkGray)),
+            chunks[1],
+        );
+        return;
+    }
+
+    state.select(if app.players_focus_global { None } else { Some(app.main_selected) });
+
+    let list = List::new(items)
+        .highlight_style(cursor_styles(focused && !app.players_focus_global).0)
+        .highlight_symbol("");
+
+    f.render_stateful_widget(list, chunks[1], state);
 }
 
 fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
@@ -401,6 +507,7 @@ fn draw_help(f: &mut Frame, area: Rect) {
     let right: Vec<Line> = vec![
         Line::from(Span::styled("Library & Queue", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
         shortcut("a",  "Add selected item to queue"),
+        shortcut("x",  "Clear queue"),
         Line::from(""),
         Line::from(Span::styled("Players", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
         shortcut("t",  "Toggle player power"),
@@ -460,13 +567,14 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         f.render_stateful_widget(img, cols[0], proto);
     }
 
-    // Info panel: title / artist / album / [spacer] / progress+time overlay
+    // Info panel: title / artist / album / controls / [spacer] / progress+time overlay
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // title
             Constraint::Length(1), // artist
             Constraint::Length(1), // album
+            Constraint::Length(1), // playback controls
             Constraint::Min(0),    // filler
             Constraint::Length(1), // progress bar with time overlay
         ])
@@ -499,12 +607,30 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     ));
     f.render_widget(Paragraph::new(album_line), rows[2]);
 
+    // Playback control buttons: Prev | Play/Pause | Stop | Next (left-aligned, compact)
+    {
+        let ctrl = rows[3];
+        let play_pause_icon = if np.is_playing { "⏸" } else { "▶" };
+        let icons = ["⏮", play_pause_icon, "⏹", "⏭"];
+        let btn_w: u16 = 3; // " ⏮ "
+        let gap: u16 = 1;
+        for (i, icon) in icons.iter().enumerate() {
+            let x = ctrl.x + (i as u16) * (btn_w + gap);
+            if x + btn_w > ctrl.x + ctrl.width { break; }
+            f.render_widget(
+                Paragraph::new(format!(" {} ", icon))
+                    .style(Style::default().fg(Color::Rgb(160, 200, 255)).bg(Color::Rgb(28, 32, 45))),
+                Rect::new(x, ctrl.y, btn_w, 1),
+            );
+        }
+    }
+
     let pct = if np.duration > 0.0 {
         ((np.elapsed / np.duration) * 100.0).clamp(0.0, 100.0) as usize
     } else {
         0
     };
-    let bar_w = rows[4].width as usize;
+    let bar_w = rows[5].width as usize;
     let filled = pct * bar_w / 100;
 
     let time = format!(
@@ -537,7 +663,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
             Style::default().bg(Color::Rgb(55, 55, 70)).fg(Color::Rgb(210, 215, 225)),
         ),
     ]);
-    f.render_widget(Paragraph::new(bar), rows[4]);
+    f.render_widget(Paragraph::new(bar), rows[5]);
 }
 
 fn draw_disconnected_overlay(f: &mut Frame, area: Rect, state: &ConnectionState) {
@@ -675,62 +801,10 @@ fn draw_two_row_list(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_list(
-    f: &mut Frame,
-    area: Rect,
-    title: &str,
-    items: Vec<ListItem>,
-    selected: usize,
-    focused: bool,
-    border_style: Style,
-    state: &mut ListState,
-) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(border_style)
-        .title(title);
-
-    if items.is_empty() {
-        // Reset scroll when empty so offset doesn't stick from a previous view
-        state.select(None);
-        let p = Paragraph::new("(empty)")
-            .block(block)
-            .style(Style::default().fg(Color::DarkGray));
-        f.render_widget(p, area);
-        return;
-    }
-
-    state.select(Some(selected));
-
-    let item_count = items.len();
-    let inner = block.inner(area);
-    let visible = inner.height as usize;
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(cursor_styles(focused).0)
-        .highlight_symbol("");
-
-    f.render_stateful_widget(list, area, state);
-
-    if item_count > visible {
-        let scroll_area = Rect::new(
-            area.x + area.width.saturating_sub(1),
-            area.y + 1,
-            1,
-            area.height.saturating_sub(2),
-        );
-        let offset = state.offset();
-        let mut ss = ScrollbarState::new(item_count.saturating_sub(visible))
-            .position(offset);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("║")
-            .track_symbol(Some("│"))
-            .begin_symbol(None)
-            .end_symbol(None);
-        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+fn value_id_str(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -801,6 +875,42 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     Rect::new(x, y, width.min(area.width), height.min(area.height))
+}
+
+fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
+    let area = f.area();
+    let popup = centered_rect_abs(44, 7, area);
+
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(" Clear Queue ");
+
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let song_word = if queue_len == 1 { "song" } else { "songs" };
+    let msg = Paragraph::new(format!("Remove {} {} from the queue?", queue_len, song_word))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::White));
+    f.render_widget(msg, rows[1]);
+
+    let hint = Paragraph::new(hint_line(&[("y / Enter", "confirm"), ("any key", "cancel")]))
+        .alignment(Alignment::Center);
+    f.render_widget(hint, rows[3]);
 }
 
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
