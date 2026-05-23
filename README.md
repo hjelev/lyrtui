@@ -36,13 +36,16 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 brew install hjelev/tap/lyrtui
 ```
 
+### Build from source
 ```sh
 git clone https://github.com/yourname/lyrtui
 cd lyrtui
 cargo build --release
 # binary at: target/release/lyrtui
 ```
-or use the installer from the releases page
+### Use the installer from the releases page
+
+[releases page](https://github.com/hjelev/lyrtui/releases) and run it. This will place the `lyrtui` binary in your system's PATH.
 
 ## Usage
 
