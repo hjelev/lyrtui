@@ -195,7 +195,7 @@ async fn run(
         if current_url != last_artwork_url {
             last_artwork_url = current_url.clone();
             album_art = None;
-            app.accent_color = None;
+            // Keep the previous accent_color until the new image resolves.
             if let Some(url) = current_url {
                 let c = client.clone();
                 let t = tx.clone();

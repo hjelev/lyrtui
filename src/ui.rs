@@ -30,6 +30,24 @@ fn sidebar_nerd_icon(item: &SidebarItem) -> &'static str {
     }
 }
 
+fn focus_border_color(accent: Option<[u8; 3]>) -> Color {
+    match accent {
+        Some([r, g, b]) => Color::Rgb(r, g, b),
+        None => Color::Yellow,
+    }
+}
+
+fn unfocus_border_color(accent: Option<[u8; 3]>) -> Color {
+    match accent {
+        Some([r, g, b]) => Color::Rgb(
+            (r as u16 * 25 / 100 + 20).min(255) as u8,
+            (g as u16 * 25 / 100 + 20).min(255) as u8,
+            (b as u16 * 25 / 100 + 30).min(255) as u8,
+        ),
+        None => Color::DarkGray,
+    }
+}
+
 /// Pill cursor styles: returns (primary_line_style, secondary_line_style).
 /// Focused uses a solid accent color; unfocused uses a dimmed variant.
 fn cursor_styles(focused: bool) -> (Style, Style) {
@@ -202,7 +220,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(Style::default().fg(unfocus_border_color(app.accent_color)))
         .title(" Status ");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -261,9 +279,9 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let border_style = if app.focus_sidebar {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(focus_border_color(app.accent_color))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(unfocus_border_color(app.accent_color))
     };
 
     let block = Block::default()
@@ -308,11 +326,14 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             area.height.saturating_sub(2),
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.accent_color);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
             .begin_symbol(None)
-            .end_symbol(None);
+            .end_symbol(None)
+            .track_style(track_style)
+            .thumb_style(thumb_style);
         f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
     }
 }
@@ -334,9 +355,9 @@ fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
 fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
     let border_style = if focused {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(focus_border_color(app.accent_color))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(unfocus_border_color(app.accent_color))
     };
 
     let block = Block::default()
@@ -388,7 +409,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 line1: Line::from(Span::raw(format!("  {}", a.artist))),
                 line2: Line::from(Span::styled("  artist", Style::default().fg(Color::DarkGray))),
             }).collect();
-            draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, state, thumbnails);
+            draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, state, thumbnails, app.accent_color);
         }
         LibraryView::Albums { .. } => {
             let items = app.albums.iter().map(|a| {
@@ -399,7 +420,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     line2: Line::from(Span::styled(format!("  {}", sub), Style::default().fg(Color::DarkGray))),
                 }
             }).collect();
-            draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, state, thumbnails);
+            draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, state, thumbnails, app.accent_color);
         }
         LibraryView::Tracks { album_id } => {
             let title = if album_id.is_some() { " Tracks " } else { " All Tracks " };
@@ -415,7 +436,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     )),
                 }
             }).collect();
-            draw_two_row_list(f, area, title, items, app.main_selected, focused, state, thumbnails);
+            draw_two_row_list(f, area, title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
         }
         LibraryView::Folder { .. } => {
             let breadcrumb = breadcrumb_str(
@@ -451,7 +472,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     )),
                 }
             }).collect();
-            draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails);
+            draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
         }
     }
 }
@@ -482,15 +503,15 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
         }
     }).collect();
 
-    draw_two_row_list(f, area, " Queue ", items, app.main_selected, focused, state, thumbnails);
+    draw_two_row_list(f, area, " Queue ", items, app.main_selected, focused, state, thumbnails, app.accent_color);
 }
 
 fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
     let border_style = if focused {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(focus_border_color(app.accent_color))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(unfocus_border_color(app.accent_color))
     };
 
     let block = Block::default()
@@ -580,7 +601,7 @@ fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
             )),
         }
     }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails);
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
 }
 
 fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
@@ -598,7 +619,7 @@ fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
             )),
         }
     }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails);
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
 }
 
 fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
@@ -616,16 +637,16 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
             )),
         }
     }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails);
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
 }
 
 fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
     let focused = !app.focus_sidebar;
 
     let border_style = if focused {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(focus_border_color(app.accent_color))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(unfocus_border_color(app.accent_color))
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -790,11 +811,14 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             results_area.height,
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.accent_color);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
             .begin_symbol(None)
-            .end_symbol(None);
+            .end_symbol(None)
+            .track_style(track_style)
+            .thumb_style(thumb_style);
         f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
     }
 }
@@ -872,6 +896,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(focus_border_color(app.accent_color)))
         .title(" Now Playing ");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -1119,19 +1144,27 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let over_filled_text: String = text_bytes[..over_filled].iter().collect();
     let over_unfilled_text: String = text_bytes[over_filled..].iter().collect();
 
-    let accent = app.accent_color
-        .map(|[r, g, b]| Color::Rgb(r, g, b))
-        .unwrap_or(Color::Yellow);
+    let (accent, track_color) = match app.accent_color {
+        Some([r, g, b]) => (
+            Color::Rgb(r, g, b),
+            Color::Rgb(
+                (r as u16 * 25 / 100 + 20).min(255) as u8,
+                (g as u16 * 25 / 100 + 20).min(255) as u8,
+                (b as u16 * 25 / 100 + 30).min(255) as u8,
+            ),
+        ),
+        None => (Color::Yellow, Color::Rgb(55, 55, 70)),
+    };
     let bar = Line::from(vec![
         Span::styled("█".repeat(pure_filled), Style::default().fg(accent)),
-        Span::styled("░".repeat(pure_unfilled), Style::default().fg(Color::Rgb(55, 55, 70))),
+        Span::styled("░".repeat(pure_unfilled), Style::default().fg(track_color)),
         Span::styled(
             over_filled_text,
             Style::default().bg(accent).fg(Color::Black).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             over_unfilled_text,
-            Style::default().bg(Color::Rgb(55, 55, 70)).fg(Color::Rgb(210, 215, 225)),
+            Style::default().bg(track_color).fg(Color::Rgb(210, 215, 225)),
         ),
     ]);
     let progress_rect = Rect::new(prog_x, prog.y, prog_w, prog.height);
@@ -1219,11 +1252,12 @@ fn draw_two_row_list(
     focused: bool,
     state: &mut ListState,
     thumbnails: &mut HashMap<String, StatefulProtocol>,
+    accent: Option<[u8; 3]>,
 ) {
     let border_style = if focused {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(focus_border_color(accent))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(unfocus_border_color(accent))
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1313,13 +1347,34 @@ fn draw_two_row_list(
         );
         let mut ss = ScrollbarState::new(items.len().saturating_sub(visible))
             .position(offset);
+        let (track_style, thumb_style) = scrollbar_accent_styles(accent);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
             .begin_symbol(None)
-            .end_symbol(None);
+            .end_symbol(None)
+            .track_style(track_style)
+            .thumb_style(thumb_style);
         f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
     }
+}
+
+/// Returns (track_style, thumb_style) for a scrollbar tinted from the accent color.
+/// Track gets a very dark muted tint; thumb gets the accent at full strength.
+fn scrollbar_accent_styles(accent: Option<[u8; 3]>) -> (Style, Style) {
+    let (tr, tg, tb, ar, ag, ab) = match accent {
+        Some([r, g, b]) => {
+            let tr = (r as u16 * 20 / 100 + 20) as u8;
+            let tg = (g as u16 * 20 / 100 + 20) as u8;
+            let tb = (b as u16 * 20 / 100 + 30) as u8;
+            (tr, tg, tb, r, g, b)
+        }
+        None => (30, 30, 45, 180, 160, 60),
+    };
+    (
+        Style::default().fg(Color::Rgb(tr, tg, tb)),
+        Style::default().fg(Color::Rgb(ar, ag, ab)),
+    )
 }
 
 fn value_id_str(v: &Value) -> String {
