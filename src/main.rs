@@ -59,6 +59,7 @@ async fn run(
     let mut cfg = cfg;
     let (tx, mut rx) = mpsc::channel::<AppMsg>(64);
     let mut app = App::new(cfg.default_player.clone());
+    app.use_nerd_icons = cfg.use_nerd_icons;
     // Compute Now Playing panel height: art column is 18 cols; height = ceil(18 * fw / fh) + 2 borders.
     // art_col_w is the actual cell width the square image fills (inner_h * fh / fw).
     {
@@ -218,27 +219,25 @@ async fn run(
                 } else {
                     let action = key_to_action(key);
                     if matches!(action, Action::OpenConfig) {
-                        app.config_modal = Some(ConfigModal::new(&cfg.host, cfg.port));
+                        app.config_modal = Some(ConfigModal::new(&cfg.host, cfg.port, cfg.use_nerd_icons));
                     } else if handlers::handle_action(&mut app, action, &client, &tx).await {
                         break;
                     }
                 }
             }
             InputEvent::Mouse(mouse) => {
-                if app.config_modal.is_none() {
-                    let area = terminal.size()?.into();
-                    handlers::handle_mouse_event(
-                        &mut app,
-                        mouse,
-                        &client,
-                        &tx,
-                        area,
-                        &sidebar_state,
-                        &main_state,
-                        &mut last_main_click,
-                    )
-                    .await;
-                }
+                let area = terminal.size()?.into();
+                handlers::handle_mouse_event(
+                    &mut app,
+                    mouse,
+                    &client,
+                    &tx,
+                    area,
+                    &sidebar_state,
+                    &main_state,
+                    &mut last_main_click,
+                )
+                .await;
             }
             InputEvent::Tick => {}
         }

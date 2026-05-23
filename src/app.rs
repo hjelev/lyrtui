@@ -54,16 +54,18 @@ pub enum SearchResultItem {
 pub struct ConfigModal {
     pub host: String,
     pub port: String,
-    pub selected_field: usize, // 0 = host, 1 = port
+    pub use_nerd_icons: bool,
+    pub selected_field: usize, // 0 = host, 1 = port, 2 = use_nerd_icons
     pub editing: bool,
     pub error: Option<String>,
 }
 
 impl ConfigModal {
-    pub fn new(host: &str, port: u16) -> Self {
+    pub fn new(host: &str, port: u16, use_nerd_icons: bool) -> Self {
         Self {
             host: host.to_string(),
             port: port.to_string(),
+            use_nerd_icons,
             selected_field: 0,
             editing: false,
             error: None,
@@ -175,6 +177,8 @@ pub struct App {
     pub search_query: String,
     pub search_results: Vec<SearchResultItem>,
     pub search_input_active: bool,
+
+    pub use_nerd_icons: bool,
 }
 
 impl App {
@@ -225,19 +229,20 @@ impl App {
             search_query: String::new(),
             search_results: vec![],
             search_input_active: false,
+            use_nerd_icons: false,
         }
     }
 
     pub fn sidebar_label(&self, item: &SidebarItem) -> &'static str {
         match item {
-            SidebarItem::MyMusic => "My Music",
-            SidebarItem::Search => "Search  /",
-            SidebarItem::Radio => "Radio",
-            SidebarItem::Apps => "Apps",
-            SidebarItem::Favourites => "Favourites",
-            SidebarItem::Queue => "Queue",
-            SidebarItem::Players => "Players",
-            SidebarItem::Help => "Help  ?",
+            SidebarItem::MyMusic => " My Music",
+            SidebarItem::Search => " Search",
+            SidebarItem::Radio => " Radio",
+            SidebarItem::Apps => " Apps",
+            SidebarItem::Favourites => " Favourites",
+            SidebarItem::Queue => " Queue",
+            SidebarItem::Players => " Players",
+            SidebarItem::Help => " Help",
         }
     }
 

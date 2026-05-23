@@ -1,5 +1,5 @@
 use crate::api::FolderItemType;
-use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView, SearchResultItem};
+use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView, SearchResultItem, SidebarItem};
 use serde_json::Value;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -16,6 +16,19 @@ use std::collections::HashMap;
 
 const THUMB_W: u16 = 4; // image column width in cells
 const THUMB_SEP: u16 = 1; // gap between image and text
+
+fn sidebar_nerd_icon(item: &SidebarItem) -> &'static str {
+    match item {
+        SidebarItem::MyMusic    => "\u{F001}",  // nf-fa-music
+        SidebarItem::Search     => "\u{F002}",  // nf-fa-search
+        SidebarItem::Radio      => "\u{F130}",  // nf-fa-microphone
+        SidebarItem::Apps       => "\u{F009}",  // nf-fa-th-large
+        SidebarItem::Favourites => "\u{F005}",  // nf-fa-star
+        SidebarItem::Queue      => "\u{F03A}",  // nf-fa-list
+        SidebarItem::Players    => "\u{F028}",  // nf-fa-volume-up
+        SidebarItem::Help       => "\u{F059}",  // nf-fa-question-circle
+    }
+}
 
 /// Pill cursor styles: returns (primary_line_style, secondary_line_style).
 /// Focused uses a solid accent color; unfocused uses a dimmed variant.
@@ -255,7 +268,14 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let items: Vec<ListItem> = app
         .sidebar_items
         .iter()
-        .map(|item| ListItem::new(format!("  {}", app.sidebar_label(item))))
+        .map(|item| {
+            let label = app.sidebar_label(item);
+            if app.use_nerd_icons {
+                ListItem::new(format!("  {} {}", sidebar_nerd_icon(item), label))
+            } else {
+                ListItem::new(format!("  {}", label))
+            }
+        })
         .collect();
 
     let total = items.len();
@@ -870,12 +890,30 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         ])
         .split(cols[2]);
 
-    let play_icon = if np.is_playing { "▶" } else { "⏸" };
-    let shuffle_icon = if np.shuffle > 0 { " ⇌" } else { "" };
-    let repeat_icon = match np.repeat {
-        1 => " ↺",
-        2 => " ↺1",
-        _ => "",
+    let play_icon = if app.use_nerd_icons {
+        if np.is_playing { "\u{F04B}" } else { "\u{F04C}" }  // nf-fa-play / nf-fa-pause
+    } else if np.is_playing {
+        "▶"
+    } else {
+        "⏸"
+    };
+    let shuffle_icon = if np.shuffle > 0 {
+        if app.use_nerd_icons { " \u{F074}" } else { " ⇌" }  // nf-fa-random
+    } else {
+        ""
+    };
+    let repeat_icon = if app.use_nerd_icons {
+        match np.repeat {
+            1 => " \u{F01E}",   // nf-fa-repeat
+            2 => " \u{F01E}1",
+            _ => "",
+        }
+    } else {
+        match np.repeat {
+            1 => " ↺",
+            2 => " ↺1",
+            _ => "",
+        }
     };
 
     let title_line = Line::from(vec![
@@ -900,11 +938,20 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     // Playback control buttons: Prev | Play/Pause | Stop | Next  Shuffle | Repeat
     {
         let ctrl = rows[3];
-        let play_pause_icon = if np.is_playing { "⏸" } else { "▶" };
+        let play_pause_icon = if app.use_nerd_icons {
+            if np.is_playing { "\u{F04C}" } else { "\u{F04B}" }  // nf-fa-pause / nf-fa-play
+        } else if np.is_playing {
+            "⏸"
+        } else {
+            "▶"
+        };
+        let prev_icon = if app.use_nerd_icons { "\u{F048}" } else { "⏮" };  // nf-fa-step-backward
+        let stop_icon = if app.use_nerd_icons { "\u{F04D}" } else { "⏹" };  // nf-fa-stop
+        let next_icon = if app.use_nerd_icons { "\u{F051}" } else { "⏭" };  // nf-fa-step-forward
         let btn_w: u16 = 3;
         let gap: u16 = 1;
         let sep: u16 = 2;
-        let media_icons = ["⏮", play_pause_icon, "⏹", "⏭"];
+        let media_icons = [prev_icon, play_pause_icon, stop_icon, next_icon];
         for (i, icon) in media_icons.iter().enumerate() {
             let x = ctrl.x + (i as u16) * (btn_w + gap);
             if x + btn_w > ctrl.x + ctrl.width { break; }
@@ -914,6 +961,8 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
                 Rect::new(x, ctrl.y, btn_w, 1),
             );
         }
+        let shuf_icon = if app.use_nerd_icons { "\u{F074}" } else { "⇌" };  // nf-fa-random
+        let rep_icon  = if app.use_nerd_icons { "\u{F01E}" } else { "↺" };  // nf-fa-repeat
         let shuffle_x = ctrl.x + 4 * (btn_w + gap) + sep;
         if shuffle_x + btn_w <= ctrl.x + ctrl.width {
             let (sfg, sbg) = if np.shuffle > 0 {
@@ -922,7 +971,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
                 (Color::Rgb(80, 80, 100), Color::Rgb(28, 32, 45))
             };
             f.render_widget(
-                Paragraph::new(" ⇌ ").style(Style::default().fg(sfg).bg(sbg)),
+                Paragraph::new(format!(" {} ", shuf_icon)).style(Style::default().fg(sfg).bg(sbg)),
                 Rect::new(shuffle_x, ctrl.y, btn_w, 1),
             );
         }
@@ -934,7 +983,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
                 (Color::Rgb(80, 80, 100), Color::Rgb(28, 32, 45))
             };
             f.render_widget(
-                Paragraph::new(" ↺ ").style(Style::default().fg(rfg).bg(rbg)),
+                Paragraph::new(format!(" {} ", rep_icon)).style(Style::default().fg(rfg).bg(rbg)),
                 Rect::new(repeat_x, ctrl.y, btn_w, 1),
             );
         }
@@ -1193,6 +1242,19 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
 
+/// Returns (popup_rect, [host_row, port_row, nerd_icons_row]).
+pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 3]) {
+    let popup = centered_rect_abs(54, 12, area);
+    let inner_x = popup.x + 1;
+    let inner_y = popup.y + 1;
+    let inner_w = popup.width.saturating_sub(2);
+    // row layout inside inner: [pad, host, port, divider, nerd, error, spacer, help]
+    let host_rect = Rect::new(inner_x, inner_y + 1, inner_w, 1);
+    let port_rect = Rect::new(inner_x, inner_y + 2, inner_w, 1);
+    let nerd_rect = Rect::new(inner_x, inner_y + 4, inner_w, 1);
+    (popup, [host_rect, port_rect, nerd_rect])
+}
+
 fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
     let area = f.area();
     let popup = centered_rect_abs(44, 7, area);
@@ -1231,7 +1293,7 @@ fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
 
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
     let area = f.area();
-    let popup = centered_rect_abs(54, 10, area);
+    let popup = centered_rect_abs(54, 12, area);
 
     f.render_widget(Clear, popup);
 
@@ -1239,15 +1301,17 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::Cyan))
-        .title(" Server Configuration ");
+        .title(" Configuration ");
 
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    // rows: top-pad | host | port | error | spacer | help
+    // rows: top-pad | host | port | divider | nerd-icons | error | spacer | help
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -1280,15 +1344,40 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
         f.render_widget(Paragraph::new(line), rows[i + 1]);
     }
 
+    // Divider
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "─".repeat(inner.width as usize),
+            Style::default().fg(Color::DarkGray),
+        )),
+        rows[3],
+    );
+
+    // Nerd icons toggle
+    {
+        let is_selected = modal.selected_field == 2;
+        let checkbox = if modal.use_nerd_icons { "[x]" } else { "[ ]" };
+        let label_style = if is_selected {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let line = Line::from(vec![
+            Span::styled("  Nerd icons: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(checkbox, label_style),
+        ]);
+        f.render_widget(Paragraph::new(line), rows[4]);
+    }
+
     if let Some(err) = &modal.error {
         let p = Paragraph::new(err.as_str())
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Red));
-        f.render_widget(p, rows[3]);
+        f.render_widget(p, rows[5]);
     }
 
     let help = Paragraph::new(hint_line(&[
-        ("Enter/i", "edit"), ("j/k", "switch field"), ("s", "save"), ("Esc", "close"),
+        ("Enter/i", "edit"), ("j/k", "switch field"), ("Space", "toggle"), ("s", "save"), ("Esc", "close"),
     ]));
-    f.render_widget(help, rows[5]);
+    f.render_widget(help, rows[7]);
 }

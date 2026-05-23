@@ -33,6 +33,31 @@ pub async fn handle_mouse_event(
     let col = mouse.column;
     let row = mouse.row;
 
+    // Config modal intercepts all mouse events when open
+    if app.config_modal.is_some() {
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let (modal_area, field_rects) = ui::compute_config_modal_rects(terminal_area);
+            if point_in(col, row, modal_area) {
+                let modal = app.config_modal.as_mut().unwrap();
+                if point_in(col, row, field_rects[0]) {
+                    modal.selected_field = 0;
+                    modal.editing = true;
+                    modal.error = None;
+                } else if point_in(col, row, field_rects[1]) {
+                    modal.selected_field = 1;
+                    modal.editing = true;
+                    modal.error = None;
+                } else if point_in(col, row, field_rects[2]) {
+                    modal.selected_field = 2;
+                    modal.use_nerd_icons = !modal.use_nerd_icons;
+                }
+            } else {
+                app.config_modal = None;
+            }
+        }
+        return;
+    }
+
     // Context menu intercepts all left clicks
     if app.context_menu.is_some() {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
@@ -889,19 +914,29 @@ pub fn handle_config_key(
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field < 1 {
+                if modal.selected_field < 2 {
                     modal.selected_field += 1;
                 }
             }
             KeyCode::Enter | KeyCode::Char('i') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                modal.editing = true;
-                modal.error = None;
+                if modal.selected_field == 2 {
+                    modal.use_nerd_icons = !modal.use_nerd_icons;
+                } else {
+                    modal.editing = true;
+                    modal.error = None;
+                }
+            }
+            KeyCode::Char(' ') => {
+                let modal = app.config_modal.as_mut().unwrap();
+                if modal.selected_field == 2 {
+                    modal.use_nerd_icons = !modal.use_nerd_icons;
+                }
             }
             KeyCode::Char('s') => {
-                let (host, port_str) = {
+                let (host, port_str, use_nerd_icons) = {
                     let modal = app.config_modal.as_ref().unwrap();
-                    (modal.host.trim().to_string(), modal.port.trim().to_string())
+                    (modal.host.trim().to_string(), modal.port.trim().to_string(), modal.use_nerd_icons)
                 };
                 if host.is_empty() {
                     app.config_modal.as_mut().unwrap().error =
@@ -911,9 +946,11 @@ pub fn handle_config_key(
                         Ok(port) if port > 0 => {
                             cfg.host = host;
                             cfg.port = port;
+                            cfg.use_nerd_icons = use_nerd_icons;
                             match cfg.save() {
                                 Ok(()) => {
                                     client.update_base_url(cfg.base_url());
+                                    app.use_nerd_icons = use_nerd_icons;
                                     app.config_modal = None;
                                     app.connection = ConnectionState::Reconnecting;
                                     app.players = vec![];

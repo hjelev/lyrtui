@@ -10,6 +10,8 @@ pub struct Config {
     #[serde(default = "default_port")]
     pub port: u16,
     pub default_player: Option<String>,
+    #[serde(default)]
+    pub use_nerd_icons: bool,
 }
 
 fn default_host() -> String {
@@ -26,6 +28,7 @@ impl Default for Config {
             host: default_host(),
             port: default_port(),
             default_player: None,
+            use_nerd_icons: false,
         }
     }
 }
