@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Driver for lmstui — wraps the TUI in a detached tmux session for agent use.
+# Driver for lyrtui — wraps the TUI in a detached tmux session for agent use.
 # Usage: driver.sh <command> [args]
-#   launch [WxH]   — build (if needed) and start lmstui in tmux (default 120x40)
+#   launch [WxH]   — build (if needed) and start lyrtui in tmux (default 120x40)
 #   ss             — capture current screen to stdout
 #   send <keys>    — send keys (tmux send-keys syntax, e.g. "j" "Enter" "Escape")
 #   quit           — send 'q' and kill the session
 #   status         — print "running" or "stopped"
 
-SESSION="lmstui-driver"
+SESSION="lyrtui-driver"
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 
 case "${1:-}" in
@@ -17,7 +17,7 @@ case "${1:-}" in
     H="${DIMS##*x}"
     tmux kill-session -t "$SESSION" 2>/dev/null || true
     tmux new-session -d -s "$SESSION" -x "$W" -y "$H"
-    tmux send-keys -t "$SESSION" "cd '$REPO' && cargo run 2>/tmp/lmstui-err.txt" Enter
+    tmux send-keys -t "$SESSION" "cd '$REPO' && cargo run 2>/tmp/lyrtui-err.txt" Enter
     # Wait up to 10s for the app to appear (look for the Navigation box)
     for i in $(seq 1 20); do
       sleep 0.5
@@ -27,7 +27,7 @@ case "${1:-}" in
       fi
     done
     echo "timeout — app did not start within 10s" >&2
-    cat /tmp/lmstui-err.txt >&2
+    cat /tmp/lyrtui-err.txt >&2
     exit 1
     ;;
 

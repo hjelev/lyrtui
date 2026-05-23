@@ -1,4 +1,4 @@
-# lmstui
+# lyrtui
 
 A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (formerly Logitech Media Server / Squeezebox Server), written in Rust.
 
@@ -27,19 +27,19 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 ## Installation
 
 ```sh
-git clone https://github.com/yourname/lmstui
-cd lmstui
+git clone https://github.com/yourname/lyrtui
+cd lyrtui
 cargo build --release
-# binary at: target/release/lmstui
+# binary at: target/release/lyrtui
 ```
 
 ## Usage
 
 ```sh
-lmstui
+lyrtui
 ```
 
-If the server is not on `localhost:9000`, press `c` to open the configuration menu and set the correct host and port. Settings are saved to `~/.config/lmstui/config.toml`.
+If the server is not on `localhost:9000`, press `c` to open the configuration menu and set the correct host and port. Settings are saved to `~/.config/lyrtui/config.toml`.
 
 ### Mouse support
 
@@ -78,7 +78,7 @@ The action menu can be navigated with `↑`/`↓` (or `j`/`k`), confirmed with `
 
 ### Configuration
 
-The config file lives at `~/.config/lmstui/config.toml`:
+The config file lives at `~/.config/lyrtui/config.toml`:
 
 ```toml
 host = "localhost"
