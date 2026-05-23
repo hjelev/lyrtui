@@ -66,7 +66,7 @@ pub fn compute_areas(area: Rect, status_height: u16) -> (Rect, Rect) {
 }
 
 /// Returns the six clickable button rects in the Now Playing controls row: [Prev, PlayPause, Stop, Next, Shuffle, Repeat].
-pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w: u16) -> [Rect; 6] {
+pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w: u16) -> [Rect; 8] {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
@@ -95,12 +95,15 @@ pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w
     let ctrl = rows[3];
     let btn_w: u16 = 3;
     let gap: u16 = 1;
-    let sep: u16 = 2; // extra gap before shuffle/repeat group
+    let sep: u16 = 2;
     std::array::from_fn(|i| {
         let x = if i < 4 {
             ctrl.x + (i as u16) * (btn_w + gap)
-        } else {
+        } else if i < 6 {
             ctrl.x + 4 * (btn_w + gap) + sep + ((i - 4) as u16) * (btn_w + gap)
+        } else {
+            // volume down (6) and volume up (7) after a second sep gap
+            ctrl.x + 4 * (btn_w + gap) + sep + 2 * (btn_w + gap) + sep + ((i - 6) as u16) * (btn_w + gap)
         };
         Rect::new(x, ctrl.y, btn_w, 1)
     })
@@ -1067,6 +1070,24 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 Rect::new(repeat_x, ctrl.y, btn_w, 1),
             );
         }
+        let vol_down_x = repeat_x + btn_w + sep;
+        if vol_down_x + btn_w <= ctrl_max_x {
+            let vol_down_icon = if app.use_nerd_icons { "\u{F027}" } else { "−" };  // nf-fa-volume-down
+            f.render_widget(
+                Paragraph::new(format!(" {} ", vol_down_icon))
+                    .style(Style::default().fg(Color::Rgb(160, 200, 255)).bg(Color::Rgb(28, 32, 45))),
+                Rect::new(vol_down_x, ctrl.y, btn_w, 1),
+            );
+        }
+        let vol_up_x = vol_down_x + btn_w + gap;
+        if vol_up_x + btn_w <= ctrl_max_x {
+            let vol_up_icon = if app.use_nerd_icons { "\u{F028}" } else { "+" };  // nf-fa-volume-up
+            f.render_widget(
+                Paragraph::new(format!(" {} ", vol_up_icon))
+                    .style(Style::default().fg(Color::Rgb(160, 200, 255)).bg(Color::Rgb(28, 32, 45))),
+                Rect::new(vol_up_x, ctrl.y, btn_w, 1),
+            );
+        }
     }
 
     let pct = if np.duration > 0.0 {
@@ -1326,8 +1347,8 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, w, height)
 }
 
-/// Returns the six clickable button rects in the big-screen (full art) controls row: [Prev, PlayPause, Stop, Next, Shuffle, Repeat].
-pub fn compute_full_art_control_rects(area: Rect) -> [Rect; 6] {
+/// Returns the eight clickable button rects in the big-screen (full art) controls row: [Prev, PlayPause, Stop, Next, Shuffle, Repeat, VolumeDown, VolumeUp].
+pub fn compute_full_art_control_rects(area: Rect) -> [Rect; 8] {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
@@ -1347,8 +1368,11 @@ pub fn compute_full_art_control_rects(area: Rect) -> [Rect; 6] {
     std::array::from_fn(|i| {
         let x = if i < 4 {
             ctrl_x + (i as u16) * (btn_w + gap)
-        } else {
+        } else if i < 6 {
             ctrl_x + 4 * (btn_w + gap) + sep + ((i - 4) as u16) * (btn_w + gap)
+        } else {
+            // volume down (6) and volume up (7) after a second sep gap
+            ctrl_x + 4 * (btn_w + gap) + sep + 2 * (btn_w + gap) + sep + ((i - 6) as u16) * (btn_w + gap)
         };
         Rect::new(x, ctrl_y, btn_w, 1)
     })

@@ -106,7 +106,9 @@ pub async fn handle_mouse_event(
                     2 => Action::Stop,
                     3 => Action::Next,
                     4 => Action::ToggleShuffle,
-                    _ => Action::ToggleRepeat,
+                    5 => Action::ToggleRepeat,
+                    6 => Action::VolumeDown,
+                    _ => Action::VolumeUp,
                 };
                 handle_action(app, action, client, tx).await;
             }
@@ -132,7 +134,9 @@ pub async fn handle_mouse_event(
                     2 => Action::Stop,
                     3 => Action::Next,
                     4 => Action::ToggleShuffle,
-                    _ => Action::ToggleRepeat,
+                    5 => Action::ToggleRepeat,
+                    6 => Action::VolumeDown,
+                    _ => Action::VolumeUp,
                 };
                 handle_action(app, action, client, tx).await;
             } else if point_in(col, row, sidebar_area) {
