@@ -1,4 +1,4 @@
-use crate::api::{Album, Artist, NowPlaying, Player, RadioItem, Track};
+use crate::api::{Album, Artist, FolderItem, NowPlaying, Player, Playlist, RadioItem, Track};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,9 +10,8 @@ pub enum ConnectionState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidebarItem {
-    Artists,
-    Albums,
-    Tracks,
+    MyMusic,
+    Search,
     Radio,
     Apps,
     Favourites,
@@ -26,17 +25,29 @@ pub enum LibraryView {
     Artists,
     Albums { artist_id: Option<String> },
     Tracks { album_id: Option<String> }, // None = all tracks
+    Folder { folder_id: Option<u32> },
 }
 
 #[derive(Debug, Clone)]
 pub enum MainView {
     Library(LibraryView),
+    MyMusic,
     Queue,
     Players,
     Radio,
     Apps,
     Favourites,
     Help,
+    Search,
+}
+
+#[derive(Debug, Clone)]
+pub enum SearchResultItem {
+    Artist(Artist),
+    Album(Album),
+    Track(Track),
+    Playlist(Playlist),
+    AppItem(RadioItem),
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +79,14 @@ pub struct RadioNav {
     /// Items at this level, moved out and stored here while browsing deeper.
     pub items: Vec<RadioItem>,
     /// Cursor position to restore on Back.
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct FolderNav {
+    pub folder_id: Option<u32>,
+    pub title: String,
+    pub items: Vec<FolderItem>,
     pub selected: usize,
 }
 
@@ -127,6 +146,11 @@ pub struct App {
     pub fav_nav_stack: Vec<RadioNav>,
     pub fav_title: String,
 
+    // Folder view data
+    pub folder_items: Vec<FolderItem>,
+    pub folder_nav_stack: Vec<FolderNav>,
+    pub folder_title: String,
+
     // Per-player volumes (updated by background polling)
     pub player_volumes: HashMap<String, u8>,
 
@@ -144,6 +168,13 @@ pub struct App {
     pub confirm_clear_queue: bool,
     /// Height (in terminal rows) of the Now Playing panel, computed from font metrics.
     pub status_height: u16,
+    /// Width (in terminal columns) of the album-art cell in the Now Playing panel.
+    pub art_col_w: u16,
+
+    // Search state
+    pub search_query: String,
+    pub search_results: Vec<SearchResultItem>,
+    pub search_input_active: bool,
 }
 
 impl App {
@@ -166,13 +197,15 @@ impl App {
             fav_items: vec![],
             fav_nav_stack: vec![],
             fav_title: "Favourites".to_string(),
+            folder_items: vec![],
+            folder_nav_stack: vec![],
+            folder_title: "Folders".to_string(),
             player_volumes: HashMap::new(),
             sidebar_selected: 0,
             main_selected: 0,
             sidebar_items: vec![
-                SidebarItem::Artists,
-                SidebarItem::Albums,
-                SidebarItem::Tracks,
+                SidebarItem::MyMusic,
+                SidebarItem::Search,
                 SidebarItem::Radio,
                 SidebarItem::Apps,
                 SidebarItem::Favourites,
@@ -180,7 +213,7 @@ impl App {
                 SidebarItem::Players,
                 SidebarItem::Help,
             ],
-            main_view: MainView::Library(LibraryView::Artists),
+            main_view: MainView::MyMusic,
             focus_sidebar: true,
             players_focus_global: false,
             status_message: None,
@@ -188,14 +221,17 @@ impl App {
             context_menu: None,
             confirm_clear_queue: false,
             status_height: 11, // overwritten in run() from picker font metrics
+            art_col_w: 16,     // overwritten in run() from picker font metrics
+            search_query: String::new(),
+            search_results: vec![],
+            search_input_active: false,
         }
     }
 
     pub fn sidebar_label(&self, item: &SidebarItem) -> &'static str {
         match item {
-            SidebarItem::Artists => "Artists",
-            SidebarItem::Albums => "Albums",
-            SidebarItem::Tracks => "Tracks",
+            SidebarItem::MyMusic => "My Music",
+            SidebarItem::Search => "Search  /",
             SidebarItem::Radio => "Radio",
             SidebarItem::Apps => "Apps",
             SidebarItem::Favourites => "Favourites",
@@ -223,11 +259,13 @@ pub enum AppMsg {
     RadioItemsLoaded(Vec<RadioItem>),
     AppItemsLoaded(Vec<RadioItem>),
     FavItemsLoaded(Vec<RadioItem>),
+    FolderItemsLoaded(Vec<FolderItem>),
     ArtworkLoaded(Vec<u8>),
     ThumbnailLoaded(String, Vec<u8>), // url, bytes
     ThumbnailFailed(String),          // url
     PlayerVolumesLoaded(HashMap<String, u8>),
     StatusMsg(String),
+    SearchResultsLoaded(Vec<SearchResultItem>),
     #[allow(dead_code)]
     Error(String),
 }

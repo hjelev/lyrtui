@@ -47,11 +47,31 @@ pub struct Artist {
     pub artist: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum FolderItemType {
+    Folder,
+    Track,
+}
+
+#[derive(Debug, Clone)]
+pub struct FolderItem {
+    pub id: u32,
+    pub filename: String,
+    pub item_type: FolderItemType,
+    pub duration: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Album {
     pub id: Value,
     pub album: String,
     pub artist: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Playlist {
+    pub id: Value,
+    pub name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -467,6 +487,15 @@ impl LmsClient {
         Ok(())
     }
 
+    pub async fn add_folder_to_queue(&self, player_id: &str, folder_id: u32) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("folder_id:{}", folder_id))],
+        )
+        .await?;
+        Ok(())
+    }
+
     pub async fn clear_queue(&self, player_id: &str) -> Result<()> {
         self.rpc(player_id, &[json!("playlist"), json!("clear")]).await?;
         Ok(())
@@ -475,6 +504,31 @@ impl LmsClient {
     pub async fn add_url_to_queue(&self, player_id: &str, url: &str) -> Result<()> {
         self.rpc(player_id, &[json!("playlist"), json!("add"), json!(url)]).await?;
         Ok(())
+    }
+
+    pub async fn browse_music_folder(&self, folder_id: Option<u32>) -> Result<Vec<FolderItem>> {
+        let mut params = vec![json!("musicfolder"), json!(0), json!(10000), json!("tags:dlt")];
+        if let Some(id) = folder_id {
+            params.push(json!(format!("folder_id:{}", id)));
+        }
+        let result = self.rpc("", &params).await?;
+        let items = result["folder_loop"].as_array().cloned().unwrap_or_default();
+        Ok(items
+            .into_iter()
+            .filter_map(|v| {
+                let id = v["id"].as_u64()? as u32;
+                let filename = v["filename"].as_str()?.to_string();
+                let item_type = match v["type"].as_str() {
+                    Some("track") => FolderItemType::Track,
+                    _ => FolderItemType::Folder,
+                };
+                let duration = v["duration"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .map(String::from);
+                Some(FolderItem { id, filename, item_type, duration })
+            })
+            .collect())
     }
 
     pub async fn insert_track_next(&self, player_id: &str, track_id: &str) -> Result<()> {
@@ -494,6 +548,79 @@ impl LmsClient {
         self.rpc(
             player_id,
             &[json!("favorites"), json!("add"), json!(format!("url:{}", url)), json!(format!("title:{}", title))],
+        ).await?;
+        Ok(())
+    }
+
+    pub async fn search_library(&self, query: &str) -> Result<(Vec<Artist>, Vec<Album>, Vec<Track>, Vec<Playlist>)> {
+        let result = self.rpc("", &[
+            json!("search"),
+            json!(0), json!(100),
+            json!(format!("term:{}", query)),
+        ]).await?;
+
+        // LMS search returns contributors_loop (not artists_loop) with contributor/contributor_id fields
+        let raw_artists = result["contributors_loop"].as_array().cloned().unwrap_or_default();
+        let artists: Vec<Artist> = raw_artists.into_iter().filter_map(|v| {
+            let name = v["contributor"].as_str()?.to_string();
+            let id = json!(v["contributor_id"].as_u64()?);
+            Some(Artist { id, artist: name })
+        }).collect();
+
+        // albums_loop uses album_id instead of id
+        let raw_albums = result["albums_loop"].as_array().cloned().unwrap_or_default();
+        let albums: Vec<Album> = raw_albums.into_iter().filter_map(|v| {
+            let name = v["album"].as_str()?.to_string();
+            let id = json!(v["album_id"].as_u64()?);
+            Some(Album { id, album: name, artist: v["artist"].as_str().map(String::from) })
+        }).collect();
+
+        // tracks_loop uses track_id and track (not id and title)
+        let raw_tracks = result["tracks_loop"].as_array().cloned().unwrap_or_default();
+        let tracks: Vec<Track> = raw_tracks.into_iter().filter_map(|v| {
+            let title = v["track"].as_str()?.to_string();
+            let id = json!(v["track_id"].as_u64()?);
+            Some(Track {
+                id: Some(id),
+                title,
+                artist: v["artist"].as_str().map(String::from),
+                album: v["album"].as_str().map(String::from),
+                duration: v["duration"].as_f64(),
+                artwork_url: None,
+            })
+        }).collect();
+
+        // playlists_loop uses playlist_id and playlist
+        let raw_playlists = result["playlists_loop"].as_array().cloned().unwrap_or_default();
+        let playlists: Vec<Playlist> = raw_playlists.into_iter().filter_map(|v| {
+            let name = v["playlist"].as_str()?.to_string();
+            let id = json!(v["playlist_id"].as_u64()?);
+            Some(Playlist { id, name })
+        }).collect();
+
+        Ok((artists, albums, tracks, playlists))
+    }
+
+    pub async fn play_playlist(&self, player_id: &str, playlist_id: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:load"), json!(format!("playlist_id:{}", playlist_id))],
+        ).await?;
+        Ok(())
+    }
+
+    pub async fn add_playlist_to_queue(&self, player_id: &str, playlist_id: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("playlist_id:{}", playlist_id))],
+        ).await?;
+        Ok(())
+    }
+
+    pub async fn insert_playlist_next(&self, player_id: &str, playlist_id: &str) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlistcontrol"), json!("cmd:insert"), json!(format!("playlist_id:{}", playlist_id))],
         ).await?;
         Ok(())
     }
@@ -520,9 +647,12 @@ fn resolve_image_url(v: &Value, base: &str) -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    if raw.starts_with('/') {
+    if raw.starts_with("http://") || raw.starts_with("https://") {
+        Some(raw.to_string())
+    } else if raw.starts_with('/') {
         Some(format!("{}{}", base, raw))
     } else {
-        Some(raw.to_string())
+        // relative path without leading slash (e.g. plugin icons like "plugins/Foo/icon.png")
+        Some(format!("{}/{}", base, raw))
     }
 }

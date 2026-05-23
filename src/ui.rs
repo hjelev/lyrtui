@@ -1,4 +1,5 @@
-use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView};
+use crate::api::FolderItemType;
+use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView, SearchResultItem};
 use serde_json::Value;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -52,7 +53,7 @@ pub fn compute_areas(area: Rect, status_height: u16) -> (Rect, Rect) {
 }
 
 /// Returns the four clickable button rects in the Now Playing controls row: [Prev, PlayPause, Stop, Next].
-pub fn compute_statusbar_control_rects(area: Rect, status_height: u16) -> [Rect; 4] {
+pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w: u16) -> [Rect; 4] {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
@@ -65,7 +66,7 @@ pub fn compute_statusbar_control_rects(area: Rect, status_height: u16) -> [Rect;
     );
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(18), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([Constraint::Length(art_col_w), Constraint::Length(1), Constraint::Min(1)])
         .split(status_inner);
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -139,6 +140,12 @@ pub fn draw(
                 ("t", "power"), ("Spc", "play/pause"), ("n/p", "next/prev"),
                 ("+/-", "vol"), ("c", "config"), ("q", "quit"),
             ])
+        } else if matches!(app.main_view, MainView::Search) {
+            if app.search_input_active {
+                hint_line(&[("Type", "query"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")])
+            } else {
+                hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("i//", "edit query"), ("Esc", "back"), ("q", "quit")])
+            }
         } else {
             hint_line(&[
                 ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
@@ -260,6 +267,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
 fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
     match &app.main_view {
+        MainView::MyMusic => draw_my_music(f, app, area, state),
         MainView::Library(lib) => draw_library(f, app, area, lib, state, thumbnails, base),
         MainView::Queue => draw_queue(f, app, area, state, thumbnails),
         MainView::Players => draw_players(f, app, area, state),
@@ -267,7 +275,47 @@ fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
         MainView::Apps => draw_apps(f, app, area, state, thumbnails),
         MainView::Favourites => draw_favourites(f, app, area, state, thumbnails),
         MainView::Help => draw_help(f, area),
+        MainView::Search => draw_search(f, app, area, state, thumbnails, base),
     }
+}
+
+fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
+    let focused = !app.focus_sidebar;
+    let border_style = if focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title(" My Music ");
+
+    let entries = [
+        ("Artists", "your music library by artist"),
+        ("Albums",  "all albums"),
+        ("Tracks",  "all tracks"),
+        ("Folders", "browse by folder"),
+    ];
+
+    let items: Vec<ListItem> = entries.iter().map(|(label, sub)| {
+        ListItem::new(Line::from(vec![
+            Span::styled("  ▸  ", Style::default().fg(Color::Cyan)),
+            Span::raw(label.to_string()),
+            Span::styled(format!("  — {}", sub), Style::default().fg(Color::DarkGray)),
+        ]))
+    }).collect();
+
+    state.select(Some(app.main_selected));
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(cursor_styles(focused).0)
+        .highlight_symbol("");
+
+    f.render_stateful_widget(list, area, state);
 }
 
 fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
@@ -307,6 +355,42 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 }
             }).collect();
             draw_two_row_list(f, area, title, items, app.main_selected, focused, state, thumbnails);
+        }
+        LibraryView::Folder { .. } => {
+            let breadcrumb = breadcrumb_str(
+                app.folder_nav_stack.iter().map(|n| n.title.as_str()),
+                &app.folder_title,
+            );
+            let title = format!(" Folders — {} ", breadcrumb);
+            let items = app.folder_items.iter().map(|item| {
+                let is_track = item.item_type == FolderItemType::Track;
+                let (icon, fg) = if is_track {
+                    ("▶ ", Color::Cyan)
+                } else {
+                    ("▸ ", Color::White)
+                };
+                let sub = if is_track {
+                    item.duration.as_deref().unwrap_or("").to_string()
+                } else {
+                    "folder".to_string()
+                };
+                RowItem {
+                    thumb_url: if is_track {
+                        Some(format!("{}/music/{}/cover.jpg", base, item.id))
+                    } else {
+                        None
+                    },
+                    line1: Line::from(Span::styled(
+                        format!("  {}{}", icon, item.filename),
+                        Style::default().fg(fg),
+                    )),
+                    line2: Line::from(Span::styled(
+                        format!("  {}", sub),
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                }
+            }).collect();
+            draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails);
         }
     }
 }
@@ -474,6 +558,185 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
     draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails);
 }
 
+fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
+    let focused = !app.focus_sidebar;
+
+    let border_style = if focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title(" Search ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(inner);
+
+    // Search input box
+    let input_border_style = if app.search_input_active {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let cursor = if app.search_input_active { "█" } else { "" };
+    let input_text = format!("  / {}{}", app.search_query, cursor);
+    let input = Paragraph::new(input_text)
+        .style(Style::default().fg(Color::White))
+        .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(input_border_style));
+    f.render_widget(input, chunks[0]);
+
+    let results_area = chunks[1];
+
+    if app.search_results.is_empty() {
+        let msg = if app.search_query.is_empty() {
+            "Type a query above and press Enter to search"
+        } else {
+            "No results found"
+        };
+        f.render_widget(
+            Paragraph::new(msg)
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center),
+            Rect::new(results_area.x, results_area.y + results_area.height / 2, results_area.width, 1),
+        );
+        return;
+    }
+
+    let results_focused = focused && !app.search_input_active;
+    let selected = app.main_selected;
+    let visible = ((results_area.height / 2) as usize).max(1);
+    let total = app.search_results.len();
+
+    // Sync scroll offset
+    let offset = {
+        let o = *state.offset_mut();
+        let new_o = if selected < o {
+            selected
+        } else if selected >= o + visible {
+            selected + 1 - visible
+        } else {
+            o
+        };
+        *state.offset_mut() = new_o;
+        new_o
+    };
+
+    let text_x = results_area.x + THUMB_W + THUMB_SEP;
+    let text_w = results_area.width.saturating_sub(THUMB_W + THUMB_SEP);
+
+    for (vis_i, item_i) in (offset..).zip(0usize..) {
+        if vis_i >= total { break; }
+        let y = results_area.y + (item_i as u16) * 2;
+        if y + 1 >= results_area.y + results_area.height { break; }
+
+        let is_sel = vis_i == selected;
+        let (s1, s2) = if is_sel { cursor_styles(results_focused) } else { (Style::default(), Style::default()) };
+
+        let thumb_url = match &app.search_results[vis_i] {
+            SearchResultItem::Artist(a) => Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
+            SearchResultItem::Album(alb) => Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&alb.id))),
+            SearchResultItem::Track(t) => t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, value_id_str(id))),
+            SearchResultItem::AppItem(item) => item.artwork_url.clone(),
+            SearchResultItem::Playlist(_) => None,
+        };
+        let thumb_rect = Rect::new(results_area.x, y, THUMB_W, 2);
+        let thumb_bg = if is_sel {
+            if results_focused { Color::Rgb(45, 100, 170) } else { Color::Rgb(50, 50, 68) }
+        } else {
+            Color::Rgb(25, 25, 35)
+        };
+        match thumb_url.as_ref().and_then(|u| thumbnails.get_mut(u)) {
+            Some(proto) => {
+                let img = StatefulImage::default().resize(Resize::Fit(None));
+                f.render_stateful_widget(img, thumb_rect, proto);
+            }
+            None => {
+                f.render_widget(
+                    Paragraph::new(if thumb_rect.height >= 2 { "\n ♪" } else { " ♪" })
+                        .style(Style::default().fg(Color::Rgb(80, 80, 110)).bg(thumb_bg)),
+                    thumb_rect,
+                );
+            }
+        }
+
+        let (line1, line2) = match &app.search_results[vis_i] {
+            SearchResultItem::Artist(a) => (
+                Line::from(vec![
+                    Span::styled("  ▸ ", Style::default().fg(Color::White)),
+                    Span::styled(a.artist.clone(), Style::default().fg(Color::White)),
+                ]),
+                Line::from(Span::styled("  artist", Style::default().fg(Color::DarkGray))),
+            ),
+            SearchResultItem::Album(alb) => (
+                Line::from(vec![
+                    Span::styled("  ▸ ", Style::default().fg(Color::Rgb(100, 160, 220))),
+                    Span::styled(alb.album.clone(), Style::default().fg(Color::White)),
+                ]),
+                Line::from(Span::styled(
+                    format!("  album  {}", alb.artist.as_deref().unwrap_or("")),
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ),
+            SearchResultItem::Track(t) => (
+                Line::from(vec![
+                    Span::styled("  ▶ ", Style::default().fg(Color::Cyan)),
+                    Span::styled(t.title.clone(), Style::default().fg(Color::White)),
+                ]),
+                Line::from(Span::styled(
+                    format!("  {}", t.artist.as_deref().unwrap_or("")),
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ),
+            SearchResultItem::Playlist(pl) => (
+                Line::from(vec![
+                    Span::styled("  ▸ ", Style::default().fg(Color::Rgb(220, 180, 80))),
+                    Span::styled(pl.name.clone(), Style::default().fg(Color::White)),
+                ]),
+                Line::from(Span::styled("  playlist", Style::default().fg(Color::DarkGray))),
+            ),
+            SearchResultItem::AppItem(item) => (
+                Line::from(vec![
+                    Span::styled("  ▸ ", Style::default().fg(Color::Rgb(180, 120, 220))),
+                    Span::styled(item.name.clone(), Style::default().fg(Color::White)),
+                ]),
+                Line::from(Span::styled("  app", Style::default().fg(Color::DarkGray))),
+            ),
+        };
+
+        f.render_widget(
+            Paragraph::new(line1).style(s1),
+            Rect::new(text_x, y, text_w, 1),
+        );
+        f.render_widget(
+            Paragraph::new(line2).style(s2),
+            Rect::new(text_x, y + 1, text_w, 1),
+        );
+    }
+
+    if total > visible {
+        let scroll_area = Rect::new(
+            area.x + area.width.saturating_sub(1),
+            results_area.y,
+            1,
+            results_area.height,
+        );
+        let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("║")
+            .track_symbol(Some("│"))
+            .begin_symbol(None)
+            .end_symbol(None);
+        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+    }
+}
+
 fn draw_help(f: &mut Frame, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -556,10 +819,10 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         return;
     };
 
-    // Split: art column (18 cols) | 1-col gap | info column
+    // Split: art column | 1-col gap | info column
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(18), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([Constraint::Length(app.art_col_w), Constraint::Length(1), Constraint::Min(1)])
         .split(inner);
 
     if let Some(proto) = album_art {
@@ -630,7 +893,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     } else {
         0
     };
-    let bar_w = rows[5].width as usize;
+    let bar_w = rows[5].width.saturating_sub(1) as usize;
     let filled = pct * bar_w / 100;
 
     let time = format!(
@@ -663,7 +926,8 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
             Style::default().bg(Color::Rgb(55, 55, 70)).fg(Color::Rgb(210, 215, 225)),
         ),
     ]);
-    f.render_widget(Paragraph::new(bar), rows[5]);
+    let progress_rect = Rect::new(rows[5].x, rows[5].y, rows[5].width.saturating_sub(1), rows[5].height);
+    f.render_widget(Paragraph::new(bar), progress_rect);
 }
 
 fn draw_disconnected_overlay(f: &mut Frame, area: Rect, state: &ConnectionState) {

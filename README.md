@@ -5,6 +5,7 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 ## Features
 
 - Browse your music library: Artists → Albums → Tracks, or jump straight to All Tracks
+- **Search** your music library (artists, albums, tracks, playlists) — type a query, press Enter, then drill in or play results directly
 - Browse and play internet radio via Lyrion's radio services (TuneIn, etc.) with full hierarchical navigation
 - Browse and play installed Lyrion apps (Spotify, Deezer, Bandcamp, etc.) with the same hierarchical navigation
 - View and jump to items in the playback queue
