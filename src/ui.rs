@@ -279,6 +279,11 @@ pub fn draw(
         draw_confirm_clear_queue(f, app.queue.len(), app.clear_queue_selected_button, app.effective_accent());
     }
 
+    if let Some(idx) = app.confirm_delete_queue_item {
+        let title = app.queue.get(idx).map(|t| t.title.as_str()).unwrap_or("");
+        draw_confirm_delete_queue_item(f, title, app.delete_queue_selected_button, app.effective_accent());
+    }
+
     if app.context_menu.is_some() {
         draw_context_menu(f, app, area);
     }
@@ -1048,6 +1053,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
     let right: Vec<Line> = vec![
         header("Library & Queue"),
         shortcut("a",  "Add selected item to queue",                    mid),
+        shortcut("d / Del", "Remove selected item from queue",          mid),
         shortcut("x",  "Clear queue",                                   mid),
         Line::from(""),
         header("Players"),
@@ -1059,8 +1065,33 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         shortcut("q / Ctrl-c", "Quit",                                  mid),
     ];
 
-    f.render_widget(Paragraph::new(left), cols[0]);
-    f.render_widget(Paragraph::new(right), cols[1]);
+    let content_lines = left.len().max(right.len()) as u16;
+    let visible = inner.height;
+    app.help_visible_lines.set(visible);
+    let max_scroll = content_lines.saturating_sub(visible);
+    let scroll = app.help_scroll.min(max_scroll);
+
+    f.render_widget(Paragraph::new(left).scroll((scroll, 0)), cols[0]);
+    f.render_widget(Paragraph::new(right).scroll((scroll, 0)), cols[1]);
+
+    if content_lines > visible {
+        let scroll_area = Rect::new(
+            area.x + area.width.saturating_sub(1),
+            inner.y,
+            1,
+            inner.height,
+        );
+        let mut ss = ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent());
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("║")
+            .track_symbol(Some("│"))
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(track_style)
+            .thumb_style(thumb_style);
+        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+    }
 }
 
 fn shortcut(key: &'static str, desc: &'static str, mid: Color) -> Line<'static> {
@@ -1368,6 +1399,30 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     f.render_widget(Paragraph::new(bar), progress_rect);
 }
 
+/// Returns the number of terminal columns the album art will actually occupy after
+/// proportional scaling, replicating ratatui-image's `Resize::Scale` logic.
+/// Falls back to half the available width when image dimensions are unknown.
+fn art_rendered_cols(app: &App, area: Rect) -> u16 {
+    let Some((img_w, img_h)) = app.art_image_size else {
+        return area.width / 2;
+    };
+    if img_w == 0 || img_h == 0 {
+        return area.width / 2;
+    }
+    let (fw, fh) = app.font_size;
+    if fw == 0 || fh == 0 {
+        return area.width / 2;
+    }
+    let avail_w_px = area.width as u32 * fw as u32;
+    let avail_h_px = area.height as u32 * fh as u32;
+    let wratio = avail_w_px as f64 / img_w as f64;
+    let hratio = avail_h_px as f64 / img_h as f64;
+    let ratio = wratio.min(hratio);
+    let rendered_w_px = (img_w as f64 * ratio).round() as u32;
+    let rendered_cols = (rendered_w_px as f32 / fw as f32).ceil() as u16;
+    rendered_cols.min(area.width)
+}
+
 fn draw_full_art_mode(
     f: &mut Frame,
     app: &App,
@@ -1385,17 +1440,20 @@ fn draw_full_art_mode(
     let content_area = outer[0];
     let footer_area = outer[1];
 
-    // Content: image (50%) | now-playing info (50%)
+    // Compute how many columns the image will actually occupy after proportional scaling,
+    // so the right panel can claim any leftover space.
+    let image_col_w = art_rendered_cols(app, content_area);
+
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Length(image_col_w), Constraint::Min(1)])
         .split(content_area);
 
     let image_area = cols[0];
     let info_area = cols[1];
 
     if let Some(proto) = album_art {
-        let img = StatefulImage::<StatefulProtocol>::default().resize(Resize::Fit(None));
+        let img = StatefulImage::<StatefulProtocol>::default().resize(Resize::Scale(None));
         f.render_stateful_widget(img, image_area, proto);
     } else {
         let placeholder = Paragraph::new("♪")
@@ -1639,15 +1697,16 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
 }
 
 /// Returns the queue widget rect in full art mode (right column, below the Now Playing block).
-pub fn compute_full_art_queue_rect(area: Rect) -> Rect {
+pub fn compute_full_art_queue_rect(area: Rect, app: &App) -> Rect {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(area);
     let content_area = outer[0];
+    let image_col_w = art_rendered_cols(app, content_area);
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Length(image_col_w), Constraint::Min(1)])
         .split(content_area);
     let info_area = cols[1];
     let info_rows = Layout::default()
@@ -1658,15 +1717,16 @@ pub fn compute_full_art_queue_rect(area: Rect) -> Rect {
 }
 
 /// Returns the eight clickable button rects in the big-screen (full art) controls row: [Prev, PlayPause, Stop, Next, Shuffle, Repeat, VolumeDown, VolumeUp].
-pub fn compute_full_art_control_rects(area: Rect) -> [Rect; 8] {
+pub fn compute_full_art_control_rects(area: Rect, app: &App) -> [Rect; 8] {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(area);
     let content_area = outer[0];
+    let image_col_w = art_rendered_cols(app, content_area);
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Length(image_col_w), Constraint::Min(1)])
         .split(content_area);
     let info_area = cols[1];
     // np_block border (+1) + rows[3] controls in the non-bigscreen layout = info_area.y + 4
@@ -1695,16 +1755,18 @@ pub fn compute_full_art_footer_exit_rect(area: Rect) -> Rect {
     Rect::new(area.x, footer_y, 12, 1)
 }
 
-/// Returns the left-half image area in full art mode.
-pub fn compute_full_art_image_rect(area: Rect) -> Rect {
+/// Returns the left-column image area in full art mode.
+pub fn compute_full_art_image_rect(area: Rect, app: &App) -> Rect {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(area);
+    let content_area = outer[0];
+    let image_col_w = art_rendered_cols(app, content_area);
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(outer[0]);
+        .constraints([Constraint::Length(image_col_w), Constraint::Min(1)])
+        .split(content_area);
     cols[0]
 }
 
@@ -1868,6 +1930,85 @@ pub fn compute_clear_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
     // Layout rows: pad(1), message(1), spacer(min→2), buttons(1) → buttons at offset 4
+    let btn_y = inner_y + 4;
+    let half_w = inner_w / 2;
+    let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
+    let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
+    (popup, [ok_rect, cancel_rect])
+}
+
+fn draw_confirm_delete_queue_item(f: &mut Frame, title: &str, selected_button: u8, accent: Option<[u8; 3]>) {
+    let area = f.area();
+    let popup = centered_rect_abs(54, 7, area);
+
+    f.render_widget(Clear, popup);
+
+    let accent_color = accent
+        .map(|c| Color::Rgb(c[0], c[1], c[2]))
+        .unwrap_or(Color::Yellow);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent_color))
+        .title_style(Style::default().fg(accent_color))
+        .title(" Remove from Queue ");
+
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let display_title = if title.len() > 46 {
+        format!("{}…", &title[..45])
+    } else {
+        title.to_string()
+    };
+    let msg = Paragraph::new(format!("Remove \"{}\"?", display_title))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::White));
+    f.render_widget(msg, rows[1]);
+
+    let btn_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[3]);
+
+    let ok_style = if selected_button == 0 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let cancel_style = if selected_button == 1 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    f.render_widget(
+        Paragraph::new("[ OK ]").alignment(Alignment::Center).style(ok_style),
+        btn_cols[0],
+    );
+    f.render_widget(
+        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        btn_cols[1],
+    );
+}
+
+/// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
+pub fn compute_delete_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
+    let popup = centered_rect_abs(54, 7, area);
+    let inner_x = popup.x + 1;
+    let inner_y = popup.y + 1;
+    let inner_w = popup.width.saturating_sub(2);
     let btn_y = inner_y + 4;
     let half_w = inner_w / 2;
     let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);

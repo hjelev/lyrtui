@@ -1,4 +1,5 @@
 use crate::api::{Album, Artist, FolderItem, NowPlaying, Player, Playlist, RadioItem, Track};
+use std::cell::Cell;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -192,6 +193,8 @@ pub struct App {
     pub context_menu: Option<ContextMenu>,
     pub confirm_clear_queue: bool,
     pub clear_queue_selected_button: u8, // 0 = OK, 1 = Cancel
+    pub confirm_delete_queue_item: Option<usize>, // Some(idx) when pending confirmation
+    pub delete_queue_selected_button: u8, // 0 = OK, 1 = Cancel
     /// Height (in terminal rows) of the Now Playing panel, computed from font metrics.
     pub status_height: u16,
     /// Width (in terminal columns) of the album-art cell in the Now Playing panel.
@@ -206,6 +209,15 @@ pub struct App {
     pub full_art_mode: bool,
     pub accent_color: Option<[u8; 3]>,
     pub disable_auto_colors: bool,
+
+    pub help_scroll: u16,
+    /// Updated each frame by draw_help; used by handlers to clamp scrolling.
+    pub help_visible_lines: Cell<u16>,
+
+    /// Pixel dimensions of the current album art image (width, height).
+    pub art_image_size: Option<(u32, u32)>,
+    /// Terminal font size in pixels (width, height), set once from the picker.
+    pub font_size: (u16, u16),
 }
 
 impl App {
@@ -254,6 +266,8 @@ impl App {
             context_menu: None,
             confirm_clear_queue: false,
             clear_queue_selected_button: 0,
+            confirm_delete_queue_item: None,
+            delete_queue_selected_button: 0,
             status_height: 11, // overwritten in run() from picker font metrics
             art_col_w: 16,     // overwritten in run() from picker font metrics
             search_query: String::new(),
@@ -263,6 +277,10 @@ impl App {
             full_art_mode: false,
             accent_color: None,
             disable_auto_colors: false,
+            help_scroll: 0,
+            help_visible_lines: Cell::new(u16::MAX),
+            art_image_size: None,
+            font_size: (8, 16),
         }
     }
 

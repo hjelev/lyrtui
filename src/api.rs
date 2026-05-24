@@ -480,6 +480,11 @@ impl LmsClient {
         Ok(())
     }
 
+    pub async fn delete_queue_item(&self, player_id: &str, index: usize) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("delete"), json!(index)]).await?;
+        Ok(())
+    }
+
     pub async fn add_url_to_queue(&self, player_id: &str, url: &str) -> Result<()> {
         self.rpc(player_id, &[json!("playlist"), json!("add"), json!(url)]).await?;
         Ok(())

@@ -92,8 +92,10 @@ async fn run(
         let art_col_w = (inner_h as u32 * fs.height as u32 / fs.width as u32) as u16;
         app.status_height = art_rows;
         app.art_col_w = art_col_w.max(4);
+        app.font_size = (fs.width, fs.height);
     }
     let mut album_art: Option<StatefulProtocol> = None;
+    let mut last_artwork_image: Option<image::DynamicImage> = None;
     let mut last_artwork_url: Option<String> = None;
     let mut sidebar_state = ListState::default();
     let mut main_state = ListState::default();
@@ -208,7 +210,9 @@ async fn run(
                                 app.accent_color = Some([c.r, c.g, c.b]);
                             }
                         }
-                        album_art = Some(picker.new_resize_protocol(img));
+                        app.art_image_size = Some((img.width(), img.height()));
+                        album_art = Some(picker.new_resize_protocol(img.clone()));
+                        last_artwork_image = Some(img);
                     }
                 }
                 AppMsg::ThumbnailLoaded(url, bytes) => {
@@ -232,6 +236,8 @@ async fn run(
         if current_url != last_artwork_url {
             last_artwork_url = current_url.clone();
             album_art = None;
+            last_artwork_image = None;
+            app.art_image_size = None;
             // Keep the previous accent_color until the new image resolves.
             if let Some(url) = current_url {
                 let c = client.clone();
@@ -273,12 +279,19 @@ async fn run(
             }
         }
 
+        let had_overlay = app.confirm_delete_queue_item.is_some()
+            || app.confirm_clear_queue
+            || app.config_modal.is_some()
+            || app.context_menu.is_some();
+
         match poll_event(TICK_RATE)? {
             InputEvent::Key(key) => {
                 if app.config_modal.is_some() {
                     handlers::handle_config_key(&mut app, key, &mut cfg, &client);
                 } else if app.confirm_clear_queue {
                     handlers::handle_confirm_clear_queue_key(&mut app, key, &client, &tx).await;
+                } else if app.confirm_delete_queue_item.is_some() {
+                    handlers::handle_confirm_delete_queue_item_key(&mut app, key, &client, &tx).await;
                 } else if app.context_menu.is_some() {
                     handlers::handle_context_menu_key(&mut app, key, &client, &tx).await;
                 } else if matches!(app.main_view, MainView::Search) && app.search_input_active {
@@ -328,6 +341,19 @@ async fn run(
                 .await;
             }
             InputEvent::Tick => {}
+        }
+
+        // When any overlay closes, the terminal graphic protocol has already transmitted the image
+        // data and won't retransmit on the next render. Some terminals discard stored image data
+        // when cells are overwritten by Clear, so we recreate the protocol to force retransmission.
+        let has_overlay = app.confirm_delete_queue_item.is_some()
+            || app.confirm_clear_queue
+            || app.config_modal.is_some()
+            || app.context_menu.is_some();
+        if had_overlay && !has_overlay {
+            if let Some(img) = &last_artwork_image {
+                album_art = Some(picker.new_resize_protocol(img.clone()));
+            }
         }
     }
 

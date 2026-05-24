@@ -18,6 +18,12 @@ fn point_in(col: u16, row: u16, area: Rect) -> bool {
     col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height
 }
 
+const HELP_CONTENT_LINES: u16 = 18; // tallest column in draw_help (left); keep in sync
+
+fn help_max_scroll(app: &App) -> u16 {
+    HELP_CONTENT_LINES.saturating_sub(app.help_visible_lines.get())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_mouse_event(
     app: &mut App,
@@ -52,6 +58,37 @@ pub async fn handle_mouse_event(
                 }
             } else if point_in(col, row, cancel_rect) || !point_in(col, row, popup) {
                 app.confirm_clear_queue = false;
+            }
+        }
+        return;
+    }
+
+    // Delete queue item dialog intercepts all mouse events when open
+    if let Some(idx) = app.confirm_delete_queue_item {
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let (popup, [ok_rect, cancel_rect]) = ui::compute_delete_queue_button_rects(terminal_area);
+            if point_in(col, row, ok_rect) {
+                app.confirm_delete_queue_item = None;
+                if let Some(pid) = app.active_player.clone() {
+                    if idx < app.queue.len() {
+                        let name = app.queue[idx].title.clone();
+                        let c = client.clone();
+                        let t = tx.clone();
+                        tokio::spawn(async move {
+                            if c.delete_queue_item(&pid, idx).await.is_ok() {
+                                let _ = t
+                                    .send(AppMsg::StatusMsg(format!("Removed \"{}\" from queue", name)))
+                                    .await;
+                            }
+                        });
+                        app.queue.remove(idx);
+                        if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
+                            app.main_selected = app.queue.len() - 1;
+                        }
+                    }
+                }
+            } else if point_in(col, row, cancel_rect) || !point_in(col, row, popup) {
+                app.confirm_delete_queue_item = None;
             }
         }
         return;
@@ -133,7 +170,7 @@ pub async fn handle_mouse_event(
     if app.full_art_mode {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                let image_rect = ui::compute_full_art_image_rect(terminal_area);
+                let image_rect = ui::compute_full_art_image_rect(terminal_area, app);
                 if point_in(col, row, image_rect) {
                     app.full_art_mode = false;
                     cfg.full_art_mode = false;
@@ -145,7 +182,7 @@ pub async fn handle_mouse_event(
                     app.full_art_mode = false;
                     return;
                 }
-                let ctrl_rects = ui::compute_full_art_control_rects(terminal_area);
+                let ctrl_rects = ui::compute_full_art_control_rects(terminal_area, app);
                 if let Some((btn_idx, _)) = ctrl_rects.iter().enumerate().find(|(_, r)| point_in(col, row, **r)) {
                     let action = match btn_idx {
                         0 => Action::Prev,
@@ -160,7 +197,7 @@ pub async fn handle_mouse_event(
                     handle_action(app, action, client, tx, vol_sync_tx).await;
                     return;
                 }
-                let queue_rect = ui::compute_full_art_queue_rect(terminal_area);
+                let queue_rect = ui::compute_full_art_queue_rect(terminal_area, app);
                 if point_in(col, row, queue_rect) {
                     let inner_top = queue_rect.y + 1;
                     let inner_bot = queue_rect.y + queue_rect.height.saturating_sub(1);
@@ -180,13 +217,13 @@ pub async fn handle_mouse_event(
                 }
             }
             MouseEventKind::ScrollUp => {
-                let queue_rect = ui::compute_full_art_queue_rect(terminal_area);
+                let queue_rect = ui::compute_full_art_queue_rect(terminal_area, app);
                 if point_in(col, row, queue_rect) {
                     app.main_selected = app.main_selected.saturating_sub(1);
                 }
             }
             MouseEventKind::ScrollDown => {
-                let queue_rect = ui::compute_full_art_queue_rect(terminal_area);
+                let queue_rect = ui::compute_full_art_queue_rect(terminal_area, app);
                 if point_in(col, row, queue_rect) {
                     let max = app.queue.len().saturating_sub(1);
                     if app.main_selected < max {
@@ -363,6 +400,73 @@ pub async fn handle_confirm_clear_queue_key(
         KeyCode::Esc => {
             app.confirm_clear_queue = false;
             app.clear_queue_selected_button = 0;
+        }
+        _ => {}
+    }
+}
+
+pub async fn handle_confirm_delete_queue_item_key(
+    app: &mut App,
+    key: KeyEvent,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    match key.code {
+        KeyCode::Tab | KeyCode::Right | KeyCode::Left => {
+            app.delete_queue_selected_button = 1 - app.delete_queue_selected_button;
+        }
+        KeyCode::Char('y') => {
+            if let Some(idx) = app.confirm_delete_queue_item.take() {
+                app.delete_queue_selected_button = 0;
+                if let Some(pid) = app.active_player.clone() {
+                    if idx < app.queue.len() {
+                        let name = app.queue[idx].title.clone();
+                        let c = client.clone();
+                        let t = tx.clone();
+                        tokio::spawn(async move {
+                            if c.delete_queue_item(&pid, idx).await.is_ok() {
+                                let _ = t
+                                    .send(AppMsg::StatusMsg(format!("Removed \"{}\" from queue", name)))
+                                    .await;
+                            }
+                        });
+                        app.queue.remove(idx);
+                        if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
+                            app.main_selected = app.queue.len() - 1;
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Enter => {
+            let confirmed = app.delete_queue_selected_button == 0;
+            if let Some(idx) = app.confirm_delete_queue_item.take() {
+                app.delete_queue_selected_button = 0;
+                if confirmed {
+                    if let Some(pid) = app.active_player.clone() {
+                        if idx < app.queue.len() {
+                            let name = app.queue[idx].title.clone();
+                            let c = client.clone();
+                            let t = tx.clone();
+                            tokio::spawn(async move {
+                                if c.delete_queue_item(&pid, idx).await.is_ok() {
+                                    let _ = t
+                                        .send(AppMsg::StatusMsg(format!("Removed \"{}\" from queue", name)))
+                                        .await;
+                                }
+                            });
+                            app.queue.remove(idx);
+                            if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
+                                app.main_selected = app.queue.len() - 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.confirm_delete_queue_item = None;
+            app.delete_queue_selected_button = 0;
         }
         _ => {}
     }
@@ -725,6 +829,8 @@ pub async fn handle_action(
         Action::NavUp => {
             if app.focus_sidebar {
                 app.sidebar_selected = app.sidebar_selected.saturating_sub(1);
+            } else if let MainView::Help = &app.main_view {
+                app.help_scroll = app.help_scroll.saturating_sub(1);
             } else if let MainView::Players = &app.main_view {
                 if !app.players_focus_global && app.main_selected == 0 {
                     app.players_focus_global = true;
@@ -747,6 +853,8 @@ pub async fn handle_action(
                 if app.sidebar_selected < max {
                     app.sidebar_selected += 1;
                 }
+            } else if let MainView::Help = &app.main_view {
+                app.help_scroll = app.help_scroll.saturating_add(1).min(help_max_scroll(app));
             } else if let MainView::Players = &app.main_view {
                 if app.players_focus_global {
                     app.players_focus_global = false;
@@ -767,26 +875,42 @@ pub async fn handle_action(
 
         Action::PageUp => {
             if !app.focus_sidebar {
-                app.main_selected = app.main_selected.saturating_sub(10);
+                if let MainView::Help = &app.main_view {
+                    app.help_scroll = app.help_scroll.saturating_sub(10);
+                } else {
+                    app.main_selected = app.main_selected.saturating_sub(10);
+                }
             }
         }
 
         Action::PageDown => {
             if !app.focus_sidebar {
-                let max = utils::main_list_len(app).saturating_sub(1);
-                app.main_selected = (app.main_selected + 10).min(max);
+                if let MainView::Help = &app.main_view {
+                    app.help_scroll = app.help_scroll.saturating_add(10).min(help_max_scroll(app));
+                } else {
+                    let max = utils::main_list_len(app).saturating_sub(1);
+                    app.main_selected = (app.main_selected + 10).min(max);
+                }
             }
         }
 
         Action::Home => {
             if !app.focus_sidebar {
-                app.main_selected = 0;
+                if let MainView::Help = &app.main_view {
+                    app.help_scroll = 0;
+                } else {
+                    app.main_selected = 0;
+                }
             }
         }
 
         Action::End => {
             if !app.focus_sidebar {
-                app.main_selected = utils::main_list_len(app).saturating_sub(1);
+                if let MainView::Help = &app.main_view {
+                    app.help_scroll = help_max_scroll(app);
+                } else {
+                    app.main_selected = utils::main_list_len(app).saturating_sub(1);
+                }
             }
         }
 
@@ -854,6 +978,7 @@ pub async fn handle_action(
                     Some(SidebarItem::Help) => {
                         app.main_view = MainView::Help;
                         app.focus_sidebar = false;
+                        app.help_scroll = 0;
                     }
                     None => {}
                 }
@@ -1035,6 +1160,17 @@ pub async fn handle_action(
             app.full_art_mode = !app.full_art_mode;
             if app.full_art_mode {
                 app.focus_sidebar = false;
+            }
+        }
+
+        Action::DeleteQueueItem => {
+            let in_queue = matches!(app.main_view, MainView::Queue) || app.full_art_mode;
+            if in_queue && !app.focus_sidebar {
+                let idx = app.main_selected;
+                if app.active_player.is_some() && idx < app.queue.len() {
+                    app.confirm_delete_queue_item = Some(idx);
+                    app.delete_queue_selected_button = 0;
+                }
             }
         }
 
@@ -1465,6 +1601,7 @@ async fn handle_add_parent_to_queue(
         app.status_message = Some("No active player".to_string());
         return;
     };
+    let queue_was_empty = app.queue.is_empty();
 
     match app.main_view.clone() {
         MainView::Library(LibraryView::Tracks { album_id: Some(id) }) => {
@@ -1478,6 +1615,7 @@ async fn handle_add_parent_to_queue(
             let t = tx.clone();
             tokio::spawn(async move {
                 if c.add_album_to_queue(&pid, &id).await.is_ok() {
+                    if queue_was_empty { let _ = c.play(&pid).await; }
                     let _ = t
                         .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                         .await;
@@ -1501,6 +1639,7 @@ async fn handle_add_parent_to_queue(
                     }
                 }
                 if added > 0 {
+                    if queue_was_empty { let _ = c.play(&pid).await; }
                     let _ = t
                         .send(AppMsg::StatusMsg(format!(
                             "Added {} items from \"{}\" to queue",
@@ -1527,6 +1666,7 @@ async fn handle_add_parent_to_queue(
                     }
                 }
                 if added > 0 {
+                    if queue_was_empty { let _ = c.play(&pid).await; }
                     let _ = t
                         .send(AppMsg::StatusMsg(format!(
                             "Added {} items from \"{}\" to queue",
@@ -1553,6 +1693,7 @@ async fn handle_add_parent_to_queue(
                     }
                 }
                 if added > 0 {
+                    if queue_was_empty { let _ = c.play(&pid).await; }
                     let _ = t
                         .send(AppMsg::StatusMsg(format!(
                             "Added {} items from \"{}\" to queue",
@@ -1571,6 +1712,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
         app.status_message = Some("No active player".to_string());
         return;
     };
+    let queue_was_empty = app.queue.is_empty();
 
     match app.main_view.clone() {
         MainView::Library(LibraryView::Artists) => {
@@ -1581,6 +1723,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 let t = tx.clone();
                 tokio::spawn(async move {
                     if c.add_artist_to_queue(&pid, &id).await.is_ok() {
+                        if queue_was_empty { let _ = c.play(&pid).await; }
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                             .await;
@@ -1596,6 +1739,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 let t = tx.clone();
                 tokio::spawn(async move {
                     if c.add_album_to_queue(&pid, &id).await.is_ok() {
+                        if queue_was_empty { let _ = c.play(&pid).await; }
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                             .await;
@@ -1613,6 +1757,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 let t = tx.clone();
                 tokio::spawn(async move {
                     if c.add_track_to_queue(&pid, &id).await.is_ok() {
+                        if queue_was_empty { let _ = c.play(&pid).await; }
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                             .await;
@@ -1630,6 +1775,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                         let id = item.id.to_string();
                         tokio::spawn(async move {
                             if c.add_track_to_queue(&pid, &id).await.is_ok() {
+                                if queue_was_empty { let _ = c.play(&pid).await; }
                                 let _ = t
                                     .send(AppMsg::StatusMsg(format!(
                                         "Added \"{}\" to queue",
@@ -1643,6 +1789,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                         let folder_id = item.id;
                         tokio::spawn(async move {
                             if c.add_folder_to_queue(&pid, folder_id).await.is_ok() {
+                                if queue_was_empty { let _ = c.play(&pid).await; }
                                 let _ = t
                                     .send(AppMsg::StatusMsg(format!(
                                         "Added folder \"{}\" to queue",
@@ -1664,6 +1811,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 let t = tx.clone();
                 tokio::spawn(async move {
                     if c.add_url_to_queue(&pid, &url).await.is_ok() {
+                        if queue_was_empty { let _ = c.play(&pid).await; }
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                             .await;
@@ -1680,6 +1828,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 let t = tx.clone();
                 tokio::spawn(async move {
                     if c.add_url_to_queue(&pid, &url).await.is_ok() {
+                        if queue_was_empty { let _ = c.play(&pid).await; }
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                             .await;
@@ -1696,6 +1845,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 let t = tx.clone();
                 tokio::spawn(async move {
                     if c.add_url_to_queue(&pid, &url).await.is_ok() {
+                        if queue_was_empty { let _ = c.play(&pid).await; }
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                             .await;
@@ -1714,6 +1864,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                     let t = tx.clone();
                     tokio::spawn(async move {
                         if c.add_track_to_queue(&pid, &id).await.is_ok() {
+                            if queue_was_empty { let _ = c.play(&pid).await; }
                             let _ = t
                                 .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                                 .await;
@@ -1727,6 +1878,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                     let t = tx.clone();
                     tokio::spawn(async move {
                         if c.add_album_to_queue(&pid, &id).await.is_ok() {
+                            if queue_was_empty { let _ = c.play(&pid).await; }
                             let _ = t
                                 .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                                 .await;
@@ -1740,6 +1892,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                     let t = tx.clone();
                     tokio::spawn(async move {
                         if c.add_artist_to_queue(&pid, &id).await.is_ok() {
+                            if queue_was_empty { let _ = c.play(&pid).await; }
                             let _ = t
                                 .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                                 .await;
@@ -1753,6 +1906,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                     let t = tx.clone();
                     tokio::spawn(async move {
                         if c.add_playlist_to_queue(&pid, &id).await.is_ok() {
+                            if queue_was_empty { let _ = c.play(&pid).await; }
                             let _ = t
                                 .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
                                 .await;
