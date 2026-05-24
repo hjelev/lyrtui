@@ -59,13 +59,15 @@ pub struct ConfigModal {
     pub use_nerd_icons: bool,
     pub auto_discover: bool,
     pub broadcast_mask: String,
-    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask
+    pub disable_auto_colors: bool,
+    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask, 7=disable_auto_colors, 8=OK, 9=Cancel
     pub selected_field: usize,
     pub editing: bool,
     pub error: Option<String>,
 }
 
 impl ConfigModal {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         host: &str,
         port: u16,
@@ -74,6 +76,7 @@ impl ConfigModal {
         use_nerd_icons: bool,
         auto_discover: bool,
         broadcast_mask: &str,
+        disable_auto_colors: bool,
     ) -> Self {
         Self {
             host: host.to_string(),
@@ -83,6 +86,7 @@ impl ConfigModal {
             use_nerd_icons,
             auto_discover,
             broadcast_mask: broadcast_mask.to_string(),
+            disable_auto_colors,
             selected_field: 0,
             editing: false,
             error: None,
@@ -181,11 +185,13 @@ pub struct App {
     pub main_view: MainView,
     pub focus_sidebar: bool,
     pub players_focus_global: bool,
+    pub global_volume_control: bool,
 
     pub status_message: Option<String>,
     pub config_modal: Option<ConfigModal>,
     pub context_menu: Option<ContextMenu>,
     pub confirm_clear_queue: bool,
+    pub clear_queue_selected_button: u8, // 0 = OK, 1 = Cancel
     /// Height (in terminal rows) of the Now Playing panel, computed from font metrics.
     pub status_height: u16,
     /// Width (in terminal columns) of the album-art cell in the Now Playing panel.
@@ -199,6 +205,7 @@ pub struct App {
     pub use_nerd_icons: bool,
     pub full_art_mode: bool,
     pub accent_color: Option<[u8; 3]>,
+    pub disable_auto_colors: bool,
 }
 
 impl App {
@@ -241,10 +248,12 @@ impl App {
             main_view: MainView::MyMusic,
             focus_sidebar: true,
             players_focus_global: false,
+            global_volume_control: false,
             status_message: None,
             config_modal: None,
             context_menu: None,
             confirm_clear_queue: false,
+            clear_queue_selected_button: 0,
             status_height: 11, // overwritten in run() from picker font metrics
             art_col_w: 16,     // overwritten in run() from picker font metrics
             search_query: String::new(),
@@ -253,6 +262,7 @@ impl App {
             use_nerd_icons: false,
             full_art_mode: false,
             accent_color: None,
+            disable_auto_colors: false,
         }
     }
 
@@ -271,6 +281,10 @@ impl App {
 
     pub fn is_playing(&self) -> bool {
         self.now_playing.as_ref().map(|n| n.is_playing).unwrap_or(false)
+    }
+
+    pub fn effective_accent(&self) -> Option<[u8; 3]> {
+        if self.disable_auto_colors { None } else { self.accent_color }
     }
 }
 

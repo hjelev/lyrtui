@@ -37,78 +37,97 @@ fn focus_border_color(accent: Option<[u8; 3]>) -> Color {
     }
 }
 
-fn unfocus_border_color(accent: Option<[u8; 3]>) -> Color {
+fn accent_tint(accent: Option<[u8; 3]>, pct: u16, r_off: u16, g_off: u16, b_off: u16, fallback: Color) -> Color {
     match accent {
         Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 25 / 100 + 20).min(255) as u8,
-            (g as u16 * 25 / 100 + 20).min(255) as u8,
-            (b as u16 * 25 / 100 + 30).min(255) as u8,
+            (r as u16 * pct / 100 + r_off).min(255) as u8,
+            (g as u16 * pct / 100 + g_off).min(255) as u8,
+            (b as u16 * pct / 100 + b_off).min(255) as u8,
         ),
-        None => Color::DarkGray,
+        None => fallback,
     }
+}
+
+fn unfocus_border_color(accent: Option<[u8; 3]>) -> Color {
+    accent_tint(accent, 25, 20, 20, 30, Color::DarkGray)
 }
 
 /// Very dark accent tint used as the background for media control buttons.
 fn btn_bg_color(accent: Option<[u8; 3]>) -> Color {
-    match accent {
-        Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 12 / 100 + 15).min(255) as u8,
-            (g as u16 * 12 / 100 + 15).min(255) as u8,
-            (b as u16 * 12 / 100 + 20).min(255) as u8,
-        ),
-        None => Color::Rgb(28, 32, 45),
-    }
+    accent_tint(accent, 12, 15, 15, 20, Color::Rgb(28, 32, 45))
 }
 
 /// Slightly brighter dark accent tint for active-state toggle buttons (shuffle on, repeat on).
 fn btn_active_bg_color(accent: Option<[u8; 3]>) -> Color {
-    match accent {
-        Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 22 / 100 + 15).min(255) as u8,
-            (g as u16 * 22 / 100 + 15).min(255) as u8,
-            (b as u16 * 22 / 100 + 20).min(255) as u8,
-        ),
-        None => Color::Rgb(20, 45, 60),
-    }
+    accent_tint(accent, 22, 15, 15, 20, Color::Rgb(20, 45, 60))
 }
 
 /// Dimmed foreground for inactive toggle buttons (shuffle off, repeat off).
 fn btn_dim_color(accent: Option<[u8; 3]>) -> Color {
-    match accent {
-        Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 30 / 100 + 15).min(255) as u8,
-            (g as u16 * 30 / 100 + 15).min(255) as u8,
-            (b as u16 * 30 / 100 + 20).min(255) as u8,
-        ),
-        None => Color::Rgb(80, 80, 100),
-    }
+    accent_tint(accent, 30, 15, 15, 20, Color::Rgb(80, 80, 100))
 }
 
 /// Mid-brightness color from the accent palette — between the bright focus color and the dark
 /// unfocus color. Used for secondary labels that should feel tinted but not dominant.
 fn mid_accent_color(accent: Option<[u8; 3]>) -> Color {
-    match accent {
-        Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 58 / 100 + 18).min(255) as u8,
-            (g as u16 * 58 / 100 + 18).min(255) as u8,
-            (b as u16 * 58 / 100 + 25).min(255) as u8,
-        ),
-        None => Color::Gray,
+    accent_tint(accent, 58, 18, 18, 25, Color::Gray)
+}
+
+fn sync_scroll_offset(state: &mut ListState, selected: usize, visible: usize) -> usize {
+    let o = *state.offset_mut();
+    let new_o = if selected < o {
+        selected
+    } else if visible > 0 && selected >= o + visible {
+        selected + 1 - visible
+    } else {
+        o
+    };
+    *state.offset_mut() = new_o;
+    new_o
+}
+
+fn pill_endcap_left(bg: Color) -> Span<'static> {
+    Span::styled("\u{e0b6}", Style::default().fg(bg).bg(Color::Reset))
+}
+
+fn pill_endcap_right(bg: Color) -> Span<'static> {
+    Span::styled("\u{e0b4}", Style::default().fg(bg).bg(Color::Reset))
+}
+
+fn icon_vol(nerd: bool) -> &'static str {
+    if nerd { "\u{F028}" } else { "♪" }
+}
+
+fn icon_player_dot(nerd: bool) -> &'static str {
+    if nerd { "\u{f075a}" } else { "▶" }
+}
+
+fn icon_globe(nerd: bool) -> &'static str {
+    if nerd { " \u{F0AC}" } else { " ◎" }
+}
+
+/// Returns (pill_bg, pill_fg) for the yazi-style pill selector.
+fn pill_colors(focused: bool) -> (Color, Color) {
+    if focused {
+        (Color::Rgb(45, 100, 170), Color::Rgb(220, 235, 255))
+    } else {
+        (Color::Rgb(50, 50, 68), Color::Rgb(190, 190, 210))
     }
 }
 
 /// Pill cursor styles: returns (primary_line_style, secondary_line_style).
 /// Focused uses a solid accent color; unfocused uses a dimmed variant.
 fn cursor_styles(focused: bool) -> (Style, Style) {
+    let (bg, fg) = pill_colors(focused);
     if focused {
         (
-            Style::default().bg(Color::Rgb(45, 100, 170)).fg(Color::Rgb(220, 235, 255)).add_modifier(Modifier::BOLD),
-            Style::default().bg(Color::Rgb(45, 100, 170)).fg(Color::Rgb(160, 195, 230)),
+            Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD),
+            Style::default().bg(bg).fg(Color::Rgb(160, 195, 230)),
         )
     } else {
         (
-            Style::default().bg(Color::Rgb(50, 50, 68)).fg(Color::Rgb(190, 190, 210)),
-            Style::default().bg(Color::Rgb(50, 50, 68)).fg(Color::Rgb(140, 140, 160)),
+            Style::default().bg(bg).fg(fg),
+            Style::default().bg(bg).fg(Color::Rgb(140, 140, 160)),
         )
     }
 }
@@ -190,7 +209,7 @@ pub fn draw(
     let area = f.area();
 
     if app.full_art_mode {
-        draw_full_art_mode(f, app, area, album_art);
+        draw_full_art_mode(f, app, area, album_art, main_state, thumbnails);
     } else {
         // Outer layout: main content | status bar | notification line
         let outer = Layout::default()
@@ -230,19 +249,19 @@ pub fn draw(
                     ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
                     ("t", "power"), ("Spc", "play/pause"), ("n/p", "next/prev"),
                     ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
-                ], app.accent_color)
+                ], app.effective_accent())
             } else if matches!(app.main_view, MainView::Search) {
                 if app.search_input_active {
-                    hint_line(&[("Type", "query"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")], app.accent_color)
+                    hint_line(&[("Type", "query"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")], app.effective_accent())
                 } else {
-                    hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("i//", "edit query"), ("Esc", "back"), ("q", "quit")], app.accent_color)
+                    hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("i//", "edit query"), ("Esc", "back"), ("q", "quit")], app.effective_accent())
                 }
             } else {
                 hint_line(&[
                     ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
                     ("a", "add to queue"), ("Spc", "play/pause"), ("n/p", "next/prev"),
                     ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
-                ], app.accent_color)
+                ], app.effective_accent())
             };
             f.render_widget(Paragraph::new(footer), notif_area);
         }
@@ -253,11 +272,11 @@ pub fn draw(
     }
 
     if let Some(modal) = &app.config_modal {
-        draw_config_modal(f, modal, app.accent_color);
+        draw_config_modal(f, modal, app.effective_accent());
     }
 
     if app.confirm_clear_queue {
-        draw_confirm_clear_queue(f, app.queue.len());
+        draw_confirm_clear_queue(f, app.queue.len(), app.clear_queue_selected_button, app.effective_accent());
     }
 
     if app.context_menu.is_some() {
@@ -269,8 +288,8 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(unfocus_border_color(app.accent_color)))
-        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
+        .border_style(Style::default().fg(unfocus_border_color(app.effective_accent())))
+        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" Status ");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -280,7 +299,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
         .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
         .split(inner);
 
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
 
     // Active player
     let player_name = app.active_player.as_ref()
@@ -289,7 +308,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
         .unwrap_or("—");
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("▶ ", Style::default().fg(mid)),
+            Span::styled(if app.use_nerd_icons { "\u{f075a} " } else { "▶ " }, Style::default().fg(mid)),
             Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
         ])),
         rows[0],
@@ -297,10 +316,12 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
 
     // Volume
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
+    let globe_icon = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("Vol ", Style::default().fg(mid)),
             Span::styled(format!("{vol}%"), Style::default().fg(Color::White)),
+            Span::styled(globe_icon, Style::default().fg(focus_border_color(app.effective_accent()))),
         ])),
         rows[1],
     );
@@ -331,26 +352,45 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let border_style = if app.focus_sidebar {
-        Style::default().fg(focus_border_color(app.accent_color))
+        Style::default().fg(focus_border_color(app.effective_accent()))
     } else {
-        Style::default().fg(unfocus_border_color(app.accent_color))
+        Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
-        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
+        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" Navigation ");
+
+    let (pill_bg, pill_fg) = pill_colors(app.focus_sidebar);
 
     let items: Vec<ListItem> = app
         .sidebar_items
         .iter()
-        .map(|item| {
+        .enumerate()
+        .map(|(i, item)| {
             let label = app.sidebar_label(item);
-            if app.use_nerd_icons {
+            let selected = i == app.sidebar_selected;
+            if selected {
+                if app.use_nerd_icons {
+                    ListItem::new(Line::from(vec![
+                        pill_endcap_left(pill_bg),
+                        Span::styled(format!(" {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
+                        Span::styled(format!("{} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                        pill_endcap_right(pill_bg),
+                    ]))
+                } else {
+                    ListItem::new(Line::from(vec![
+                        pill_endcap_left(pill_bg),
+                        Span::styled(format!(" {} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                        pill_endcap_right(pill_bg),
+                    ]))
+                }
+            } else if app.use_nerd_icons {
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.accent_color))),
+                    Span::styled(format!("  {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.effective_accent()))),
                     Span::raw(label.to_string()),
                 ]))
             } else {
@@ -364,12 +404,10 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
     state.select(Some(app.sidebar_selected));
 
-    let (hl_style, hl_symbol) = (cursor_styles(app.focus_sidebar).0, "");
-
     let list = List::new(items)
         .block(block)
-        .highlight_style(hl_style)
-        .highlight_symbol(hl_symbol);
+        .highlight_style(Style::default())
+        .highlight_symbol("");
 
     f.render_stateful_widget(list, area, state);
 
@@ -382,7 +420,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             area.height.saturating_sub(2),
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.accent_color);
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent());
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -410,18 +448,18 @@ fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
 
 fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
     let border_style = if focused {
-        Style::default().fg(focus_border_color(app.accent_color))
+        Style::default().fg(focus_border_color(app.effective_accent()))
     } else {
-        Style::default().fg(unfocus_border_color(app.accent_color))
+        Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
-        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
+        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" My Music ");
 
     let entries: [(&str, &str, &str); 4] = if app.use_nerd_icons {
@@ -440,19 +478,31 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         ]
     };
 
-    let items: Vec<ListItem> = entries.iter().map(|(icon, label, sub)| {
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {}  ", icon), Style::default().fg(focus_border_color(app.accent_color))),
-            Span::raw(label.to_string()),
-            Span::styled(format!("  — {}", sub), Style::default().fg(mid)),
-        ]))
+    let (pill_bg, pill_fg) = pill_colors(focused);
+
+    let items: Vec<ListItem> = entries.iter().enumerate().map(|(i, (icon, label, sub))| {
+        if i == app.main_selected {
+            ListItem::new(Line::from(vec![
+                pill_endcap_left(pill_bg),
+                Span::styled(format!(" {}  ", icon), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
+                Span::styled(label.to_string(), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                Span::styled(format!("  — {} ", sub), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
+                pill_endcap_right(pill_bg),
+            ]))
+        } else {
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("  {}  ", icon), Style::default().fg(focus_border_color(app.effective_accent()))),
+                Span::raw(label.to_string()),
+                Span::styled(format!("  — {}", sub), Style::default().fg(mid)),
+            ]))
+        }
     }).collect();
 
     state.select(Some(app.main_selected));
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(cursor_styles(focused).0)
+        .highlight_style(Style::default())
         .highlight_symbol("");
 
     f.render_stateful_widget(list, area, state);
@@ -460,7 +510,7 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
 fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
     match view {
         LibraryView::Artists => {
             let items = app.artists.iter().map(|a| RowItem {
@@ -468,7 +518,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 line1: Line::from(Span::raw(format!("  {}", a.artist))),
                 line2: Line::from(Span::styled("  artist", Style::default().fg(mid))),
             }).collect();
-            draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, state, thumbnails, app.accent_color);
+            draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, state, thumbnails, app.effective_accent());
         }
         LibraryView::Albums { .. } => {
             let items = app.albums.iter().map(|a| {
@@ -479,7 +529,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     line2: Line::from(Span::styled(format!("  {}", sub), Style::default().fg(mid))),
                 }
             }).collect();
-            draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, state, thumbnails, app.accent_color);
+            draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, state, thumbnails, app.effective_accent());
         }
         LibraryView::Tracks { album_id } => {
             let title = if album_id.is_some() { " Tracks " } else { " All Tracks " };
@@ -495,7 +545,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     )),
                 }
             }).collect();
-            draw_two_row_list(f, area, title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
+            draw_two_row_list(f, area, title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
         }
         LibraryView::Folder { .. } => {
             let breadcrumb = breadcrumb_str(
@@ -531,14 +581,14 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     )),
                 }
             }).collect();
-            draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
+            draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
         }
     }
 }
 
 fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
     let playing_title = app.now_playing.as_ref().map(|n| n.title.as_str()).unwrap_or("");
 
     let items = app.queue.iter().enumerate().map(|(i, t)| {
@@ -563,23 +613,23 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
         }
     }).collect();
 
-    draw_two_row_list(f, area, " Queue ", items, app.main_selected, focused, state, thumbnails, app.accent_color);
+    draw_two_row_list(f, area, " Queue ", items, app.main_selected, focused, state, thumbnails, app.effective_accent());
 }
 
 fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
     let border_style = if focused {
-        Style::default().fg(focus_border_color(app.accent_color))
+        Style::default().fg(focus_border_color(app.effective_accent()))
     } else {
-        Style::default().fg(unfocus_border_color(app.accent_color))
+        Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
-        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
+        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" Players ");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -603,34 +653,31 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let glob_bg = if glob_focused { Color::Rgb(45, 100, 170) } else { Color::Reset };
     let glob_fg = if glob_focused { Color::Rgb(220, 235, 255) } else { mid };
 
-    let label = " ◎ Global  ";
+    let checkbox = if app.global_volume_control { "[x]" } else { "[ ]" };
+    let label = format!(" {} Global vol  ", checkbox);
     let vol_str = format!(" {}%", global_avg);
-    let bar_w = (chunks[0].width as usize).saturating_sub(label.len() + vol_str.len());
+    // Use char count (display width) so bar aligns with player rows.
+    let label_w: usize = label.chars().count();
+    let bar_w = (chunks[0].width as usize).saturating_sub(label_w + vol_str.len() + 1);
     let filled = if bar_w > 0 { (global_avg as usize * bar_w) / 100 } else { 0 };
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
 
+    let checkbox_color = if app.global_volume_control {
+        focus_border_color(app.effective_accent())
+    } else {
+        mid
+    };
     let global_line = Line::from(vec![
-        Span::styled(label, Style::default().fg(glob_fg).bg(glob_bg)),
+        Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
+        Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
+        Span::styled(" Global vol  ", Style::default().fg(glob_fg).bg(glob_bg)),
         Span::styled(bar, Style::default().fg(if glob_focused { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) }).bg(glob_bg)),
         Span::styled(&vol_str, Style::default().fg(if glob_focused { Color::White } else { mid }).bg(glob_bg)),
     ]);
     f.render_widget(Paragraph::new(global_line), chunks[0]);
 
     // --- Player list ---
-    let items: Vec<ListItem> = app.players.iter().map(|p| {
-        let active = app.active_player.as_deref() == Some(p.playerid.as_str());
-        let powered = p.power > 0;
-        let marker = if active { "● " } else { "○ " };
-        let power_tag = if powered { "" } else { " [off]" };
-        let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
-        let name_fg = if active { Color::Green } else if powered { Color::White } else { mid };
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {}{}{}", marker, p.name, power_tag), Style::default().fg(name_fg)),
-            Span::styled(format!(" {}%", vol), Style::default().fg(mid)),
-        ]))
-    }).collect();
-
-    if items.is_empty() {
+    if app.players.is_empty() {
         state.select(None);
         f.render_widget(
             Paragraph::new("(no players)").style(Style::default().fg(mid)),
@@ -639,18 +686,90 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         return;
     }
 
-    state.select(if app.players_focus_global { None } else { Some(app.main_selected) });
+    let list_area = chunks[1];
+    let total = app.players.len();
+    let visible = list_area.height as usize;
 
-    let list = List::new(items)
-        .highlight_style(cursor_styles(focused && !app.players_focus_global).0)
-        .highlight_symbol("");
+    // Pin name column so all rows share one bar-start column.
+    // label_w = len(" [x] Global vol  ") = 17; subtract 3 for the " ○ " prefix.
+    let name_col_w: usize = label_w - 3;
 
-    f.render_stateful_widget(list, chunks[1], state);
+    let offset = if !app.players_focus_global {
+        sync_scroll_offset(state, app.main_selected, visible)
+    } else {
+        *state.offset_mut()
+    };
+
+    for (vis_i, item_i) in (offset..).zip(0usize..) {
+        if vis_i >= total { break; }
+        let y = list_area.y + item_i as u16;
+        if y >= list_area.y + list_area.height { break; }
+
+        let p = &app.players[vis_i];
+        let active = app.active_player.as_deref() == Some(p.playerid.as_str());
+        let powered = p.power > 0;
+        let is_sel = focused && !app.players_focus_global && vis_i == app.main_selected;
+        let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
+
+        let marker = if active { "● " } else { "○ " };
+        let power_tag = if powered { "" } else { " [off]" };
+        let name_raw = format!("{}{}{}", marker, p.name, power_tag);
+
+        // Pad/truncate to name_col_w display chars — use > so exact-fit names aren't truncated.
+        let name_padded = if name_raw.chars().count() > name_col_w {
+            let s: String = name_raw.chars().take(name_col_w.saturating_sub(1)).collect();
+            format!("{}…", s)
+        } else {
+            format!("{:<width$}", name_raw, width = name_col_w)
+        };
+        let label = format!(" {}  ", name_padded);
+
+        let row_bg = if is_sel { Color::Rgb(45, 100, 170) } else { Color::Reset };
+        let name_fg = if is_sel { Color::Rgb(220, 235, 255) }
+                      else if active { Color::Green }
+                      else if powered { Color::White }
+                      else { mid };
+        let bar_color = if is_sel { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) };
+        let vol_fg = if is_sel { Color::White } else { mid };
+
+        // Use fixed display width (= global label_w) so all bars start and end at the same column.
+        let vol_str = format!(" {}%", vol);
+        let row_w = list_area.width as usize;
+        let bar_w = row_w.saturating_sub(label_w + vol_str.len() + 1);
+        let filled = if bar_w > 0 { (vol as usize * bar_w) / 100 } else { 0 };
+        let bar_str = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
+
+        let line = Line::from(vec![
+            Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
+            Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
+            Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
+        ]);
+        f.render_widget(Paragraph::new(line), Rect::new(list_area.x, y, list_area.width, 1));
+    }
+
+    if total > visible {
+        let scroll_area = Rect::new(
+            area.x + area.width.saturating_sub(1),
+            list_area.y,
+            1,
+            list_area.height,
+        );
+        let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent());
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("║")
+            .track_symbol(Some("│"))
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(track_style)
+            .thumb_style(thumb_style);
+        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+    }
 }
 
 fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
     let breadcrumb = breadcrumb_str(app.radio_nav_stack.iter().map(|n| n.title.as_str()), &app.radio_title);
     let title = format!(" {} ", breadcrumb);
     let items = app.radio_items.iter().map(|item| {
@@ -664,12 +783,12 @@ fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
             )),
         }
     }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
 }
 
 fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
     let breadcrumb = breadcrumb_str(app.app_nav_stack.iter().map(|n| n.title.as_str()), &app.app_title);
     let title = format!(" {} ", breadcrumb);
     let items = app.app_items.iter().map(|item| {
@@ -683,12 +802,12 @@ fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
             )),
         }
     }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
 }
 
 fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
     let breadcrumb = breadcrumb_str(app.fav_nav_stack.iter().map(|n| n.title.as_str()), &app.fav_title);
     let title = format!(" ★ {} ", breadcrumb);
     let items = app.fav_items.iter().map(|item| {
@@ -702,23 +821,23 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
             )),
         }
     }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.accent_color);
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
 }
 
 fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
 
     let border_style = if focused {
-        Style::default().fg(focus_border_color(app.accent_color))
+        Style::default().fg(focus_border_color(app.effective_accent()))
     } else {
-        Style::default().fg(unfocus_border_color(app.accent_color))
+        Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
-        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
+        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" Search ");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -730,9 +849,9 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
 
     // Search input box
     let input_border_style = if app.search_input_active {
-        Style::default().fg(focus_border_color(app.accent_color))
+        Style::default().fg(focus_border_color(app.effective_accent()))
     } else {
-        Style::default().fg(unfocus_border_color(app.accent_color))
+        Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
     let cursor = if app.search_input_active { "█" } else { "" };
     let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" };  // nf-fa-search
@@ -764,19 +883,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
     let visible = ((results_area.height / 2) as usize).max(1);
     let total = app.search_results.len();
 
-    // Sync scroll offset
-    let offset = {
-        let o = *state.offset_mut();
-        let new_o = if selected < o {
-            selected
-        } else if selected >= o + visible {
-            selected + 1 - visible
-        } else {
-            o
-        };
-        *state.offset_mut() = new_o;
-        new_o
-    };
+    let offset = sync_scroll_offset(state, selected, visible);
 
     let text_x = results_area.x + THUMB_W + THUMB_SEP;
     let text_w = results_area.width.saturating_sub(THUMB_W + THUMB_SEP);
@@ -878,7 +985,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             results_area.height,
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.accent_color);
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent());
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -891,13 +998,13 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
-    let accent = focus_border_color(app.accent_color);
-    let mid = mid_accent_color(app.accent_color);
+    let accent = focus_border_color(app.effective_accent());
+    let mid = mid_accent_color(app.effective_accent());
     let focused = !app.focus_sidebar;
     let border_style = if focused {
         Style::default().fg(accent)
     } else {
-        Style::default().fg(unfocus_border_color(app.accent_color))
+        Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
     let block = Block::default()
         .borders(Borders::ALL)
@@ -945,6 +1052,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         header("Players"),
         shortcut("t",  "Toggle player power",                           mid),
+        shortcut("Enter (on Global vol)", "Toggle global volume control", mid),
         Line::from(""),
         header("App"),
         shortcut("c",         "Open server configuration",              mid),
@@ -980,7 +1088,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(focus_border_color(app.accent_color)))
+        .border_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" Now Playing ");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -1040,7 +1148,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let ctrl_row = if bigscreen { 6 } else { 3 };
     let progress_row = if bigscreen { 8 } else { 5 };
     let indent: &str = if bigscreen { " " } else { "" };
-    let mid = mid_accent_color(app.accent_color);
+    let mid = mid_accent_color(app.effective_accent());
 
     let play_icon = if app.use_nerd_icons {
         if np.is_playing { "\u{F04B}" } else { "\u{F04C}" }  // nf-fa-play / nf-fa-pause
@@ -1078,7 +1186,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     ]);
     f.render_widget(Paragraph::new(title_line), rows[0]);
 
-    let accent = focus_border_color(app.accent_color);
+    let accent = focus_border_color(app.effective_accent());
     let artist_line = Line::from(vec![
         Span::raw(indent),
         Span::styled("  by ", Style::default().fg(mid)),
@@ -1102,11 +1210,14 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
             .map(|p| p.name.as_str())
             .unwrap_or("—");
-        let vol_icon = if app.use_nerd_icons { "\u{F028}" } else { "♪" };  // nf-fa-volume-up
+        let vol_icon = icon_vol(app.use_nerd_icons);
+        let globe_icon = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
         let player_vol_line = Line::from(vec![
-            Span::styled(format!(" {} ", vol_icon), Style::default().fg(mid)),
-            Span::styled(player_name.to_string(), Style::default().fg(accent)),
-            Span::styled(format!("  {}%", np.volume), Style::default().fg(mid)),
+            Span::styled(if app.use_nerd_icons { " \u{f075a} " } else { " ▶ " }, Style::default().fg(mid)),
+            Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
+            Span::styled(format!("  {} ", vol_icon), Style::default().fg(mid)),
+            Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
+            Span::styled(globe_icon, Style::default().fg(accent)),
         ]);
         f.render_widget(Paragraph::new(player_vol_line), rows[4]);
     }
@@ -1135,7 +1246,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             if x + btn_w > ctrl_max_x { break; }
             f.render_widget(
                 Paragraph::new(format!(" {} ", icon))
-                    .style(Style::default().fg(focus_border_color(app.accent_color)).bg(btn_bg_color(app.accent_color))),
+                    .style(Style::default().fg(focus_border_color(app.effective_accent())).bg(btn_bg_color(app.effective_accent()))),
                 Rect::new(x, ctrl.y, btn_w, 1),
             );
         }
@@ -1143,9 +1254,9 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         let shuffle_x = ctrl_x + 4 * (btn_w + gap) + sep;
         if shuffle_x + btn_w <= ctrl_max_x {
             let (sfg, sbg) = if np.shuffle > 0 {
-                (focus_border_color(app.accent_color), btn_active_bg_color(app.accent_color))
+                (focus_border_color(app.effective_accent()), btn_active_bg_color(app.effective_accent()))
             } else {
-                (btn_dim_color(app.accent_color), btn_bg_color(app.accent_color))
+                (btn_dim_color(app.effective_accent()), btn_bg_color(app.effective_accent()))
             };
             f.render_widget(
                 Paragraph::new(format!(" {} ", shuf_icon)).style(Style::default().fg(sfg).bg(sbg)),
@@ -1156,23 +1267,23 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         if repeat_x + btn_w <= ctrl_max_x {
             let (rfg, rbg, rep_btn) = match np.repeat {
                 1 => (
-                    focus_border_color(app.accent_color),
-                    btn_active_bg_color(app.accent_color),
+                    focus_border_color(app.effective_accent()),
+                    btn_active_bg_color(app.effective_accent()),
                     if app.use_nerd_icons { " \u{F01E}1".to_string() } else { " ↺1".to_string() },
                 ),
                 2 => (
-                    focus_border_color(app.accent_color),
-                    btn_active_bg_color(app.accent_color),
+                    focus_border_color(app.effective_accent()),
+                    btn_active_bg_color(app.effective_accent()),
                     if app.use_nerd_icons { " \u{F01E} ".to_string() } else { " ↺ ".to_string() },
                 ),
                 3 => (
-                    focus_border_color(app.accent_color),
-                    btn_active_bg_color(app.accent_color),
+                    focus_border_color(app.effective_accent()),
+                    btn_active_bg_color(app.effective_accent()),
                     " ∞ ".to_string(),
                 ),
                 _ => (
-                    btn_dim_color(app.accent_color),
-                    btn_bg_color(app.accent_color),
+                    btn_dim_color(app.effective_accent()),
+                    btn_bg_color(app.effective_accent()),
                     if app.use_nerd_icons { " \u{F01E} ".to_string() } else { " ↺ ".to_string() },
                 ),
             };
@@ -1186,7 +1297,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             let vol_down_icon = if app.use_nerd_icons { "\u{F027}" } else { "−" };  // nf-fa-volume-down
             f.render_widget(
                 Paragraph::new(format!(" {} ", vol_down_icon))
-                    .style(Style::default().fg(focus_border_color(app.accent_color)).bg(btn_bg_color(app.accent_color))),
+                    .style(Style::default().fg(focus_border_color(app.effective_accent())).bg(btn_bg_color(app.effective_accent()))),
                 Rect::new(vol_down_x, ctrl.y, btn_w, 1),
             );
         }
@@ -1195,7 +1306,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             let vol_up_icon = if app.use_nerd_icons { "\u{F028}" } else { "+" };  // nf-fa-volume-up
             f.render_widget(
                 Paragraph::new(format!(" {} ", vol_up_icon))
-                    .style(Style::default().fg(focus_border_color(app.accent_color)).bg(btn_bg_color(app.accent_color))),
+                    .style(Style::default().fg(focus_border_color(app.effective_accent())).bg(btn_bg_color(app.effective_accent()))),
                 Rect::new(vol_up_x, ctrl.y, btn_w, 1),
             );
         }
@@ -1230,7 +1341,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let over_filled_text: String = text_bytes[..over_filled].iter().collect();
     let over_unfilled_text: String = text_bytes[over_filled..].iter().collect();
 
-    let (accent, track_color) = match app.accent_color {
+    let (accent, track_color) = match app.effective_accent() {
         Some([r, g, b]) => (
             Color::Rgb(r, g, b),
             Color::Rgb(
@@ -1262,6 +1373,8 @@ fn draw_full_art_mode(
     app: &App,
     area: Rect,
     album_art: Option<&mut StatefulProtocol>,
+    main_state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
 ) {
     // Outer: content row | footer
     let outer = Layout::default()
@@ -1291,19 +1404,67 @@ fn draw_full_art_mode(
         f.render_widget(placeholder, image_area);
     }
 
+    let info_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(8), Constraint::Min(1)])
+        .split(info_area);
+
+    let np_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(focus_border_color(app.effective_accent())))
+        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
+        .title(" Now Playing ");
+    let np_inner = np_block.inner(info_rows[0]);
+    f.render_widget(np_block, info_rows[0]);
+
     if let Some(np) = &app.now_playing {
-        draw_now_playing_info(f, app, np, info_area, true);
+        draw_now_playing_info(f, app, np, np_inner, false);
     } else {
         let msg = Paragraph::new("No player selected — press → then navigate to Players")
             .style(Style::default().fg(Color::DarkGray));
-        f.render_widget(msg, info_area);
+        f.render_widget(msg, np_inner);
     }
+
+    draw_queue(f, app, info_rows[1], main_state, thumbnails);
+
+    let mid = mid_accent_color(app.effective_accent());
+    let accent = focus_border_color(app.effective_accent());
+    let player_name = app.active_player.as_ref()
+        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "—".to_string());
+    let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
+    let vol_icon = icon_vol(app.use_nerd_icons);
+    let player_icon = icon_player_dot(app.use_nerd_icons);
+    let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
+    let vol_str = format!("{}%", vol);
+    let right_w = (1 + player_icon.chars().count() + 1
+        + player_name.chars().count()
+        + 2 + vol_icon.chars().count() + 1
+        + vol_str.chars().count()
+        + globe.chars().count()
+        + 1) as u16;
+
+    let footer_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(1), Constraint::Length(right_w)])
+        .split(footer_area);
 
     let footer = hint_line(&[
         ("`", "exit art"), ("Spc", "play/pause"), ("n/p", "next/prev"),
         ("+/-", "vol"), ("c", "config"), ("q", "quit"),
-    ], app.accent_color);
-    f.render_widget(Paragraph::new(footer), footer_area);
+    ], app.effective_accent());
+    f.render_widget(Paragraph::new(footer), footer_cols[0]);
+
+    let right_line = Line::from(vec![
+        Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
+        Span::styled(player_name, Style::default().fg(Color::White)),
+        Span::styled(format!("  {} ", vol_icon), Style::default().fg(mid)),
+        Span::styled(vol_str, Style::default().fg(Color::White)),
+        Span::styled(format!("{} ", globe), Style::default().fg(accent)),
+    ]);
+    f.render_widget(Paragraph::new(right_line), footer_cols[1]);
 }
 
 fn draw_disconnected_overlay(f: &mut Frame, area: Rect, state: &ConnectionState) {
@@ -1367,19 +1528,7 @@ fn draw_two_row_list(
     let visible = ((inner.height / 2) as usize).max(1);
     let needs_scroll = items.len() > visible;
 
-    // Sync scroll so selected is always visible
-    let offset = {
-        let o = *state.offset_mut();
-        let new_o = if selected < o {
-            selected
-        } else if selected >= o + visible {
-            selected + 1 - visible
-        } else {
-            o
-        };
-        *state.offset_mut() = new_o;
-        new_o
-    };
+    let offset = sync_scroll_offset(state, selected, visible);
 
     let text_x = inner.x + THUMB_W + THUMB_SEP;
     let text_w = inner.width.saturating_sub(THUMB_W + THUMB_SEP);
@@ -1489,6 +1638,25 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, w, height)
 }
 
+/// Returns the queue widget rect in full art mode (right column, below the Now Playing block).
+pub fn compute_full_art_queue_rect(area: Rect) -> Rect {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(area);
+    let content_area = outer[0];
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(content_area);
+    let info_area = cols[1];
+    let info_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(8), Constraint::Min(1)])
+        .split(info_area);
+    info_rows[1]
+}
+
 /// Returns the eight clickable button rects in the big-screen (full art) controls row: [Prev, PlayPause, Stop, Next, Shuffle, Repeat, VolumeDown, VolumeUp].
 pub fn compute_full_art_control_rects(area: Rect) -> [Rect; 8] {
     let outer = Layout::default()
@@ -1501,9 +1669,9 @@ pub fn compute_full_art_control_rects(area: Rect) -> [Rect; 8] {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(content_area);
     let info_area = cols[1];
-    // ctrl_row is rows[6] in the bigscreen layout (each preceding row is Length(1))
-    let ctrl_y = info_area.y + 6;
-    let ctrl_x = info_area.x + 1; // bigscreen indent
+    // np_block border (+1) + rows[3] controls in the non-bigscreen layout = info_area.y + 4
+    let ctrl_y = info_area.y + 4;
+    let ctrl_x = info_area.x + 1; // left border of the Now Playing block
     let btn_w: u16 = 3;
     let gap: u16 = 1;
     let sep: u16 = 2;
@@ -1525,6 +1693,34 @@ pub fn compute_full_art_footer_exit_rect(area: Rect) -> Rect {
     let footer_y = area.y + area.height.saturating_sub(1);
     // "`" (1) + ":exit art" (9) = 10 chars; add 2 for padding
     Rect::new(area.x, footer_y, 12, 1)
+}
+
+/// Returns the left-half image area in full art mode.
+pub fn compute_full_art_image_rect(area: Rect) -> Rect {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(area);
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(outer[0]);
+    cols[0]
+}
+
+/// Returns the album art column rect inside the Now Playing status bar.
+pub fn compute_statusbar_art_rect(area: Rect, status_height: u16, art_col_w: u16) -> Rect {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .split(area);
+    let status_inner = Rect::new(
+        outer[1].x + 1,
+        outer[1].y + 1,
+        outer[1].width.saturating_sub(2),
+        outer[1].height.saturating_sub(2),
+    );
+    Rect::new(status_inner.x, status_inner.y, art_col_w.min(status_inner.width), status_inner.height)
 }
 
 pub fn compute_context_menu_rect(area: Rect, option_count: usize) -> Rect {
@@ -1552,23 +1748,30 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
         .split(inner);
 
     let options = menu.options();
-    let items: Vec<ListItem> = options.iter().map(|o| ListItem::new(o.as_str())).collect();
+    let pill_bg = Color::Cyan;
+    let pill_fg = Color::Black;
+    let items: Vec<ListItem> = options.iter().enumerate().map(|(i, o)| {
+        if i == menu.selected {
+            ListItem::new(Line::from(vec![
+                pill_endcap_left(pill_bg),
+                Span::styled(format!(" {} ", o), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                pill_endcap_right(pill_bg),
+            ]))
+        } else {
+            ListItem::new(Line::from(Span::raw(format!("  {}", o))))
+        }
+    }).collect();
 
     let mut state = ListState::default();
     state.select(Some(menu.selected));
 
     let list = List::new(items)
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
+        .highlight_style(Style::default())
+        .highlight_symbol("");
 
     f.render_stateful_widget(list, rows[0], &mut state);
 
-    let hint = Paragraph::new(hint_line(&[("↑/↓", "move"), ("Enter", "confirm"), ("Esc", "cancel")], app.accent_color));
+    let hint = Paragraph::new(hint_line(&[("↑/↓", "move"), ("Enter", "confirm"), ("Esc", "cancel")], app.effective_accent()));
     f.render_widget(hint, rows[1]);
 }
 
@@ -1578,33 +1781,39 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
 
-/// Returns (popup_rect, [host, port, username, password, nerd_icons, auto_discover, broadcast_mask]).
-pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 7]) {
-    let popup = centered_rect_abs(54, 17, area);
+/// Returns (popup_rect, [host, port, username, password, nerd_icons, auto_discover, broadcast_mask, disable_auto_colors]).
+pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 8]) {
+    let popup = centered_rect_abs(54, 18, area);
     let inner_x = popup.x + 1;
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
-    // row layout: [pad, host, port, username, password, divider, nerd, auto_discover, broadcast_mask, error, spacer, help]
-    let host_rect     = Rect::new(inner_x, inner_y + 1, inner_w, 1);
-    let port_rect     = Rect::new(inner_x, inner_y + 2, inner_w, 1);
-    let user_rect     = Rect::new(inner_x, inner_y + 3, inner_w, 1);
-    let pass_rect     = Rect::new(inner_x, inner_y + 4, inner_w, 1);
-    let nerd_rect     = Rect::new(inner_x, inner_y + 6, inner_w, 1);
-    let auto_rect     = Rect::new(inner_x, inner_y + 7, inner_w, 1);
-    let mask_rect     = Rect::new(inner_x, inner_y + 8, inner_w, 1);
-    (popup, [host_rect, port_rect, user_rect, pass_rect, nerd_rect, auto_rect, mask_rect])
+    // row layout: [pad, host, port, username, password, divider, nerd, auto_discover, broadcast_mask, disable_auto_colors, error, spacer, help]
+    let host_rect          = Rect::new(inner_x, inner_y + 1, inner_w, 1);
+    let port_rect          = Rect::new(inner_x, inner_y + 2, inner_w, 1);
+    let user_rect          = Rect::new(inner_x, inner_y + 3, inner_w, 1);
+    let pass_rect          = Rect::new(inner_x, inner_y + 4, inner_w, 1);
+    let nerd_rect          = Rect::new(inner_x, inner_y + 6, inner_w, 1);
+    let auto_rect          = Rect::new(inner_x, inner_y + 7, inner_w, 1);
+    let mask_rect          = Rect::new(inner_x, inner_y + 8, inner_w, 1);
+    let no_colors_rect     = Rect::new(inner_x, inner_y + 9, inner_w, 1);
+    (popup, [host_rect, port_rect, user_rect, pass_rect, nerd_rect, auto_rect, mask_rect, no_colors_rect])
 }
 
-fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
+fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize, selected_button: u8, accent: Option<[u8; 3]>) {
     let area = f.area();
     let popup = centered_rect_abs(44, 7, area);
 
     f.render_widget(Clear, popup);
 
+    let accent_color = accent
+        .map(|c| Color::Rgb(c[0], c[1], c[2]))
+        .unwrap_or(Color::Yellow);
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(accent_color))
+        .title_style(Style::default().fg(accent_color))
         .title(" Clear Queue ");
 
     let inner = block.inner(popup);
@@ -1626,14 +1835,49 @@ fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
         .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    let hint = Paragraph::new(hint_line(&[("y / Enter", "confirm"), ("any key", "cancel")], None))
-        .alignment(Alignment::Center);
-    f.render_widget(hint, rows[3]);
+    let btn_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[3]);
+
+    let ok_style = if selected_button == 0 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let cancel_style = if selected_button == 1 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    f.render_widget(
+        Paragraph::new("[ OK ]").alignment(Alignment::Center).style(ok_style),
+        btn_cols[0],
+    );
+    f.render_widget(
+        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        btn_cols[1],
+    );
+}
+
+/// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
+pub fn compute_clear_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
+    let popup = centered_rect_abs(44, 7, area);
+    let inner_x = popup.x + 1;
+    let inner_y = popup.y + 1;
+    let inner_w = popup.width.saturating_sub(2);
+    // Layout rows: pad(1), message(1), spacer(min→2), buttons(1) → buttons at offset 4
+    let btn_y = inner_y + 4;
+    let half_w = inner_w / 2;
+    let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
+    let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
+    (popup, [ok_rect, cancel_rect])
 }
 
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>) {
     let area = f.area();
-    let popup = centered_rect_abs(54, 17, area);
+    let popup = centered_rect_abs(54, 18, area);
 
     f.render_widget(Clear, popup);
 
@@ -1651,7 +1895,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    // rows: pad | host | port | username | password | divider | nerd-icons | auto-discover | broadcast-mask | error | spacer | help
+    // rows: pad | host | port | username | password | divider | nerd-icons | auto-discover | broadcast-mask | disable-auto-colors | error | spacer | help
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -1664,9 +1908,10 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
             Constraint::Length(1), // [6] nerd-icons
             Constraint::Length(1), // [7] auto-discover
             Constraint::Length(1), // [8] broadcast-mask
-            Constraint::Length(1), // [9] error
-            Constraint::Min(0),    // [10] spacer
-            Constraint::Length(1), // [11] help
+            Constraint::Length(1), // [9] disable-auto-colors
+            Constraint::Length(1), // [10] error
+            Constraint::Min(0),    // [11] spacer
+            Constraint::Length(1), // [12] help
         ])
         .split(inner);
 
@@ -1762,15 +2007,51 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         f.render_widget(Paragraph::new(line), rows[8]);
     }
 
+    render_toggle(f, rows[9], "Disable auto colors", modal.disable_auto_colors, modal.selected_field == 7);
+
     if let Some(err) = &modal.error {
         let p = Paragraph::new(err.as_str())
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Red));
-        f.render_widget(p, rows[9]);
+        f.render_widget(p, rows[10]);
     }
 
-    let help = Paragraph::new(hint_line(&[
-        ("Enter/i", "edit"), ("j/k", "switch field"), ("Space", "toggle"), ("s", "save"), ("Esc", "close"),
-    ], accent));
-    f.render_widget(help, rows[11]);
+    let btn_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[12]);
+
+    let ok_style = if modal.selected_field == 8 {
+        Style::default().fg(Color::Black).bg(accent_bright).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let cancel_style = if modal.selected_field == 9 {
+        Style::default().fg(Color::Black).bg(accent_bright).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    f.render_widget(
+        Paragraph::new("[ OK ]").alignment(Alignment::Center).style(ok_style),
+        btn_cols[0],
+    );
+    f.render_widget(
+        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        btn_cols[1],
+    );
+}
+
+/// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
+pub fn compute_config_modal_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
+    let popup = centered_rect_abs(54, 18, area);
+    let inner_x = popup.x + 1;
+    let inner_y = popup.y + 1;
+    let inner_w = popup.width.saturating_sub(2);
+    // Layout rows: 11 fixed (0-10) + spacer(min→4) + buttons(1) → buttons at offset 15
+    let btn_y = inner_y + 15;
+    let half_w = inner_w / 2;
+    let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
+    let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
+    (popup, [ok_rect, cancel_rect])
 }

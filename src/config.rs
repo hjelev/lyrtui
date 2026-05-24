@@ -18,6 +18,12 @@ pub struct Config {
     pub auto_discover: bool,
     #[serde(default = "default_broadcast_mask")]
     pub broadcast_mask: String,
+    #[serde(default)]
+    pub global_volume_control: bool,
+    #[serde(default)]
+    pub full_art_mode: bool,
+    #[serde(default)]
+    pub disable_auto_colors: bool,
 }
 
 fn default_host() -> String {
@@ -47,6 +53,9 @@ impl Default for Config {
             password: None,
             auto_discover: default_auto_discover(),
             broadcast_mask: default_broadcast_mask(),
+            global_volume_control: false,
+            full_art_mode: false,
+            disable_auto_colors: false,
         }
     }
 }

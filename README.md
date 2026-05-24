@@ -4,7 +4,17 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 
 ## Screenshot
 
-![Shell Buddy screenshot](screenshot.png)
+![Shell Buddy screenshot](screenshots/screenshot.png)
+
+<details>
+  <summary>Show more screenshots</summary>
+  <img src="screenshots/screenshot-1.png" alt="Screenshot" width="500"/>
+  <img src="screenshots/screenshot-2.png" alt="Screenshot" width="500"/>
+  <img src="screenshots/screenshot-3.png" alt="Screenshot" width="500"/>
+  <img src="screenshots/screenshot-4.png" alt="Screenshot" width="500"/>
+  <img src="screenshots/screenshot-5.png" alt="Screenshot" width="500"/>
+  <img src="screenshots/screenshot-6.png" alt="Screenshot" width="500"/>
+</details>
 
 ## Features
 
@@ -14,6 +24,7 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 - Browse and play installed Lyrion apps (Spotify, Deezer, Bandcamp, etc.) with the same hierarchical navigation
 - View and jump to items in the playback queue
 - Select and switch between multiple players; toggle player power on/off
+- **Global volume control** — toggle a persistent checkbox in the Players view to make `+`/`-` adjust all players simultaneously from any screen; a globe icon (◎) appears in the status panel when active
 - Playback controls: play/pause, next, previous, volume up/down (keyboard and clickable buttons)
 - Toggle **shuffle** (`s`) and cycle **repeat** modes (`r`): off → one → all → repeat-all
 - Expanded now-playing panel with album art (supports Kitty, Sixel, iTerm2, and halfblock protocols — auto-detected)
@@ -30,8 +41,7 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 ## Requirements
 
 - A running [Lyrion Music Server](https://lyrion.org/) instance (default: `localhost:9000`)
-- Rust toolchain (1.80+ recommended, uses the 2024 edition)
-- A terminal that supports one of: Kitty graphics protocol, Sixel, iTerm2 inline images, or Unicode halfblocks (fallback — works everywhere)
+- (Optional) A terminal that supports one of: Kitty graphics protocol, Sixel, iTerm2 inline images, or Unicode halfblocks (fallback — works everywhere)
 - (Optional) A [Nerd Font](https://www.nerdfonts.com/) for icon support
 
 ## Installation
@@ -101,7 +111,7 @@ The action menu can be navigated with `↑`/`↓` (or `j`/`k`), confirmed with `
 | `a` | Add selected item to queue |
 | `t` | Toggle player power (in Players view) |
 | `c` | Open server configuration |
-| `?` (Help sidebar) | Show all keyboard shortcuts |
+| ``` | Enable/disable Big Art Mode |
 | `q` / `Ctrl-c` | Quit |
 
 ### Configuration
@@ -111,12 +121,15 @@ The config file lives at `~/.config/lyrtui/config.toml`:
 ```toml
 host = "localhost"
 port = 9000
-default_player = ""        # optional: player ID to select on startup
-use_nerd_icons = false      # set to true if your terminal uses a Nerd Font
-auto_discover = true        # broadcast UDP to find LMS on startup
+default_player = ""          # optional: player ID to select on startup
+use_nerd_icons = false       # set to true if your terminal uses a Nerd Font
+auto_discover = true         # broadcast UDP to find LMS on startup
 broadcast_mask = "255.255.255.255"  # subnet for discovery broadcast
-username = ""               # optional: LMS HTTP basic auth username
-password = ""               # optional: LMS HTTP basic auth password
+global_volume_control = true # enable global volume control (globe icon in status panel when active)
+full_art_mode = false        # start in big art mode 
+disable_auto_colors = false  # disable adaptive theme colors extracted from album art
+username = ""                # optional: LMS HTTP basic auth username
+password = ""                # optional: LMS HTTP basic auth password
 ```
 
 You can edit this file directly or use the in-app config menu (`c`).
