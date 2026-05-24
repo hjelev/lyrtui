@@ -94,6 +94,9 @@ pub async fn handle_mouse_event(
                     modal.selected_field = 6;
                     modal.editing = true;
                     modal.error = None;
+                } else if point_in(col, row, field_rects[7]) {
+                    modal.selected_field = 7;
+                    modal.disable_auto_colors = !modal.disable_auto_colors;
                 }
             } else {
                 app.config_modal = None;
@@ -127,27 +130,70 @@ pub async fn handle_mouse_event(
 
     // Full art mode intercepts all mouse events
     if app.full_art_mode {
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let exit_rect = ui::compute_full_art_footer_exit_rect(terminal_area);
-            if point_in(col, row, exit_rect) {
-                app.full_art_mode = false;
-                return;
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let image_rect = ui::compute_full_art_image_rect(terminal_area);
+                if point_in(col, row, image_rect) {
+                    app.full_art_mode = false;
+                    cfg.full_art_mode = false;
+                    let _ = cfg.save();
+                    return;
+                }
+                let exit_rect = ui::compute_full_art_footer_exit_rect(terminal_area);
+                if point_in(col, row, exit_rect) {
+                    app.full_art_mode = false;
+                    return;
+                }
+                let ctrl_rects = ui::compute_full_art_control_rects(terminal_area);
+                if let Some((btn_idx, _)) = ctrl_rects.iter().enumerate().find(|(_, r)| point_in(col, row, **r)) {
+                    let action = match btn_idx {
+                        0 => Action::Prev,
+                        1 => Action::PlayPause,
+                        2 => Action::Stop,
+                        3 => Action::Next,
+                        4 => Action::ToggleShuffle,
+                        5 => Action::ToggleRepeat,
+                        6 => Action::VolumeDown,
+                        _ => Action::VolumeUp,
+                    };
+                    handle_action(app, action, client, tx, vol_sync_tx).await;
+                    return;
+                }
+                let queue_rect = ui::compute_full_art_queue_rect(terminal_area);
+                if point_in(col, row, queue_rect) {
+                    let inner_top = queue_rect.y + 1;
+                    let inner_bot = queue_rect.y + queue_rect.height.saturating_sub(1);
+                    if row >= inner_top && row < inner_bot {
+                        let rel = (row - inner_top) as usize;
+                        let idx = main_state.offset() + rel / 2;
+                        if idx < app.queue.len() {
+                            app.main_selected = idx;
+                            if let Some(pid) = app.active_player.clone() {
+                                let c = client.clone();
+                                tokio::spawn(async move {
+                                    let _ = c.play_track_index(&pid, idx).await;
+                                });
+                            }
+                        }
+                    }
+                }
             }
-            let ctrl_rects = ui::compute_full_art_control_rects(terminal_area);
-            let ctrl_hit = ctrl_rects.iter().enumerate().find(|(_, r)| point_in(col, row, **r));
-            if let Some((btn_idx, _)) = ctrl_hit {
-                let action = match btn_idx {
-                    0 => Action::Prev,
-                    1 => Action::PlayPause,
-                    2 => Action::Stop,
-                    3 => Action::Next,
-                    4 => Action::ToggleShuffle,
-                    5 => Action::ToggleRepeat,
-                    6 => Action::VolumeDown,
-                    _ => Action::VolumeUp,
-                };
-                handle_action(app, action, client, tx, vol_sync_tx).await;
+            MouseEventKind::ScrollUp => {
+                let queue_rect = ui::compute_full_art_queue_rect(terminal_area);
+                if point_in(col, row, queue_rect) {
+                    app.main_selected = app.main_selected.saturating_sub(1);
+                }
             }
+            MouseEventKind::ScrollDown => {
+                let queue_rect = ui::compute_full_art_queue_rect(terminal_area);
+                if point_in(col, row, queue_rect) {
+                    let max = app.queue.len().saturating_sub(1);
+                    if app.main_selected < max {
+                        app.main_selected += 1;
+                    }
+                }
+            }
+            _ => {}
         }
         return;
     }
@@ -175,7 +221,15 @@ pub async fn handle_mouse_event(
                     _ => Action::VolumeUp,
                 };
                 handle_action(app, action, client, tx, vol_sync_tx).await;
-            } else if point_in(col, row, sidebar_area) {
+            } else {
+                let art_rect = ui::compute_statusbar_art_rect(terminal_area, app.status_height, app.art_col_w);
+                if point_in(col, row, art_rect) && app.now_playing.is_some() {
+                    app.full_art_mode = true;
+                    cfg.full_art_mode = true;
+                    let _ = cfg.save();
+                }
+            }
+            if !app.full_art_mode && point_in(col, row, sidebar_area) {
                 app.focus_sidebar = true;
                 let inner_top = sidebar_area.y + 1;
                 let inner_bot = sidebar_area.y + sidebar_area.height.saturating_sub(1);
@@ -611,9 +665,11 @@ pub async fn handle_action(
         Action::Quit => return true,
 
         Action::FocusSidebar => {
-            app.focus_sidebar = true;
-            app.players_focus_global = false;
-            app.search_input_active = false;
+            if !app.full_art_mode {
+                app.focus_sidebar = true;
+                app.players_focus_global = false;
+                app.search_input_active = false;
+            }
         }
         Action::FocusMain => {
             app.focus_sidebar = false;
@@ -691,7 +747,15 @@ pub async fn handle_action(
         }
 
         Action::Select => {
-            if app.focus_sidebar {
+            if app.full_art_mode {
+                if let Some(pid) = app.active_player.clone() {
+                    let idx = app.main_selected;
+                    let c = client.clone();
+                    tokio::spawn(async move {
+                        let _ = c.play_track_index(&pid, idx).await;
+                    });
+                }
+            } else if app.focus_sidebar {
                 app.main_selected = 0;
                 app.players_focus_global = false;
                 match app.sidebar_items.get(app.sidebar_selected).cloned() {
@@ -1035,6 +1099,9 @@ pub async fn handle_action(
 
         Action::ToggleFullArtMode => {
             app.full_art_mode = !app.full_art_mode;
+            if app.full_art_mode {
+                app.focus_sidebar = false;
+            }
         }
 
         Action::OpenConfig | Action::None => {}
@@ -1043,7 +1110,7 @@ pub async fn handle_action(
 }
 
 fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsClient>) {
-    let (host, port_str, username, password, use_nerd_icons, auto_discover, broadcast_mask) = {
+    let (host, port_str, username, password, use_nerd_icons, auto_discover, broadcast_mask, disable_auto_colors) = {
         let modal = app.config_modal.as_ref().unwrap();
         (
             modal.host.trim().to_string(),
@@ -1053,6 +1120,7 @@ fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsCl
             modal.use_nerd_icons,
             modal.auto_discover,
             modal.broadcast_mask.trim().to_string(),
+            modal.disable_auto_colors,
         )
     };
     if host.is_empty() {
@@ -1067,6 +1135,7 @@ fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsCl
                 cfg.use_nerd_icons = use_nerd_icons;
                 cfg.auto_discover = auto_discover;
                 cfg.broadcast_mask = broadcast_mask;
+                cfg.disable_auto_colors = disable_auto_colors;
                 cfg.username = if username.is_empty() { None } else { Some(username.clone()) };
                 cfg.password = if password.is_empty() { None } else { Some(password.clone()) };
                 match cfg.save() {
@@ -1077,6 +1146,7 @@ fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsCl
                             .map(|(u, p)| (u.clone(), p.clone()));
                         client.update_credentials(creds);
                         app.use_nerd_icons = use_nerd_icons;
+                        app.disable_auto_colors = disable_auto_colors;
                         app.config_modal = None;
                         app.connection = ConnectionState::Reconnecting;
                         app.players = vec![];
@@ -1147,21 +1217,22 @@ pub fn handle_config_key(
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field < 8 {
+                if modal.selected_field < 9 {
                     modal.selected_field += 1;
                 }
             }
             KeyCode::Tab => {
                 let modal = app.config_modal.as_mut().unwrap();
-                modal.selected_field = (modal.selected_field + 1) % 9;
+                modal.selected_field = (modal.selected_field + 1) % 10;
             }
             KeyCode::Enter | KeyCode::Char('i') => {
                 let selected = app.config_modal.as_ref().unwrap().selected_field;
                 match selected {
                     4 => { app.config_modal.as_mut().unwrap().use_nerd_icons ^= true; }
                     5 => { app.config_modal.as_mut().unwrap().auto_discover ^= true; }
-                    7 => { apply_config_save(app, cfg, client); }
-                    8 => { app.config_modal = None; }
+                    7 => { app.config_modal.as_mut().unwrap().disable_auto_colors ^= true; }
+                    8 => { apply_config_save(app, cfg, client); }
+                    9 => { app.config_modal = None; }
                     _ => {
                         let modal = app.config_modal.as_mut().unwrap();
                         modal.editing = true;
@@ -1174,6 +1245,7 @@ pub fn handle_config_key(
                 match modal.selected_field {
                     4 => modal.use_nerd_icons = !modal.use_nerd_icons,
                     5 => modal.auto_discover = !modal.auto_discover,
+                    7 => modal.disable_auto_colors = !modal.disable_auto_colors,
                     _ => {}
                 }
             }

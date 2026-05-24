@@ -78,6 +78,11 @@ async fn run(
     let mut app = App::new(cfg.default_player.clone());
     app.use_nerd_icons = cfg.use_nerd_icons;
     app.global_volume_control = cfg.global_volume_control;
+    app.full_art_mode = cfg.full_art_mode;
+    if app.full_art_mode {
+        app.focus_sidebar = false;
+    }
+    app.disable_auto_colors = cfg.disable_auto_colors;
     // Compute Now Playing panel height: art column is 18 cols; height = ceil(18 * fw / fh) + 2 borders.
     // art_col_w is the actual cell width the square image fills (inner_h * fh / fw).
     {
@@ -287,14 +292,20 @@ async fn run(
                             cfg.use_nerd_icons,
                             cfg.auto_discover,
                             &cfg.broadcast_mask,
+                            cfg.disable_auto_colors,
                         ));
                     } else {
                         let prev_gvc = app.global_volume_control;
+                        let prev_art = app.full_art_mode;
                         if handlers::handle_action(&mut app, action, &client, &tx, &vol_sync_tx).await {
                             break;
                         }
                         if app.global_volume_control != prev_gvc {
                             cfg.global_volume_control = app.global_volume_control;
+                            let _ = cfg.save();
+                        }
+                        if app.full_art_mode != prev_art {
+                            cfg.full_art_mode = app.full_art_mode;
                             let _ = cfg.save();
                         }
                     }

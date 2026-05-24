@@ -59,7 +59,8 @@ pub struct ConfigModal {
     pub use_nerd_icons: bool,
     pub auto_discover: bool,
     pub broadcast_mask: String,
-    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask, 7=OK, 8=Cancel
+    pub disable_auto_colors: bool,
+    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask, 7=disable_auto_colors, 8=OK, 9=Cancel
     pub selected_field: usize,
     pub editing: bool,
     pub error: Option<String>,
@@ -74,6 +75,7 @@ impl ConfigModal {
         use_nerd_icons: bool,
         auto_discover: bool,
         broadcast_mask: &str,
+        disable_auto_colors: bool,
     ) -> Self {
         Self {
             host: host.to_string(),
@@ -83,6 +85,7 @@ impl ConfigModal {
             use_nerd_icons,
             auto_discover,
             broadcast_mask: broadcast_mask.to_string(),
+            disable_auto_colors,
             selected_field: 0,
             editing: false,
             error: None,
@@ -201,6 +204,7 @@ pub struct App {
     pub use_nerd_icons: bool,
     pub full_art_mode: bool,
     pub accent_color: Option<[u8; 3]>,
+    pub disable_auto_colors: bool,
 }
 
 impl App {
@@ -257,6 +261,7 @@ impl App {
             use_nerd_icons: false,
             full_art_mode: false,
             accent_color: None,
+            disable_auto_colors: false,
         }
     }
 
@@ -275,6 +280,10 @@ impl App {
 
     pub fn is_playing(&self) -> bool {
         self.now_playing.as_ref().map(|n| n.is_playing).unwrap_or(false)
+    }
+
+    pub fn effective_accent(&self) -> Option<[u8; 3]> {
+        if self.disable_auto_colors { None } else { self.accent_color }
     }
 }
 

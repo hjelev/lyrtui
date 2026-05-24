@@ -9,6 +9,9 @@ pub fn json_id_to_string(v: &serde_json::Value) -> String {
 }
 
 pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
+    if app.full_art_mode {
+        return app.queue.get(idx).and_then(|t| t.artwork_url.clone());
+    }
     match &app.main_view {
         MainView::Library(LibraryView::Artists) => app
             .artists
@@ -119,6 +122,9 @@ pub fn is_main_item_playable(app: &App) -> bool {
 }
 
 pub fn main_list_len(app: &App) -> usize {
+    if app.full_art_mode {
+        return app.queue.len();
+    }
     match &app.main_view {
         MainView::MyMusic => 4,
         MainView::Library(LibraryView::Artists) => app.artists.len(),
