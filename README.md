@@ -8,12 +8,12 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 
 <details>
   <summary>Show more screenshots</summary>
-  <img src="screenshots/screenshot-1.png" alt="Screenshot" width="500"/>
-  <img src="screenshots/screenshot-2.png" alt="Screenshot" width="500"/>
-  <img src="screenshots/screenshot-3.png" alt="Screenshot" width="500"/>
-  <img src="screenshots/screenshot-4.png" alt="Screenshot" width="500"/>
-  <img src="screenshots/screenshot-5.png" alt="Screenshot" width="500"/>
-  <img src="screenshots/screenshot-6.png" alt="Screenshot" width="500"/>
+  <img src="screenshots/screenshot-1.png" alt="Screenshot" width="1024"/>
+  <img src="screenshots/screenshot-2.png" alt="Screenshot" width="1024"/>
+  <img src="screenshots/screenshot-3.png" alt="Screenshot" width="1024"/>
+  <img src="screenshots/screenshot-4.png" alt="Screenshot" width="1024"/>
+  <img src="screenshots/screenshot-5.png" alt="Screenshot" width="1024"/>
+  <img src="screenshots/screenshot-6.png" alt="Screenshot" width="1024"/>
 </details>
 
 ## Features
