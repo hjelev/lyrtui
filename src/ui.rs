@@ -48,6 +48,55 @@ fn unfocus_border_color(accent: Option<[u8; 3]>) -> Color {
     }
 }
 
+/// Very dark accent tint used as the background for media control buttons.
+fn btn_bg_color(accent: Option<[u8; 3]>) -> Color {
+    match accent {
+        Some([r, g, b]) => Color::Rgb(
+            (r as u16 * 12 / 100 + 15).min(255) as u8,
+            (g as u16 * 12 / 100 + 15).min(255) as u8,
+            (b as u16 * 12 / 100 + 20).min(255) as u8,
+        ),
+        None => Color::Rgb(28, 32, 45),
+    }
+}
+
+/// Slightly brighter dark accent tint for active-state toggle buttons (shuffle on, repeat on).
+fn btn_active_bg_color(accent: Option<[u8; 3]>) -> Color {
+    match accent {
+        Some([r, g, b]) => Color::Rgb(
+            (r as u16 * 22 / 100 + 15).min(255) as u8,
+            (g as u16 * 22 / 100 + 15).min(255) as u8,
+            (b as u16 * 22 / 100 + 20).min(255) as u8,
+        ),
+        None => Color::Rgb(20, 45, 60),
+    }
+}
+
+/// Dimmed foreground for inactive toggle buttons (shuffle off, repeat off).
+fn btn_dim_color(accent: Option<[u8; 3]>) -> Color {
+    match accent {
+        Some([r, g, b]) => Color::Rgb(
+            (r as u16 * 30 / 100 + 15).min(255) as u8,
+            (g as u16 * 30 / 100 + 15).min(255) as u8,
+            (b as u16 * 30 / 100 + 20).min(255) as u8,
+        ),
+        None => Color::Rgb(80, 80, 100),
+    }
+}
+
+/// Mid-brightness color from the accent palette — between the bright focus color and the dark
+/// unfocus color. Used for secondary labels that should feel tinted but not dominant.
+fn mid_accent_color(accent: Option<[u8; 3]>) -> Color {
+    match accent {
+        Some([r, g, b]) => Color::Rgb(
+            (r as u16 * 58 / 100 + 18).min(255) as u8,
+            (g as u16 * 58 / 100 + 18).min(255) as u8,
+            (b as u16 * 58 / 100 + 25).min(255) as u8,
+        ),
+        None => Color::Gray,
+    }
+}
+
 /// Pill cursor styles: returns (primary_line_style, secondary_line_style).
 /// Focused uses a solid accent color; unfocused uses a dimmed variant.
 fn cursor_styles(focused: bool) -> (Style, Style) {
@@ -221,6 +270,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(unfocus_border_color(app.accent_color)))
+        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
         .title(" Status ");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -230,6 +280,8 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
         .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
         .split(inner);
 
+    let mid = mid_accent_color(app.accent_color);
+
     // Active player
     let player_name = app.active_player.as_ref()
         .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
@@ -237,7 +289,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
         .unwrap_or("—");
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("▶ ", Style::default().fg(Color::DarkGray)),
+            Span::styled("▶ ", Style::default().fg(mid)),
             Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
         ])),
         rows[0],
@@ -247,7 +299,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("Vol ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Vol ", Style::default().fg(mid)),
             Span::styled(format!("{vol}%"), Style::default().fg(Color::White)),
         ])),
         rows[1],
@@ -262,7 +314,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(dot, Style::default().fg(dot_color)),
-            Span::styled(format!(" {label}"), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!(" {label}"), Style::default().fg(mid)),
         ])),
         rows[2],
     );
@@ -271,7 +323,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
     f.render_widget(
         Paragraph::new(Span::styled(
             format!("{server_host}:{server_port}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(mid),
         )),
         rows[3],
     );
@@ -288,6 +340,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
+        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
         .title(" Navigation ");
 
     let items: Vec<ListItem> = app
@@ -347,13 +400,14 @@ fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
         MainView::Radio => draw_radio(f, app, area, state, thumbnails),
         MainView::Apps => draw_apps(f, app, area, state, thumbnails),
         MainView::Favourites => draw_favourites(f, app, area, state, thumbnails),
-        MainView::Help => draw_help(f, area),
+        MainView::Help => draw_help(f, app, area),
         MainView::Search => draw_search(f, app, area, state, thumbnails, base),
     }
 }
 
 fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
+    let mid = mid_accent_color(app.accent_color);
     let border_style = if focused {
         Style::default().fg(focus_border_color(app.accent_color))
     } else {
@@ -364,6 +418,7 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
+        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
         .title(" My Music ");
 
     let entries: [(&str, &str, &str); 4] = if app.use_nerd_icons {
@@ -386,7 +441,7 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         ListItem::new(Line::from(vec![
             Span::styled(format!("  {}  ", icon), Style::default().fg(Color::Cyan)),
             Span::raw(label.to_string()),
-            Span::styled(format!("  — {}", sub), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("  — {}", sub), Style::default().fg(mid)),
         ]))
     }).collect();
 
@@ -402,12 +457,13 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
 fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
     let focused = !app.focus_sidebar;
+    let mid = mid_accent_color(app.accent_color);
     match view {
         LibraryView::Artists => {
             let items = app.artists.iter().map(|a| RowItem {
                 thumb_url: Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
                 line1: Line::from(Span::raw(format!("  {}", a.artist))),
-                line2: Line::from(Span::styled("  artist", Style::default().fg(Color::DarkGray))),
+                line2: Line::from(Span::styled("  artist", Style::default().fg(mid))),
             }).collect();
             draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, state, thumbnails, app.accent_color);
         }
@@ -417,7 +473,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 RowItem {
                     thumb_url: Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&a.id))),
                     line1: Line::from(Span::raw(format!("  {}", a.album))),
-                    line2: Line::from(Span::styled(format!("  {}", sub), Style::default().fg(Color::DarkGray))),
+                    line2: Line::from(Span::styled(format!("  {}", sub), Style::default().fg(mid))),
                 }
             }).collect();
             draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, state, thumbnails, app.accent_color);
@@ -432,7 +488,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     line1: Line::from(Span::raw(format!("  {:>3}. {}", i + 1, t.title))),
                     line2: Line::from(Span::styled(
                         format!("  {}  {}", artist, dur),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(mid),
                     )),
                 }
             }).collect();
@@ -468,7 +524,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     )),
                     line2: Line::from(Span::styled(
                         format!("  {}", sub),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(mid),
                     )),
                 }
             }).collect();
@@ -479,6 +535,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
 
 fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
+    let mid = mid_accent_color(app.accent_color);
     let playing_title = app.now_playing.as_ref().map(|n| n.title.as_str()).unwrap_or("");
 
     let items = app.queue.iter().enumerate().map(|(i, t)| {
@@ -488,7 +545,7 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
              Style::default().fg(Color::Green))
         } else {
             (Style::default().fg(Color::White),
-             Style::default().fg(Color::DarkGray))
+             Style::default().fg(mid))
         };
         let marker = if is_current { "▶ " } else { "  " };
         let artist_album = match (t.artist.as_deref(), t.album.as_deref()) {
@@ -508,6 +565,7 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
 
 fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
+    let mid = mid_accent_color(app.accent_color);
     let border_style = if focused {
         Style::default().fg(focus_border_color(app.accent_color))
     } else {
@@ -518,6 +576,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
+        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
         .title(" Players ");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -539,7 +598,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
     let glob_focused = focused && app.players_focus_global;
     let glob_bg = if glob_focused { Color::Rgb(45, 100, 170) } else { Color::Reset };
-    let glob_fg = if glob_focused { Color::Rgb(220, 235, 255) } else { Color::DarkGray };
+    let glob_fg = if glob_focused { Color::Rgb(220, 235, 255) } else { mid };
 
     let label = " ◎ Global  ";
     let vol_str = format!(" {}%", global_avg);
@@ -550,7 +609,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let global_line = Line::from(vec![
         Span::styled(label, Style::default().fg(glob_fg).bg(glob_bg)),
         Span::styled(bar, Style::default().fg(if glob_focused { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) }).bg(glob_bg)),
-        Span::styled(&vol_str, Style::default().fg(if glob_focused { Color::White } else { Color::DarkGray }).bg(glob_bg)),
+        Span::styled(&vol_str, Style::default().fg(if glob_focused { Color::White } else { mid }).bg(glob_bg)),
     ]);
     f.render_widget(Paragraph::new(global_line), chunks[0]);
 
@@ -561,17 +620,17 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let marker = if active { "● " } else { "○ " };
         let power_tag = if powered { "" } else { " [off]" };
         let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
-        let name_fg = if active { Color::Green } else if powered { Color::White } else { Color::DarkGray };
+        let name_fg = if active { Color::Green } else if powered { Color::White } else { mid };
         ListItem::new(Line::from(vec![
             Span::styled(format!("  {}{}{}", marker, p.name, power_tag), Style::default().fg(name_fg)),
-            Span::styled(format!(" {}%", vol), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!(" {}%", vol), Style::default().fg(mid)),
         ]))
     }).collect();
 
     if items.is_empty() {
         state.select(None);
         f.render_widget(
-            Paragraph::new("(no players)").style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new("(no players)").style(Style::default().fg(mid)),
             chunks[1],
         );
         return;
@@ -588,6 +647,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
 fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
+    let mid = mid_accent_color(app.accent_color);
     let breadcrumb = breadcrumb_str(app.radio_nav_stack.iter().map(|n| n.title.as_str()), &app.radio_title);
     let title = format!(" {} ", breadcrumb);
     let items = app.radio_items.iter().map(|item| {
@@ -597,7 +657,7 @@ fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
             line1: Line::from(Span::styled(format!("  {}{}", icon, item.name), Style::default().fg(fg))),
             line2: Line::from(Span::styled(
                 format!("  {}", if item.is_playable() { "stream" } else { "folder" }),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(mid),
             )),
         }
     }).collect();
@@ -606,6 +666,7 @@ fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
 
 fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
+    let mid = mid_accent_color(app.accent_color);
     let breadcrumb = breadcrumb_str(app.app_nav_stack.iter().map(|n| n.title.as_str()), &app.app_title);
     let title = format!(" {} ", breadcrumb);
     let items = app.app_items.iter().map(|item| {
@@ -615,7 +676,7 @@ fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
             line1: Line::from(Span::styled(format!("  {}{}", icon, item.name), Style::default().fg(fg))),
             line2: Line::from(Span::styled(
                 format!("  {}", if item.is_playable() { "stream" } else { "folder" }),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(mid),
             )),
         }
     }).collect();
@@ -624,6 +685,7 @@ fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
 
 fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
+    let mid = mid_accent_color(app.accent_color);
     let breadcrumb = breadcrumb_str(app.fav_nav_stack.iter().map(|n| n.title.as_str()), &app.fav_title);
     let title = format!(" ★ {} ", breadcrumb);
     let items = app.fav_items.iter().map(|item| {
@@ -633,7 +695,7 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
             line1: Line::from(Span::styled(format!("  {}{}", icon, item.name), Style::default().fg(fg))),
             line2: Line::from(Span::styled(
                 format!("  {}", if item.is_playable() { "stream" } else { "folder" }),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(mid),
             )),
         }
     }).collect();
@@ -642,6 +704,7 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
 
 fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
     let focused = !app.focus_sidebar;
+    let mid = mid_accent_color(app.accent_color);
 
     let border_style = if focused {
         Style::default().fg(focus_border_color(app.accent_color))
@@ -652,6 +715,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
+        .title_style(Style::default().fg(focus_border_color(app.accent_color)))
         .title(" Search ");
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -663,9 +727,9 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
 
     // Search input box
     let input_border_style = if app.search_input_active {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(focus_border_color(app.accent_color))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(unfocus_border_color(app.accent_color))
     };
     let cursor = if app.search_input_active { "█" } else { "" };
     let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" };  // nf-fa-search
@@ -685,7 +749,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
         };
         f.render_widget(
             Paragraph::new(msg)
-                .style(Style::default().fg(Color::DarkGray))
+                .style(Style::default().fg(mid))
                 .alignment(Alignment::Center),
             Rect::new(results_area.x, results_area.y + results_area.height / 2, results_area.width, 1),
         );
@@ -755,7 +819,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                     Span::styled("  ▸ ", Style::default().fg(Color::White)),
                     Span::styled(a.artist.clone(), Style::default().fg(Color::White)),
                 ]),
-                Line::from(Span::styled("  artist", Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled("  artist", Style::default().fg(mid))),
             ),
             SearchResultItem::Album(alb) => (
                 Line::from(vec![
@@ -764,7 +828,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                 ]),
                 Line::from(Span::styled(
                     format!("  album  {}", alb.artist.as_deref().unwrap_or("")),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(mid),
                 )),
             ),
             SearchResultItem::Track(t) => (
@@ -774,7 +838,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                 ]),
                 Line::from(Span::styled(
                     format!("  {}", t.artist.as_deref().unwrap_or("")),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(mid),
                 )),
             ),
             SearchResultItem::Playlist(pl) => (
@@ -782,14 +846,14 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                     Span::styled("  ▸ ", Style::default().fg(Color::Rgb(220, 180, 80))),
                     Span::styled(pl.name.clone(), Style::default().fg(Color::White)),
                 ]),
-                Line::from(Span::styled("  playlist", Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled("  playlist", Style::default().fg(mid))),
             ),
             SearchResultItem::AppItem(item) => (
                 Line::from(vec![
                     Span::styled("  ▸ ", Style::default().fg(Color::Rgb(180, 120, 220))),
                     Span::styled(item.name.clone(), Style::default().fg(Color::White)),
                 ]),
-                Line::from(Span::styled("  app", Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled("  app", Style::default().fg(mid))),
             ),
         };
 
@@ -823,10 +887,20 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
     }
 }
 
-fn draw_help(f: &mut Frame, area: Rect) {
+fn draw_help(f: &mut Frame, app: &App, area: Rect) {
+    let accent = focus_border_color(app.accent_color);
+    let mid = mid_accent_color(app.accent_color);
+    let focused = !app.focus_sidebar;
+    let border_style = if focused {
+        Style::default().fg(accent)
+    } else {
+        Style::default().fg(unfocus_border_color(app.accent_color))
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title_style(Style::default().fg(accent))
         .title(" Keyboard Shortcuts ");
 
     let inner = block.inner(area);
@@ -838,44 +912,46 @@ fn draw_help(f: &mut Frame, area: Rect) {
         .constraints([Constraint::Length(col_w), Constraint::Min(1)])
         .split(inner);
 
+    let header = |s: &'static str| Line::from(Span::styled(s, Style::default().fg(accent).add_modifier(Modifier::BOLD)));
+
     let left: Vec<Line> = vec![
-        Line::from(Span::styled("Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        shortcut("j / ↓",        "Move down"),
-        shortcut("k / ↑",        "Move up"),
-        shortcut("Enter / l / →", "Select / enter / focus main"),
-        shortcut("Esc / h / ←",  "Back / focus sidebar"),
+        header("Navigation"),
+        shortcut("j / ↓",        "Move down",                          mid),
+        shortcut("k / ↑",        "Move up",                            mid),
+        shortcut("Enter / l / →", "Select / enter / focus main",       mid),
+        shortcut("Esc / h / ←",  "Back / focus sidebar",               mid),
         Line::from(""),
-        Line::from(Span::styled("Playback", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        shortcut("Space",  "Play / pause"),
-        shortcut("n",      "Next track"),
-        shortcut("p",      "Previous track"),
-        shortcut("s",      "Toggle shuffle"),
-        shortcut("r",      "Cycle repeat (off → single → queue → ∞)"),
-        shortcut("+ / =",  "Volume up"),
-        shortcut("-",      "Volume down"),
+        header("Playback"),
+        shortcut("Space",  "Play / pause",                              mid),
+        shortcut("n",      "Next track",                                mid),
+        shortcut("p",      "Previous track",                            mid),
+        shortcut("s",      "Toggle shuffle",                            mid),
+        shortcut("r",      "Cycle repeat (off → single → queue → ∞)",  mid),
+        shortcut("+ / =",  "Volume up",                                 mid),
+        shortcut("-",      "Volume down",                               mid),
     ];
 
     let right: Vec<Line> = vec![
-        Line::from(Span::styled("Library & Queue", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        shortcut("a",  "Add selected item to queue"),
-        shortcut("x",  "Clear queue"),
+        header("Library & Queue"),
+        shortcut("a",  "Add selected item to queue",                    mid),
+        shortcut("x",  "Clear queue",                                   mid),
         Line::from(""),
-        Line::from(Span::styled("Players", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        shortcut("t",  "Toggle player power"),
+        header("Players"),
+        shortcut("t",  "Toggle player power",                           mid),
         Line::from(""),
-        Line::from(Span::styled("App", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        shortcut("c",         "Open server configuration"),
-        shortcut("q / Ctrl-c", "Quit"),
+        header("App"),
+        shortcut("c",         "Open server configuration",              mid),
+        shortcut("q / Ctrl-c", "Quit",                                  mid),
     ];
 
     f.render_widget(Paragraph::new(left), cols[0]);
     f.render_widget(Paragraph::new(right), cols[1]);
 }
 
-fn shortcut<'a>(key: &'a str, desc: &'a str) -> Line<'a> {
+fn shortcut(key: &'static str, desc: &'static str, mid: Color) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("  {:<16}", key), Style::default().fg(Color::White)),
-        Span::styled(desc, Style::default().fg(Color::DarkGray)),
+        Span::styled(desc, Style::default().fg(mid)),
     ])
 }
 
@@ -956,6 +1032,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let ctrl_row = if bigscreen { 6 } else { 3 };
     let progress_row = if bigscreen { 8 } else { 5 };
     let indent: &str = if bigscreen { " " } else { "" };
+    let mid = mid_accent_color(app.accent_color);
 
     let play_icon = if app.use_nerd_icons {
         if np.is_playing { "\u{F04B}" } else { "\u{F04C}" }  // nf-fa-play / nf-fa-pause
@@ -993,10 +1070,11 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     ]);
     f.render_widget(Paragraph::new(title_line), rows[0]);
 
+    let accent = focus_border_color(app.accent_color);
     let artist_line = Line::from(vec![
         Span::raw(indent),
-        Span::styled("  by ", Style::default().fg(Color::DarkGray)),
-        Span::styled(np.artist.clone(), Style::default().fg(Color::Gray)),
+        Span::styled("  by ", Style::default().fg(mid)),
+        Span::styled(np.artist.clone(), Style::default().fg(accent)),
     ]);
     f.render_widget(Paragraph::new(artist_line), rows[1]);
 
@@ -1006,8 +1084,8 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     };
     let album_line = Line::from(vec![
         Span::raw(indent),
-        Span::styled("  from ", Style::default().fg(Color::Rgb(80, 80, 100))),
-        Span::styled(album_text.trim_start().to_string(), Style::default().fg(Color::DarkGray)),
+        Span::styled("  from ", Style::default().fg(mid)),
+        Span::styled(album_text.trim_start().to_string(), Style::default().fg(accent)),
     ]);
     f.render_widget(Paragraph::new(album_line), rows[2]);
 
@@ -1049,7 +1127,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             if x + btn_w > ctrl_max_x { break; }
             f.render_widget(
                 Paragraph::new(format!(" {} ", icon))
-                    .style(Style::default().fg(Color::Rgb(160, 200, 255)).bg(Color::Rgb(28, 32, 45))),
+                    .style(Style::default().fg(focus_border_color(app.accent_color)).bg(btn_bg_color(app.accent_color))),
                 Rect::new(x, ctrl.y, btn_w, 1),
             );
         }
@@ -1057,9 +1135,9 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         let shuffle_x = ctrl_x + 4 * (btn_w + gap) + sep;
         if shuffle_x + btn_w <= ctrl_max_x {
             let (sfg, sbg) = if np.shuffle > 0 {
-                (Color::Cyan, Color::Rgb(20, 45, 60))
+                (focus_border_color(app.accent_color), btn_active_bg_color(app.accent_color))
             } else {
-                (Color::Rgb(80, 80, 100), Color::Rgb(28, 32, 45))
+                (btn_dim_color(app.accent_color), btn_bg_color(app.accent_color))
             };
             f.render_widget(
                 Paragraph::new(format!(" {} ", shuf_icon)).style(Style::default().fg(sfg).bg(sbg)),
@@ -1070,23 +1148,23 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         if repeat_x + btn_w <= ctrl_max_x {
             let (rfg, rbg, rep_btn) = match np.repeat {
                 1 => (
-                    Color::Yellow,
-                    Color::Rgb(45, 40, 10),
+                    focus_border_color(app.accent_color),
+                    btn_active_bg_color(app.accent_color),
                     if app.use_nerd_icons { " \u{F01E}1".to_string() } else { " ↺1".to_string() },
                 ),
                 2 => (
-                    Color::Cyan,
-                    Color::Rgb(20, 45, 60),
+                    focus_border_color(app.accent_color),
+                    btn_active_bg_color(app.accent_color),
                     if app.use_nerd_icons { " \u{F01E} ".to_string() } else { " ↺ ".to_string() },
                 ),
                 3 => (
-                    Color::Green,
-                    Color::Rgb(10, 40, 20),
+                    focus_border_color(app.accent_color),
+                    btn_active_bg_color(app.accent_color),
                     " ∞ ".to_string(),
                 ),
                 _ => (
-                    Color::Rgb(80, 80, 100),
-                    Color::Rgb(28, 32, 45),
+                    btn_dim_color(app.accent_color),
+                    btn_bg_color(app.accent_color),
                     if app.use_nerd_icons { " \u{F01E} ".to_string() } else { " ↺ ".to_string() },
                 ),
             };
@@ -1100,7 +1178,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             let vol_down_icon = if app.use_nerd_icons { "\u{F027}" } else { "−" };  // nf-fa-volume-down
             f.render_widget(
                 Paragraph::new(format!(" {} ", vol_down_icon))
-                    .style(Style::default().fg(Color::Rgb(160, 200, 255)).bg(Color::Rgb(28, 32, 45))),
+                    .style(Style::default().fg(focus_border_color(app.accent_color)).bg(btn_bg_color(app.accent_color))),
                 Rect::new(vol_down_x, ctrl.y, btn_w, 1),
             );
         }
@@ -1109,7 +1187,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             let vol_up_icon = if app.use_nerd_icons { "\u{F028}" } else { "+" };  // nf-fa-volume-up
             f.render_widget(
                 Paragraph::new(format!(" {} ", vol_up_icon))
-                    .style(Style::default().fg(Color::Rgb(160, 200, 255)).bg(Color::Rgb(28, 32, 45))),
+                    .style(Style::default().fg(focus_border_color(app.accent_color)).bg(btn_bg_color(app.accent_color))),
                 Rect::new(vol_up_x, ctrl.y, btn_w, 1),
             );
         }
@@ -1157,7 +1235,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     };
     let bar = Line::from(vec![
         Span::styled("█".repeat(pure_filled), Style::default().fg(accent)),
-        Span::styled("░".repeat(pure_unfilled), Style::default().fg(track_color)),
+        Span::styled(" ".repeat(pure_unfilled), Style::default().bg(track_color)),
         Span::styled(
             over_filled_text,
             Style::default().bg(accent).fg(Color::Black).add_modifier(Modifier::BOLD),
@@ -1263,6 +1341,7 @@ fn draw_two_row_list(
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
+        .title_style(Style::default().fg(focus_border_color(accent)))
         .title(title);
 
     if items.is_empty() {
