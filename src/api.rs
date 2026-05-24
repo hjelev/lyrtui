@@ -359,22 +359,21 @@ impl LmsClient {
         Ok(())
     }
 
-    pub async fn play_track(&self, player_id: &str, track_id: &str) -> Result<()> {
+    async fn playlistcontrol(&self, player_id: &str, cmd: &str, item_type: &str, id: &str) -> Result<()> {
         self.rpc(
             player_id,
-            &[json!("playlistcontrol"), json!("cmd:load"), json!(format!("track_id:{}", track_id))],
+            &[json!("playlistcontrol"), json!(format!("cmd:{}", cmd)), json!(format!("{}:{}", item_type, id))],
         )
         .await?;
         Ok(())
     }
 
+    pub async fn play_track(&self, player_id: &str, track_id: &str) -> Result<()> {
+        self.playlistcontrol(player_id, "load", "track_id", track_id).await
+    }
+
     pub async fn play_album(&self, player_id: &str, album_id: &str) -> Result<()> {
-        self.rpc(
-            player_id,
-            &[json!("playlistcontrol"), json!("cmd:load"), json!(format!("album_id:{}", album_id))],
-        )
-        .await?;
-        Ok(())
+        self.playlistcontrol(player_id, "load", "album_id", album_id).await
     }
 
     pub async fn play_track_index(&self, player_id: &str, index: usize) -> Result<()> {
@@ -451,22 +450,7 @@ impl LmsClient {
             .cloned()
             .unwrap_or_default();
         let base = self.server_base_url();
-        Ok(items
-            .into_iter()
-            .map(|v| RadioItem {
-                name: v["name"].as_str().unwrap_or("").to_string(),
-                item_type: v["type"].as_str().unwrap_or("link").to_string(),
-                url: v["url"].as_str().map(String::from),
-                cmd: v["cmd"]
-                    .as_str()
-                    .map(String::from)
-                    .or_else(|| Some(cmd.to_string())),
-                item_id: v["id"].as_str().map(String::from),
-                artwork_url: resolve_image_url(&v, &base),
-                has_items: v["hasitems"].as_u64().unwrap_or(0) > 0,
-                is_audio: v["isaudio"].as_u64().unwrap_or(0) > 0,
-            })
-            .collect())
+        Ok(items.into_iter().map(|v| parse_browse_item(&v, &base, cmd)).collect())
     }
 
     /// Play a raw stream URL immediately on the given player.
@@ -476,39 +460,19 @@ impl LmsClient {
     }
 
     pub async fn add_track_to_queue(&self, player_id: &str, track_id: &str) -> Result<()> {
-        self.rpc(
-            player_id,
-            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("track_id:{}", track_id))],
-        )
-        .await?;
-        Ok(())
+        self.playlistcontrol(player_id, "add", "track_id", track_id).await
     }
 
     pub async fn add_album_to_queue(&self, player_id: &str, album_id: &str) -> Result<()> {
-        self.rpc(
-            player_id,
-            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("album_id:{}", album_id))],
-        )
-        .await?;
-        Ok(())
+        self.playlistcontrol(player_id, "add", "album_id", album_id).await
     }
 
     pub async fn add_artist_to_queue(&self, player_id: &str, artist_id: &str) -> Result<()> {
-        self.rpc(
-            player_id,
-            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("artist_id:{}", artist_id))],
-        )
-        .await?;
-        Ok(())
+        self.playlistcontrol(player_id, "add", "artist_id", artist_id).await
     }
 
     pub async fn add_folder_to_queue(&self, player_id: &str, folder_id: u32) -> Result<()> {
-        self.rpc(
-            player_id,
-            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("folder_id:{}", folder_id))],
-        )
-        .await?;
-        Ok(())
+        self.playlistcontrol(player_id, "add", "folder_id", &folder_id.to_string()).await
     }
 
     pub async fn clear_queue(&self, player_id: &str) -> Result<()> {
@@ -547,11 +511,7 @@ impl LmsClient {
     }
 
     pub async fn insert_track_next(&self, player_id: &str, track_id: &str) -> Result<()> {
-        self.rpc(
-            player_id,
-            &[json!("playlistcontrol"), json!("cmd:insert"), json!(format!("track_id:{}", track_id))],
-        ).await?;
-        Ok(())
+        self.playlistcontrol(player_id, "insert", "track_id", track_id).await
     }
 
     pub async fn insert_url_next(&self, player_id: &str, url: &str) -> Result<()> {
@@ -585,16 +545,7 @@ impl LmsClient {
         let base = self.server_base_url();
         Ok(items
             .into_iter()
-            .map(|v| RadioItem {
-                name: v["name"].as_str().unwrap_or("").to_string(),
-                item_type: v["type"].as_str().unwrap_or("link").to_string(),
-                url: v["url"].as_str().map(String::from),
-                cmd: v["cmd"].as_str().map(String::from).or_else(|| Some(cmd.to_string())),
-                item_id: v["id"].as_str().map(String::from),
-                artwork_url: resolve_image_url(&v, &base),
-                has_items: v["hasitems"].as_u64().unwrap_or(0) > 0,
-                is_audio: v["isaudio"].as_u64().unwrap_or(0) > 0,
-            })
+            .map(|v| parse_browse_item(&v, &base, cmd))
             .filter(|item| !item.name.is_empty())
             .collect())
     }
@@ -649,27 +600,15 @@ impl LmsClient {
     }
 
     pub async fn play_playlist(&self, player_id: &str, playlist_id: &str) -> Result<()> {
-        self.rpc(
-            player_id,
-            &[json!("playlistcontrol"), json!("cmd:load"), json!(format!("playlist_id:{}", playlist_id))],
-        ).await?;
-        Ok(())
+        self.playlistcontrol(player_id, "load", "playlist_id", playlist_id).await
     }
 
     pub async fn add_playlist_to_queue(&self, player_id: &str, playlist_id: &str) -> Result<()> {
-        self.rpc(
-            player_id,
-            &[json!("playlistcontrol"), json!("cmd:add"), json!(format!("playlist_id:{}", playlist_id))],
-        ).await?;
-        Ok(())
+        self.playlistcontrol(player_id, "add", "playlist_id", playlist_id).await
     }
 
     pub async fn insert_playlist_next(&self, player_id: &str, playlist_id: &str) -> Result<()> {
-        self.rpc(
-            player_id,
-            &[json!("playlistcontrol"), json!("cmd:insert"), json!(format!("playlist_id:{}", playlist_id))],
-        ).await?;
-        Ok(())
+        self.playlistcontrol(player_id, "insert", "playlist_id", playlist_id).await
     }
 
     pub async fn fetch_image_bytes(&self, url: &str) -> Result<Vec<u8>> {
@@ -688,6 +627,21 @@ impl LmsClient {
             return Err(anyhow!("no response from server"));
         }
         Ok(())
+    }
+}
+
+/// Build a `RadioItem` from a browse/search result JSON object.
+/// `default_cmd` is used as the fallback when the server doesn't include a `cmd` field.
+fn parse_browse_item(v: &Value, base: &str, default_cmd: &str) -> RadioItem {
+    RadioItem {
+        name: v["name"].as_str().unwrap_or("").to_string(),
+        item_type: v["type"].as_str().unwrap_or("link").to_string(),
+        url: v["url"].as_str().map(String::from),
+        cmd: v["cmd"].as_str().map(String::from).or_else(|| Some(default_cmd.to_string())),
+        item_id: v["id"].as_str().map(String::from),
+        artwork_url: resolve_image_url(v, base),
+        has_items: v["hasitems"].as_u64().unwrap_or(0) > 0,
+        is_audio: v["isaudio"].as_u64().unwrap_or(0) > 0,
     }
 }
 

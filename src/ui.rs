@@ -37,64 +37,73 @@ fn focus_border_color(accent: Option<[u8; 3]>) -> Color {
     }
 }
 
-fn unfocus_border_color(accent: Option<[u8; 3]>) -> Color {
+fn accent_tint(accent: Option<[u8; 3]>, pct: u16, r_off: u16, g_off: u16, b_off: u16, fallback: Color) -> Color {
     match accent {
         Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 25 / 100 + 20).min(255) as u8,
-            (g as u16 * 25 / 100 + 20).min(255) as u8,
-            (b as u16 * 25 / 100 + 30).min(255) as u8,
+            (r as u16 * pct / 100 + r_off).min(255) as u8,
+            (g as u16 * pct / 100 + g_off).min(255) as u8,
+            (b as u16 * pct / 100 + b_off).min(255) as u8,
         ),
-        None => Color::DarkGray,
+        None => fallback,
     }
+}
+
+fn unfocus_border_color(accent: Option<[u8; 3]>) -> Color {
+    accent_tint(accent, 25, 20, 20, 30, Color::DarkGray)
 }
 
 /// Very dark accent tint used as the background for media control buttons.
 fn btn_bg_color(accent: Option<[u8; 3]>) -> Color {
-    match accent {
-        Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 12 / 100 + 15).min(255) as u8,
-            (g as u16 * 12 / 100 + 15).min(255) as u8,
-            (b as u16 * 12 / 100 + 20).min(255) as u8,
-        ),
-        None => Color::Rgb(28, 32, 45),
-    }
+    accent_tint(accent, 12, 15, 15, 20, Color::Rgb(28, 32, 45))
 }
 
 /// Slightly brighter dark accent tint for active-state toggle buttons (shuffle on, repeat on).
 fn btn_active_bg_color(accent: Option<[u8; 3]>) -> Color {
-    match accent {
-        Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 22 / 100 + 15).min(255) as u8,
-            (g as u16 * 22 / 100 + 15).min(255) as u8,
-            (b as u16 * 22 / 100 + 20).min(255) as u8,
-        ),
-        None => Color::Rgb(20, 45, 60),
-    }
+    accent_tint(accent, 22, 15, 15, 20, Color::Rgb(20, 45, 60))
 }
 
 /// Dimmed foreground for inactive toggle buttons (shuffle off, repeat off).
 fn btn_dim_color(accent: Option<[u8; 3]>) -> Color {
-    match accent {
-        Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 30 / 100 + 15).min(255) as u8,
-            (g as u16 * 30 / 100 + 15).min(255) as u8,
-            (b as u16 * 30 / 100 + 20).min(255) as u8,
-        ),
-        None => Color::Rgb(80, 80, 100),
-    }
+    accent_tint(accent, 30, 15, 15, 20, Color::Rgb(80, 80, 100))
 }
 
 /// Mid-brightness color from the accent palette — between the bright focus color and the dark
 /// unfocus color. Used for secondary labels that should feel tinted but not dominant.
 fn mid_accent_color(accent: Option<[u8; 3]>) -> Color {
-    match accent {
-        Some([r, g, b]) => Color::Rgb(
-            (r as u16 * 58 / 100 + 18).min(255) as u8,
-            (g as u16 * 58 / 100 + 18).min(255) as u8,
-            (b as u16 * 58 / 100 + 25).min(255) as u8,
-        ),
-        None => Color::Gray,
-    }
+    accent_tint(accent, 58, 18, 18, 25, Color::Gray)
+}
+
+fn sync_scroll_offset(state: &mut ListState, selected: usize, visible: usize) -> usize {
+    let o = *state.offset_mut();
+    let new_o = if selected < o {
+        selected
+    } else if visible > 0 && selected >= o + visible {
+        selected + 1 - visible
+    } else {
+        o
+    };
+    *state.offset_mut() = new_o;
+    new_o
+}
+
+fn pill_endcap_left(bg: Color) -> Span<'static> {
+    Span::styled("\u{e0b6}", Style::default().fg(bg).bg(Color::Reset))
+}
+
+fn pill_endcap_right(bg: Color) -> Span<'static> {
+    Span::styled("\u{e0b4}", Style::default().fg(bg).bg(Color::Reset))
+}
+
+fn icon_vol(nerd: bool) -> &'static str {
+    if nerd { "\u{F028}" } else { "♪" }
+}
+
+fn icon_player_dot(nerd: bool) -> &'static str {
+    if nerd { "\u{f075a}" } else { "▶" }
+}
+
+fn icon_globe(nerd: bool) -> &'static str {
+    if nerd { " \u{F0AC}" } else { " ◎" }
 }
 
 /// Returns (pill_bg, pill_fg) for the yazi-style pill selector.
@@ -307,11 +316,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
 
     // Volume
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
-    let globe_icon = if app.global_volume_control {
-        if app.use_nerd_icons { " \u{F0AC}" } else { " ◎" }  // nf-fa-globe
-    } else {
-        ""
-    };
+    let globe_icon = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("Vol ", Style::default().fg(mid)),
@@ -371,16 +376,16 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             if selected {
                 if app.use_nerd_icons {
                     ListItem::new(Line::from(vec![
-                        Span::styled("\u{e0b6}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                        pill_endcap_left(pill_bg),
                         Span::styled(format!(" {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
                         Span::styled(format!("{} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
-                        Span::styled("\u{e0b4}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                        pill_endcap_right(pill_bg),
                     ]))
                 } else {
                     ListItem::new(Line::from(vec![
-                        Span::styled("\u{e0b6}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                        pill_endcap_left(pill_bg),
                         Span::styled(format!(" {} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
-                        Span::styled("\u{e0b4}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                        pill_endcap_right(pill_bg),
                     ]))
                 }
             } else if app.use_nerd_icons {
@@ -478,11 +483,11 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let items: Vec<ListItem> = entries.iter().enumerate().map(|(i, (icon, label, sub))| {
         if i == app.main_selected {
             ListItem::new(Line::from(vec![
-                Span::styled("\u{e0b6}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                pill_endcap_left(pill_bg),
                 Span::styled(format!(" {}  ", icon), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
                 Span::styled(label.to_string(), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
                 Span::styled(format!("  — {} ", sub), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
-                Span::styled("\u{e0b4}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                pill_endcap_right(pill_bg),
             ]))
         } else {
             ListItem::new(Line::from(vec![
@@ -689,17 +694,10 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     // label_w = len(" [x] Global vol  ") = 17; subtract 3 for the " ○ " prefix.
     let name_col_w: usize = label_w - 3;
 
-    // Sync scroll offset.
-    let offset = {
-        let o = *state.offset_mut();
-        let new_o = if !app.players_focus_global {
-            let sel = app.main_selected;
-            if sel < o { sel }
-            else if visible > 0 && sel >= o + visible { sel + 1 - visible }
-            else { o }
-        } else { o };
-        *state.offset_mut() = new_o;
-        new_o
+    let offset = if !app.players_focus_global {
+        sync_scroll_offset(state, app.main_selected, visible)
+    } else {
+        *state.offset_mut()
     };
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
@@ -885,19 +883,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
     let visible = ((results_area.height / 2) as usize).max(1);
     let total = app.search_results.len();
 
-    // Sync scroll offset
-    let offset = {
-        let o = *state.offset_mut();
-        let new_o = if selected < o {
-            selected
-        } else if selected >= o + visible {
-            selected + 1 - visible
-        } else {
-            o
-        };
-        *state.offset_mut() = new_o;
-        new_o
-    };
+    let offset = sync_scroll_offset(state, selected, visible);
 
     let text_x = results_area.x + THUMB_W + THUMB_SEP;
     let text_w = results_area.width.saturating_sub(THUMB_W + THUMB_SEP);
@@ -1224,12 +1210,8 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
             .map(|p| p.name.as_str())
             .unwrap_or("—");
-        let vol_icon = if app.use_nerd_icons { "\u{F028}" } else { "♪" };  // nf-fa-volume-up
-        let globe_icon = if app.global_volume_control {
-            if app.use_nerd_icons { " \u{F0AC}" } else { " ◎" }
-        } else {
-            ""
-        };
+        let vol_icon = icon_vol(app.use_nerd_icons);
+        let globe_icon = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
         let player_vol_line = Line::from(vec![
             Span::styled(if app.use_nerd_icons { " \u{f075a} " } else { " ▶ " }, Style::default().fg(mid)),
             Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
@@ -1453,11 +1435,9 @@ fn draw_full_art_mode(
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "—".to_string());
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
-    let vol_icon = if app.use_nerd_icons { "\u{F028}" } else { "♪" };
-    let player_icon = if app.use_nerd_icons { "\u{f075a}" } else { "▶" };
-    let globe = if app.global_volume_control {
-        if app.use_nerd_icons { " \u{F0AC}" } else { " ◎" }
-    } else { "" };
+    let vol_icon = icon_vol(app.use_nerd_icons);
+    let player_icon = icon_player_dot(app.use_nerd_icons);
+    let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
     let vol_str = format!("{}%", vol);
     let right_w = (1 + player_icon.chars().count() + 1
         + player_name.chars().count()
@@ -1548,19 +1528,7 @@ fn draw_two_row_list(
     let visible = ((inner.height / 2) as usize).max(1);
     let needs_scroll = items.len() > visible;
 
-    // Sync scroll so selected is always visible
-    let offset = {
-        let o = *state.offset_mut();
-        let new_o = if selected < o {
-            selected
-        } else if selected >= o + visible {
-            selected + 1 - visible
-        } else {
-            o
-        };
-        *state.offset_mut() = new_o;
-        new_o
-    };
+    let offset = sync_scroll_offset(state, selected, visible);
 
     let text_x = inner.x + THUMB_W + THUMB_SEP;
     let text_w = inner.width.saturating_sub(THUMB_W + THUMB_SEP);
@@ -1785,9 +1753,9 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = options.iter().enumerate().map(|(i, o)| {
         if i == menu.selected {
             ListItem::new(Line::from(vec![
-                Span::styled("\u{e0b6}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                pill_endcap_left(pill_bg),
                 Span::styled(format!(" {} ", o), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
-                Span::styled("\u{e0b4}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                pill_endcap_right(pill_bg),
             ]))
         } else {
             ListItem::new(Line::from(Span::raw(format!("  {}", o))))

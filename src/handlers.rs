@@ -67,36 +67,37 @@ pub async fn handle_mouse_event(
             } else if point_in(col, row, btn_rects[1]) {
                 app.config_modal = None;
             } else if point_in(col, row, modal_area) {
-                let modal = app.config_modal.as_mut().unwrap();
-                if point_in(col, row, field_rects[0]) {
-                    modal.selected_field = 0;
-                    modal.editing = true;
-                    modal.error = None;
-                } else if point_in(col, row, field_rects[1]) {
-                    modal.selected_field = 1;
-                    modal.editing = true;
-                    modal.error = None;
-                } else if point_in(col, row, field_rects[2]) {
-                    modal.selected_field = 2;
-                    modal.editing = true;
-                    modal.error = None;
-                } else if point_in(col, row, field_rects[3]) {
-                    modal.selected_field = 3;
-                    modal.editing = true;
-                    modal.error = None;
-                } else if point_in(col, row, field_rects[4]) {
-                    modal.selected_field = 4;
-                    modal.use_nerd_icons = !modal.use_nerd_icons;
-                } else if point_in(col, row, field_rects[5]) {
-                    modal.selected_field = 5;
-                    modal.auto_discover = !modal.auto_discover;
-                } else if point_in(col, row, field_rects[6]) {
-                    modal.selected_field = 6;
-                    modal.editing = true;
-                    modal.error = None;
-                } else if point_in(col, row, field_rects[7]) {
-                    modal.selected_field = 7;
-                    modal.disable_auto_colors = !modal.disable_auto_colors;
+                if let Some(modal) = app.config_modal.as_mut() {
+                    if point_in(col, row, field_rects[0]) {
+                        modal.selected_field = 0;
+                        modal.editing = true;
+                        modal.error = None;
+                    } else if point_in(col, row, field_rects[1]) {
+                        modal.selected_field = 1;
+                        modal.editing = true;
+                        modal.error = None;
+                    } else if point_in(col, row, field_rects[2]) {
+                        modal.selected_field = 2;
+                        modal.editing = true;
+                        modal.error = None;
+                    } else if point_in(col, row, field_rects[3]) {
+                        modal.selected_field = 3;
+                        modal.editing = true;
+                        modal.error = None;
+                    } else if point_in(col, row, field_rects[4]) {
+                        modal.selected_field = 4;
+                        modal.use_nerd_icons = !modal.use_nerd_icons;
+                    } else if point_in(col, row, field_rects[5]) {
+                        modal.selected_field = 5;
+                        modal.auto_discover = !modal.auto_discover;
+                    } else if point_in(col, row, field_rects[6]) {
+                        modal.selected_field = 6;
+                        modal.editing = true;
+                        modal.error = None;
+                    } else if point_in(col, row, field_rects[7]) {
+                        modal.selected_field = 7;
+                        modal.disable_auto_colors = !modal.disable_auto_colors;
+                    }
                 }
             } else {
                 app.config_modal = None;
@@ -108,16 +109,16 @@ pub async fn handle_mouse_event(
     // Context menu intercepts all left clicks
     if app.context_menu.is_some() {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let option_count = app.context_menu.as_ref().unwrap().option_count();
+            let option_count = app.context_menu.as_ref().map(|m| m.option_count()).unwrap_or(0);
             let menu_area = ui::compute_context_menu_rect(terminal_area, option_count);
             if point_in(col, row, menu_area) {
                 let opt_top = menu_area.y + 1;
                 let opt_bot = menu_area.y + menu_area.height.saturating_sub(2);
                 if row >= opt_top && row < opt_bot {
                     let opt_idx = (row - opt_top) as usize;
-                    let count = app.context_menu.as_ref().unwrap().option_count();
+                    let count = app.context_menu.as_ref().map(|m| m.option_count()).unwrap_or(0);
                     if opt_idx < count {
-                        app.context_menu.as_mut().unwrap().selected = opt_idx;
+                        if let Some(m) = app.context_menu.as_mut() { m.selected = opt_idx; }
                         execute_context_menu_action(app, client, tx).await;
                     }
                 }
@@ -349,16 +350,14 @@ pub async fn handle_confirm_clear_queue_key(
             let confirmed = app.clear_queue_selected_button == 0;
             app.confirm_clear_queue = false;
             app.clear_queue_selected_button = 0;
-            if confirmed {
-                if let Some(pid) = app.active_player.clone() {
-                    let c = client.clone();
-                    let t = tx.clone();
-                    tokio::spawn(async move {
-                        if c.clear_queue(&pid).await.is_ok() {
-                            let _ = t.send(AppMsg::StatusMsg("Queue cleared".to_string())).await;
-                        }
-                    });
-                }
+            if confirmed && let Some(pid) = app.active_player.clone() {
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.clear_queue(&pid).await.is_ok() {
+                        let _ = t.send(AppMsg::StatusMsg("Queue cleared".to_string())).await;
+                    }
+                });
             }
         }
         KeyCode::Esc => {
@@ -653,6 +652,51 @@ async fn handle_add_to_favorites(
     }
 }
 
+fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta: i16) {
+    let new_vol = |v: u8| -> u8 { ((v as i16) + delta).clamp(0, 100) as u8 };
+
+    if app.global_volume_control {
+        let pids: Vec<String> = app.players.iter().map(|p| p.playerid.clone()).collect();
+        for pid in &pids {
+            let nv = new_vol(app.player_volumes.get(pid).copied().unwrap_or(50));
+            app.player_volumes.insert(pid.clone(), nv);
+            let _ = vol_sync_tx.try_send((pid.clone(), nv));
+        }
+        if let Some(active_pid) = app.active_player.clone()
+            && let Some(nv) = app.player_volumes.get(&active_pid).copied()
+            && let Some(np) = app.now_playing.as_mut()
+        {
+            np.volume = nv;
+        }
+    } else if let MainView::Players = &app.main_view {
+        if app.players_focus_global {
+            let pids: Vec<String> = app.players.iter().map(|p| p.playerid.clone()).collect();
+            for pid in pids {
+                let nv = new_vol(app.player_volumes.get(&pid).copied().unwrap_or(50));
+                app.player_volumes.insert(pid.clone(), nv);
+                let _ = vol_sync_tx.try_send((pid, nv));
+            }
+        } else if let Some(player) = app.players.get(app.main_selected) {
+            let pid = player.playerid.clone();
+            let nv = new_vol(app.player_volumes.get(&pid).copied().unwrap_or(50));
+            app.player_volumes.insert(pid.clone(), nv);
+            if app.active_player.as_deref() == Some(&pid)
+                && let Some(np) = app.now_playing.as_mut()
+            {
+                np.volume = nv;
+            }
+            let _ = vol_sync_tx.try_send((pid, nv));
+        }
+    } else if let Some(pid) = app.active_player.clone() {
+        let nv = new_vol(app.now_playing.as_ref().map(|n| n.volume).unwrap_or(50));
+        if let Some(np) = app.now_playing.as_mut() {
+            np.volume = nv;
+        }
+        app.player_volumes.insert(pid.clone(), nv);
+        let _ = vol_sync_tx.try_send((pid, nv));
+    }
+}
+
 /// Returns true if the app should quit.
 pub async fn handle_action(
     app: &mut App,
@@ -931,119 +975,9 @@ pub async fn handle_action(
             }
         }
 
-        Action::VolumeUp => {
-            if app.global_volume_control {
-                let pids: Vec<String> =
-                    app.players.iter().map(|p| p.playerid.clone()).collect();
-                for pid in &pids {
-                    let new_vol =
-                        (app.player_volumes.get(pid).copied().unwrap_or(50) + 5).min(100);
-                    app.player_volumes.insert(pid.clone(), new_vol);
-                    let _ = vol_sync_tx.try_send((pid.clone(), new_vol));
-                }
-                if let Some(active_pid) = app.active_player.clone()
-                    && let Some(new_vol) = app.player_volumes.get(&active_pid).copied()
-                    && let Some(np) = app.now_playing.as_mut()
-                {
-                    np.volume = new_vol;
-                }
-            } else if let MainView::Players = &app.main_view {
-                if app.players_focus_global {
-                    let pids: Vec<String> =
-                        app.players.iter().map(|p| p.playerid.clone()).collect();
-                    for pid in pids {
-                        let new_vol =
-                            (app.player_volumes.get(&pid).copied().unwrap_or(50) + 5).min(100);
-                        app.player_volumes.insert(pid.clone(), new_vol);
-                        let _ = vol_sync_tx.try_send((pid, new_vol));
-                    }
-                } else if let Some(player) = app.players.get(app.main_selected) {
-                    let pid = player.playerid.clone();
-                    let new_vol =
-                        (app.player_volumes.get(&pid).copied().unwrap_or(50) + 5).min(100);
-                    app.player_volumes.insert(pid.clone(), new_vol);
-                    if app.active_player.as_deref() == Some(&pid)
-                        && let Some(np) = app.now_playing.as_mut()
-                    {
-                        np.volume = new_vol;
-                    }
-                    let _ = vol_sync_tx.try_send((pid, new_vol));
-                }
-            } else if let Some(pid) = app.active_player.clone() {
-                let new_vol =
-                    (app.now_playing.as_ref().map(|n| n.volume).unwrap_or(50) + 5).min(100);
-                if let Some(np) = app.now_playing.as_mut() {
-                    np.volume = new_vol;
-                }
-                app.player_volumes.insert(pid.clone(), new_vol);
-                let _ = vol_sync_tx.try_send((pid, new_vol));
-            }
-        }
+        Action::VolumeUp => adjust_volume(app, vol_sync_tx, 5),
 
-        Action::VolumeDown => {
-            if app.global_volume_control {
-                let pids: Vec<String> =
-                    app.players.iter().map(|p| p.playerid.clone()).collect();
-                for pid in &pids {
-                    let new_vol = app
-                        .player_volumes
-                        .get(pid)
-                        .copied()
-                        .unwrap_or(50)
-                        .saturating_sub(5);
-                    app.player_volumes.insert(pid.clone(), new_vol);
-                    let _ = vol_sync_tx.try_send((pid.clone(), new_vol));
-                }
-                if let Some(active_pid) = app.active_player.clone()
-                    && let Some(new_vol) = app.player_volumes.get(&active_pid).copied()
-                    && let Some(np) = app.now_playing.as_mut()
-                {
-                    np.volume = new_vol;
-                }
-            } else if let MainView::Players = &app.main_view {
-                if app.players_focus_global {
-                    let pids: Vec<String> =
-                        app.players.iter().map(|p| p.playerid.clone()).collect();
-                    for pid in pids {
-                        let new_vol = app
-                            .player_volumes
-                            .get(&pid)
-                            .copied()
-                            .unwrap_or(50)
-                            .saturating_sub(5);
-                        app.player_volumes.insert(pid.clone(), new_vol);
-                        let _ = vol_sync_tx.try_send((pid, new_vol));
-                    }
-                } else if let Some(player) = app.players.get(app.main_selected) {
-                    let pid = player.playerid.clone();
-                    let new_vol = app
-                        .player_volumes
-                        .get(&pid)
-                        .copied()
-                        .unwrap_or(50)
-                        .saturating_sub(5);
-                    app.player_volumes.insert(pid.clone(), new_vol);
-                    if app.active_player.as_deref() == Some(&pid)
-                        && let Some(np) = app.now_playing.as_mut()
-                    {
-                        np.volume = new_vol;
-                    }
-                    let _ = vol_sync_tx.try_send((pid, new_vol));
-                }
-            } else if let Some(pid) = app.active_player.clone() {
-                let new_vol = app
-                    .now_playing
-                    .as_ref()
-                    .map(|n| n.volume)
-                    .unwrap_or(50)
-                    .saturating_sub(5);
-                if let Some(np) = app.now_playing.as_mut() {
-                    np.volume = new_vol;
-                }
-                app.player_volumes.insert(pid.clone(), new_vol);
-                let _ = vol_sync_tx.try_send((pid, new_vol));
-            }
-        }
+        Action::VolumeDown => adjust_volume(app, vol_sync_tx, -5),
 
         Action::TogglePower => {
             if let MainView::Players = &app.main_view
@@ -1109,60 +1043,62 @@ pub async fn handle_action(
     false
 }
 
+fn set_modal_error(app: &mut App, msg: &str) {
+    if let Some(m) = app.config_modal.as_mut() {
+        m.error = Some(msg.to_string());
+    }
+}
+
 fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsClient>) {
-    let (host, port_str, username, password, use_nerd_icons, auto_discover, broadcast_mask, disable_auto_colors) = {
-        let modal = app.config_modal.as_ref().unwrap();
-        (
-            modal.host.trim().to_string(),
-            modal.port.trim().to_string(),
-            modal.username.trim().to_string(),
-            modal.password.clone(),
-            modal.use_nerd_icons,
-            modal.auto_discover,
-            modal.broadcast_mask.trim().to_string(),
-            modal.disable_auto_colors,
-        )
-    };
+    let Some(modal) = app.config_modal.as_ref() else { return };
+    let host = modal.host.trim().to_string();
+    let port_str = modal.port.trim().to_string();
+    let username = modal.username.trim().to_string();
+    let password = modal.password.clone();
+    let use_nerd_icons = modal.use_nerd_icons;
+    let auto_discover = modal.auto_discover;
+    let broadcast_mask = modal.broadcast_mask.trim().to_string();
+    let disable_auto_colors = modal.disable_auto_colors;
+    // immutable borrow of modal ends here; mutable borrows below are now allowed
+
     if host.is_empty() {
-        app.config_modal.as_mut().unwrap().error = Some("Host cannot be empty".to_string());
-    } else if broadcast_mask.is_empty() {
-        app.config_modal.as_mut().unwrap().error = Some("Broadcast mask cannot be empty".to_string());
-    } else {
-        match port_str.parse::<u16>() {
-            Ok(port) if port > 0 => {
-                cfg.host = host;
-                cfg.port = port;
-                cfg.use_nerd_icons = use_nerd_icons;
-                cfg.auto_discover = auto_discover;
-                cfg.broadcast_mask = broadcast_mask;
-                cfg.disable_auto_colors = disable_auto_colors;
-                cfg.username = if username.is_empty() { None } else { Some(username.clone()) };
-                cfg.password = if password.is_empty() { None } else { Some(password.clone()) };
-                match cfg.save() {
-                    Ok(()) => {
-                        client.update_base_url(cfg.base_url());
-                        let creds = cfg.username.as_ref()
-                            .zip(cfg.password.as_ref())
-                            .map(|(u, p)| (u.clone(), p.clone()));
-                        client.update_credentials(creds);
-                        app.use_nerd_icons = use_nerd_icons;
-                        app.disable_auto_colors = disable_auto_colors;
-                        app.config_modal = None;
-                        app.connection = ConnectionState::Reconnecting;
-                        app.players = vec![];
-                        app.active_player = None;
-                        app.now_playing = None;
-                        app.status_message = Some("Reconnecting...".to_string());
-                    }
-                    Err(e) => {
-                        app.config_modal.as_mut().unwrap().error = Some(format!("Save error: {e}"));
-                    }
+        set_modal_error(app, "Host cannot be empty");
+        return;
+    }
+    if broadcast_mask.is_empty() {
+        set_modal_error(app, "Broadcast mask cannot be empty");
+        return;
+    }
+    match port_str.parse::<u16>() {
+        Ok(port) if port > 0 => {
+            cfg.host = host;
+            cfg.port = port;
+            cfg.use_nerd_icons = use_nerd_icons;
+            cfg.auto_discover = auto_discover;
+            cfg.broadcast_mask = broadcast_mask;
+            cfg.disable_auto_colors = disable_auto_colors;
+            cfg.username = if username.is_empty() { None } else { Some(username.clone()) };
+            cfg.password = if password.is_empty() { None } else { Some(password.clone()) };
+            match cfg.save() {
+                Ok(()) => {
+                    client.update_base_url(cfg.base_url());
+                    let creds = cfg.username.as_ref()
+                        .zip(cfg.password.as_ref())
+                        .map(|(u, p)| (u.clone(), p.clone()));
+                    client.update_credentials(creds);
+                    app.use_nerd_icons = use_nerd_icons;
+                    app.disable_auto_colors = disable_auto_colors;
+                    app.config_modal = None;
+                    app.connection = ConnectionState::Reconnecting;
+                    app.players = vec![];
+                    app.active_player = None;
+                    app.now_playing = None;
+                    app.status_message = Some("Reconnecting...".to_string());
                 }
-            }
-            _ => {
-                app.config_modal.as_mut().unwrap().error = Some("Invalid port (1–65535)".to_string());
+                Err(e) => set_modal_error(app, &format!("Save error: {e}")),
             }
         }
+        _ => set_modal_error(app, "Invalid port (1–65535)"),
     }
 }
 
@@ -1172,37 +1108,37 @@ pub fn handle_config_key(
     cfg: &mut config::Config,
     client: &Arc<LmsClient>,
 ) {
-    if app.config_modal.is_none() {
-        return;
-    }
-
-    let editing = app.config_modal.as_ref().unwrap().editing;
+    let editing = app.config_modal.as_ref().map(|m| m.editing).unwrap_or(false);
+    let selected = app.config_modal.as_ref().map(|m| m.selected_field);
+    let Some(selected) = selected else { return };
 
     if editing {
         match key.code {
             KeyCode::Esc | KeyCode::Enter | KeyCode::Tab => {
-                app.config_modal.as_mut().unwrap().editing = false;
+                if let Some(m) = app.config_modal.as_mut() { m.editing = false; }
             }
             KeyCode::Char(c) => {
-                let modal = app.config_modal.as_mut().unwrap();
-                match modal.selected_field {
-                    0 => modal.host.push(c),
-                    1 => { if c.is_ascii_digit() { modal.port.push(c); } }
-                    2 => modal.username.push(c),
-                    3 => modal.password.push(c),
-                    6 => modal.broadcast_mask.push(c),
-                    _ => {}
+                if let Some(modal) = app.config_modal.as_mut() {
+                    match modal.selected_field {
+                        0 => modal.host.push(c),
+                        1 => { if c.is_ascii_digit() { modal.port.push(c); } }
+                        2 => modal.username.push(c),
+                        3 => modal.password.push(c),
+                        6 => modal.broadcast_mask.push(c),
+                        _ => {}
+                    }
                 }
             }
             KeyCode::Backspace => {
-                let modal = app.config_modal.as_mut().unwrap();
-                match modal.selected_field {
-                    0 => { modal.host.pop(); }
-                    1 => { modal.port.pop(); }
-                    2 => { modal.username.pop(); }
-                    3 => { modal.password.pop(); }
-                    6 => { modal.broadcast_mask.pop(); }
-                    _ => {}
+                if let Some(modal) = app.config_modal.as_mut() {
+                    match modal.selected_field {
+                        0 => { modal.host.pop(); }
+                        1 => { modal.port.pop(); }
+                        2 => { modal.username.pop(); }
+                        3 => { modal.password.pop(); }
+                        6 => { modal.broadcast_mask.pop(); }
+                        _ => {}
+                    }
                 }
             }
             _ => {}
@@ -1210,43 +1146,41 @@ pub fn handle_config_key(
     } else {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field > 0 {
-                    modal.selected_field -= 1;
-                }
+                if let Some(modal) = app.config_modal.as_mut()
+                    && modal.selected_field > 0 { modal.selected_field -= 1; }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field < 9 {
-                    modal.selected_field += 1;
-                }
+                if let Some(modal) = app.config_modal.as_mut()
+                    && modal.selected_field < CONFIG_FIELD_COUNT - 1 { modal.selected_field += 1; }
             }
             KeyCode::Tab => {
-                let modal = app.config_modal.as_mut().unwrap();
-                modal.selected_field = (modal.selected_field + 1) % 10;
+                if let Some(modal) = app.config_modal.as_mut() {
+                    modal.selected_field = (modal.selected_field + 1) % CONFIG_FIELD_COUNT;
+                }
             }
             KeyCode::Enter | KeyCode::Char('i') => {
-                let selected = app.config_modal.as_ref().unwrap().selected_field;
                 match selected {
-                    4 => { app.config_modal.as_mut().unwrap().use_nerd_icons ^= true; }
-                    5 => { app.config_modal.as_mut().unwrap().auto_discover ^= true; }
-                    7 => { app.config_modal.as_mut().unwrap().disable_auto_colors ^= true; }
+                    4 => { if let Some(m) = app.config_modal.as_mut() { m.use_nerd_icons ^= true; } }
+                    5 => { if let Some(m) = app.config_modal.as_mut() { m.auto_discover ^= true; } }
+                    7 => { if let Some(m) = app.config_modal.as_mut() { m.disable_auto_colors ^= true; } }
                     8 => { apply_config_save(app, cfg, client); }
                     9 => { app.config_modal = None; }
                     _ => {
-                        let modal = app.config_modal.as_mut().unwrap();
-                        modal.editing = true;
-                        modal.error = None;
+                        if let Some(modal) = app.config_modal.as_mut() {
+                            modal.editing = true;
+                            modal.error = None;
+                        }
                     }
                 }
             }
             KeyCode::Char(' ') => {
-                let modal = app.config_modal.as_mut().unwrap();
-                match modal.selected_field {
-                    4 => modal.use_nerd_icons = !modal.use_nerd_icons,
-                    5 => modal.auto_discover = !modal.auto_discover,
-                    7 => modal.disable_auto_colors = !modal.disable_auto_colors,
-                    _ => {}
+                if let Some(modal) = app.config_modal.as_mut() {
+                    match modal.selected_field {
+                        4 => modal.use_nerd_icons = !modal.use_nerd_icons,
+                        5 => modal.auto_discover = !modal.auto_discover,
+                        7 => modal.disable_auto_colors = !modal.disable_auto_colors,
+                        _ => {}
+                    }
                 }
             }
             KeyCode::Char('s') => {
@@ -1259,6 +1193,8 @@ pub fn handle_config_key(
         }
     }
 }
+
+const CONFIG_FIELD_COUNT: usize = 10; // fields 0-7 + OK(8) + Cancel(9)
 
 pub async fn handle_main_select(
     app: &mut App,

@@ -67,6 +67,7 @@ pub struct ConfigModal {
 }
 
 impl ConfigModal {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         host: &str,
         port: u16,
