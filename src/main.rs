@@ -74,6 +74,7 @@ async fn run(
 ) -> Result<()> {
     let mut cfg = cfg;
     let (tx, mut rx) = mpsc::channel::<AppMsg>(64);
+    let (vol_sync_tx, mut vol_sync_rx) = mpsc::channel::<(String, u8)>(32);
     let mut app = App::new(cfg.default_player.clone());
     app.use_nerd_icons = cfg.use_nerd_icons;
     // Compute Now Playing panel height: art column is 18 cols; height = ceil(18 * fw / fh) + 2 borders.
@@ -135,6 +136,36 @@ async fn run(
         tokio::spawn(async move {
             if let Ok(artists) = c.get_artists().await {
                 let _ = t.send(AppMsg::ArtistsLoaded(artists)).await;
+            }
+        });
+    }
+
+    // Background: debounced volume sync — coalesces rapid +/- keypresses into one API call
+    {
+        let c = client.clone();
+        tokio::spawn(async move {
+            use std::collections::HashMap;
+            let debounce = Duration::from_millis(200);
+            let far = || tokio::time::Instant::now() + Duration::from_secs(3600);
+            let mut pending: HashMap<String, u8> = HashMap::new();
+            let mut deadline = far();
+            loop {
+                tokio::select! {
+                    msg = vol_sync_rx.recv() => match msg {
+                        Some((pid, vol)) => {
+                            pending.insert(pid, vol);
+                            deadline = tokio::time::Instant::now() + debounce;
+                        }
+                        None => break,
+                    },
+                    _ = tokio::time::sleep_until(deadline) => {
+                        for (pid, vol) in pending.drain() {
+                            let c2 = c.clone();
+                            tokio::spawn(async move { let _ = c2.set_volume(&pid, vol).await; });
+                        }
+                        deadline = far();
+                    }
+                }
             }
         });
     }
@@ -256,7 +287,7 @@ async fn run(
                             cfg.auto_discover,
                             &cfg.broadcast_mask,
                         ));
-                    } else if handlers::handle_action(&mut app, action, &client, &tx).await {
+                    } else if handlers::handle_action(&mut app, action, &client, &tx, &vol_sync_tx).await {
                         break;
                     }
                 }
@@ -268,6 +299,7 @@ async fn run(
                     mouse,
                     &client,
                     &tx,
+                    &vol_sync_tx,
                     area,
                     &sidebar_state,
                     &main_state,

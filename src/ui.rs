@@ -97,18 +97,28 @@ fn mid_accent_color(accent: Option<[u8; 3]>) -> Color {
     }
 }
 
+/// Returns (pill_bg, pill_fg) for the yazi-style pill selector.
+fn pill_colors(focused: bool) -> (Color, Color) {
+    if focused {
+        (Color::Rgb(45, 100, 170), Color::Rgb(220, 235, 255))
+    } else {
+        (Color::Rgb(50, 50, 68), Color::Rgb(190, 190, 210))
+    }
+}
+
 /// Pill cursor styles: returns (primary_line_style, secondary_line_style).
 /// Focused uses a solid accent color; unfocused uses a dimmed variant.
 fn cursor_styles(focused: bool) -> (Style, Style) {
+    let (bg, fg) = pill_colors(focused);
     if focused {
         (
-            Style::default().bg(Color::Rgb(45, 100, 170)).fg(Color::Rgb(220, 235, 255)).add_modifier(Modifier::BOLD),
-            Style::default().bg(Color::Rgb(45, 100, 170)).fg(Color::Rgb(160, 195, 230)),
+            Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD),
+            Style::default().bg(bg).fg(Color::Rgb(160, 195, 230)),
         )
     } else {
         (
-            Style::default().bg(Color::Rgb(50, 50, 68)).fg(Color::Rgb(190, 190, 210)),
-            Style::default().bg(Color::Rgb(50, 50, 68)).fg(Color::Rgb(140, 140, 160)),
+            Style::default().bg(bg).fg(fg),
+            Style::default().bg(bg).fg(Color::Rgb(140, 140, 160)),
         )
     }
 }
@@ -343,12 +353,31 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .title_style(Style::default().fg(focus_border_color(app.accent_color)))
         .title(" Navigation ");
 
+    let (pill_bg, pill_fg) = pill_colors(app.focus_sidebar);
+
     let items: Vec<ListItem> = app
         .sidebar_items
         .iter()
-        .map(|item| {
+        .enumerate()
+        .map(|(i, item)| {
             let label = app.sidebar_label(item);
-            if app.use_nerd_icons {
+            let selected = i == app.sidebar_selected;
+            if selected {
+                if app.use_nerd_icons {
+                    ListItem::new(Line::from(vec![
+                        Span::styled("\u{e0b6}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                        Span::styled(format!(" {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.accent_color)).bg(pill_bg)),
+                        Span::styled(format!("{} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                        Span::styled("\u{e0b4}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                    ]))
+                } else {
+                    ListItem::new(Line::from(vec![
+                        Span::styled("\u{e0b6}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                        Span::styled(format!(" {} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                        Span::styled("\u{e0b4}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                    ]))
+                }
+            } else if app.use_nerd_icons {
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("  {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.accent_color))),
                     Span::raw(label.to_string()),
@@ -364,12 +393,10 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
     state.select(Some(app.sidebar_selected));
 
-    let (hl_style, hl_symbol) = (cursor_styles(app.focus_sidebar).0, "");
-
     let list = List::new(items)
         .block(block)
-        .highlight_style(hl_style)
-        .highlight_symbol(hl_symbol);
+        .highlight_style(Style::default())
+        .highlight_symbol("");
 
     f.render_stateful_widget(list, area, state);
 
@@ -440,19 +467,31 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         ]
     };
 
-    let items: Vec<ListItem> = entries.iter().map(|(icon, label, sub)| {
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {}  ", icon), Style::default().fg(focus_border_color(app.accent_color))),
-            Span::raw(label.to_string()),
-            Span::styled(format!("  — {}", sub), Style::default().fg(mid)),
-        ]))
+    let (pill_bg, pill_fg) = pill_colors(focused);
+
+    let items: Vec<ListItem> = entries.iter().enumerate().map(|(i, (icon, label, sub))| {
+        if i == app.main_selected {
+            ListItem::new(Line::from(vec![
+                Span::styled("\u{e0b6}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                Span::styled(format!(" {}  ", icon), Style::default().fg(focus_border_color(app.accent_color)).bg(pill_bg)),
+                Span::styled(label.to_string(), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                Span::styled(format!("  — {} ", sub), Style::default().fg(Color::Rgb(160, 195, 230)).bg(pill_bg)),
+                Span::styled("\u{e0b4}", Style::default().fg(pill_bg).bg(Color::Reset)),
+            ]))
+        } else {
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("  {}  ", icon), Style::default().fg(focus_border_color(app.accent_color))),
+                Span::raw(label.to_string()),
+                Span::styled(format!("  — {}", sub), Style::default().fg(mid)),
+            ]))
+        }
     }).collect();
 
     state.select(Some(app.main_selected));
 
     let list = List::new(items)
         .block(block)
-        .highlight_style(cursor_styles(focused).0)
+        .highlight_style(Style::default())
         .highlight_symbol("");
 
     f.render_stateful_widget(list, area, state);
@@ -605,7 +644,9 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
     let label = " ◎ Global  ";
     let vol_str = format!(" {}%", global_avg);
-    let bar_w = (chunks[0].width as usize).saturating_sub(label.len() + vol_str.len());
+    // Use char count (display width) so bar aligns with player rows.
+    let label_w: usize = label.chars().count(); // = 11
+    let bar_w = (chunks[0].width as usize).saturating_sub(label_w + vol_str.len() + 1);
     let filled = if bar_w > 0 { (global_avg as usize * bar_w) / 100 } else { 0 };
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
 
@@ -617,20 +658,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     f.render_widget(Paragraph::new(global_line), chunks[0]);
 
     // --- Player list ---
-    let items: Vec<ListItem> = app.players.iter().map(|p| {
-        let active = app.active_player.as_deref() == Some(p.playerid.as_str());
-        let powered = p.power > 0;
-        let marker = if active { "● " } else { "○ " };
-        let power_tag = if powered { "" } else { " [off]" };
-        let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
-        let name_fg = if active { Color::Green } else if powered { Color::White } else { mid };
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {}{}{}", marker, p.name, power_tag), Style::default().fg(name_fg)),
-            Span::styled(format!(" {}%", vol), Style::default().fg(mid)),
-        ]))
-    }).collect();
-
-    if items.is_empty() {
+    if app.players.is_empty() {
         state.select(None);
         f.render_widget(
             Paragraph::new("(no players)").style(Style::default().fg(mid)),
@@ -639,13 +667,92 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         return;
     }
 
-    state.select(if app.players_focus_global { None } else { Some(app.main_selected) });
+    let list_area = chunks[1];
+    let total = app.players.len();
+    let visible = list_area.height as usize;
 
-    let list = List::new(items)
-        .highlight_style(cursor_styles(focused && !app.players_focus_global).0)
-        .highlight_symbol("");
+    // Pin name column to the same inner width as the global label (" ◎ Global  " = 11 chars,
+    // minus the 3-char surrounding padding), so all rows share one bar-start column.
+    let name_col_w: usize = label_w - 3; // = 8
 
-    f.render_stateful_widget(list, chunks[1], state);
+    // Sync scroll offset.
+    let offset = {
+        let o = *state.offset_mut();
+        let new_o = if !app.players_focus_global {
+            let sel = app.main_selected;
+            if sel < o { sel }
+            else if visible > 0 && sel >= o + visible { sel + 1 - visible }
+            else { o }
+        } else { o };
+        *state.offset_mut() = new_o;
+        new_o
+    };
+
+    for (vis_i, item_i) in (offset..).zip(0usize..) {
+        if vis_i >= total { break; }
+        let y = list_area.y + item_i as u16;
+        if y >= list_area.y + list_area.height { break; }
+
+        let p = &app.players[vis_i];
+        let active = app.active_player.as_deref() == Some(p.playerid.as_str());
+        let powered = p.power > 0;
+        let is_sel = focused && !app.players_focus_global && vis_i == app.main_selected;
+        let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
+
+        let marker = if active { "● " } else { "○ " };
+        let power_tag = if powered { "" } else { " [off]" };
+        let name_raw = format!("{}{}{}", marker, p.name, power_tag);
+
+        // Pad/truncate to name_col_w display chars — use > so exact-fit names aren't truncated.
+        let name_padded = if name_raw.chars().count() > name_col_w {
+            let s: String = name_raw.chars().take(name_col_w.saturating_sub(1)).collect();
+            format!("{}…", s)
+        } else {
+            format!("{:<width$}", name_raw, width = name_col_w)
+        };
+        let label = format!(" {}  ", name_padded);
+
+        let row_bg = if is_sel { Color::Rgb(45, 100, 170) } else { Color::Reset };
+        let name_fg = if is_sel { Color::Rgb(220, 235, 255) }
+                      else if active { Color::Green }
+                      else if powered { Color::White }
+                      else { mid };
+        let bar_color = if is_sel { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) };
+        let vol_fg = if is_sel { Color::White } else { mid };
+
+        // Use fixed display width (= global label_w) so all bars start and end at the same column.
+        let vol_str = format!(" {}%", vol);
+        let row_w = list_area.width as usize;
+        let bar_w = row_w.saturating_sub(label_w + vol_str.len() + 1);
+        let filled = if bar_w > 0 { (vol as usize * bar_w) / 100 } else { 0 };
+        let bar_str = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
+
+        let line = Line::from(vec![
+            Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
+            Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
+            Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
+        ]);
+        f.render_widget(Paragraph::new(line), Rect::new(list_area.x, y, list_area.width, 1));
+    }
+
+    if total > visible {
+        let scroll_area = Rect::new(
+            area.x + area.width.saturating_sub(1),
+            list_area.y,
+            1,
+            list_area.height,
+        );
+        let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.accent_color);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("║")
+            .track_symbol(Some("│"))
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(track_style)
+            .thumb_style(thumb_style);
+        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+    }
 }
 
 fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
@@ -1552,19 +1659,26 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
         .split(inner);
 
     let options = menu.options();
-    let items: Vec<ListItem> = options.iter().map(|o| ListItem::new(o.as_str())).collect();
+    let pill_bg = Color::Cyan;
+    let pill_fg = Color::Black;
+    let items: Vec<ListItem> = options.iter().enumerate().map(|(i, o)| {
+        if i == menu.selected {
+            ListItem::new(Line::from(vec![
+                Span::styled("\u{e0b6}", Style::default().fg(pill_bg).bg(Color::Reset)),
+                Span::styled(format!(" {} ", o), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                Span::styled("\u{e0b4}", Style::default().fg(pill_bg).bg(Color::Reset)),
+            ]))
+        } else {
+            ListItem::new(Line::from(Span::raw(format!("  {}", o))))
+        }
+    }).collect();
 
     let mut state = ListState::default();
     state.select(Some(menu.selected));
 
     let list = List::new(items)
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
+        .highlight_style(Style::default())
+        .highlight_symbol("");
 
     f.render_stateful_widget(list, rows[0], &mut state);
 

@@ -24,6 +24,7 @@ pub async fn handle_mouse_event(
     mouse: MouseEvent,
     client: &Arc<LmsClient>,
     tx: &mpsc::Sender<AppMsg>,
+    vol_sync_tx: &mpsc::Sender<(String, u8)>,
     terminal_area: Rect,
     sidebar_state: &ListState,
     main_state: &ListState,
@@ -117,7 +118,7 @@ pub async fn handle_mouse_event(
                     6 => Action::VolumeDown,
                     _ => Action::VolumeUp,
                 };
-                handle_action(app, action, client, tx).await;
+                handle_action(app, action, client, tx, vol_sync_tx).await;
             }
         }
         return;
@@ -125,7 +126,7 @@ pub async fn handle_mouse_event(
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Right) => {
-            handle_action(app, Action::Back, client, tx).await;
+            handle_action(app, Action::Back, client, tx, vol_sync_tx).await;
         }
         MouseEventKind::Down(MouseButton::Left) => {
             let ctrl_rects =
@@ -145,7 +146,7 @@ pub async fn handle_mouse_event(
                     6 => Action::VolumeDown,
                     _ => Action::VolumeUp,
                 };
-                handle_action(app, action, client, tx).await;
+                handle_action(app, action, client, tx, vol_sync_tx).await;
             } else if point_in(col, row, sidebar_area) {
                 app.focus_sidebar = true;
                 let inner_top = sidebar_area.y + 1;
@@ -155,7 +156,7 @@ pub async fn handle_mouse_event(
                     let idx = sidebar_state.offset() + rel;
                     if idx < app.sidebar_items.len() {
                         app.sidebar_selected = idx;
-                        handle_action(app, Action::Select, client, tx).await;
+                        handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
                     }
                 }
             } else if point_in(col, row, main_area) {
@@ -180,7 +181,7 @@ pub async fn handle_mouse_event(
                         app.main_selected = idx;
 
                         if is_double || !utils::is_main_item_playable(app) {
-                            handle_action(app, Action::Select, client, tx).await;
+                            handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
                         } else {
                             app.context_menu =
                                 Some(ContextMenu::new(utils::compute_parent_label(app)));
@@ -195,7 +196,7 @@ pub async fn handle_mouse_event(
             } else if point_in(col, row, main_area) {
                 app.focus_sidebar = false;
             }
-            handle_action(app, Action::NavUp, client, tx).await;
+            handle_action(app, Action::NavUp, client, tx, vol_sync_tx).await;
         }
         MouseEventKind::ScrollDown => {
             if point_in(col, row, sidebar_area) {
@@ -203,7 +204,7 @@ pub async fn handle_mouse_event(
             } else if point_in(col, row, main_area) {
                 app.focus_sidebar = false;
             }
-            handle_action(app, Action::NavDown, client, tx).await;
+            handle_action(app, Action::NavDown, client, tx, vol_sync_tx).await;
         }
         _ => {}
     }
@@ -554,6 +555,7 @@ pub async fn handle_action(
     action: Action,
     client: &Arc<LmsClient>,
     tx: &mpsc::Sender<AppMsg>,
+    vol_sync_tx: &mpsc::Sender<(String, u8)>,
 ) -> bool {
     match action {
         Action::Quit => return true,
@@ -818,72 +820,80 @@ pub async fn handle_action(
         Action::VolumeUp => {
             if let MainView::Players = &app.main_view {
                 if app.players_focus_global {
-                    let targets: Vec<(String, u8)> = app
-                        .players
-                        .iter()
-                        .map(|p| {
-                            (
-                                p.playerid.clone(),
-                                app.player_volumes.get(&p.playerid).copied().unwrap_or(50),
-                            )
-                        })
-                        .collect();
-                    let c = client.clone();
-                    tokio::spawn(async move {
-                        for (pid, vol) in targets {
-                            let _ = c.set_volume(&pid, (vol + 5).min(100)).await;
-                        }
-                    });
+                    let pids: Vec<String> =
+                        app.players.iter().map(|p| p.playerid.clone()).collect();
+                    for pid in pids {
+                        let new_vol =
+                            (app.player_volumes.get(&pid).copied().unwrap_or(50) + 5).min(100);
+                        app.player_volumes.insert(pid.clone(), new_vol);
+                        let _ = vol_sync_tx.try_send((pid, new_vol));
+                    }
                 } else if let Some(player) = app.players.get(app.main_selected) {
                     let pid = player.playerid.clone();
-                    let vol = app.player_volumes.get(&pid).copied().unwrap_or(50);
-                    let c = client.clone();
-                    tokio::spawn(async move {
-                        let _ = c.set_volume(&pid, (vol + 5).min(100)).await;
-                    });
+                    let new_vol =
+                        (app.player_volumes.get(&pid).copied().unwrap_or(50) + 5).min(100);
+                    app.player_volumes.insert(pid.clone(), new_vol);
+                    if app.active_player.as_deref() == Some(&pid)
+                        && let Some(np) = app.now_playing.as_mut()
+                    {
+                        np.volume = new_vol;
+                    }
+                    let _ = vol_sync_tx.try_send((pid, new_vol));
                 }
             } else if let Some(pid) = app.active_player.clone() {
-                let vol = app.now_playing.as_ref().map(|n| n.volume).unwrap_or(50);
-                let c = client.clone();
-                tokio::spawn(async move {
-                    let _ = c.set_volume(&pid, (vol + 5).min(100)).await;
-                });
+                let new_vol =
+                    (app.now_playing.as_ref().map(|n| n.volume).unwrap_or(50) + 5).min(100);
+                if let Some(np) = app.now_playing.as_mut() {
+                    np.volume = new_vol;
+                }
+                app.player_volumes.insert(pid.clone(), new_vol);
+                let _ = vol_sync_tx.try_send((pid, new_vol));
             }
         }
 
         Action::VolumeDown => {
             if let MainView::Players = &app.main_view {
                 if app.players_focus_global {
-                    let targets: Vec<(String, u8)> = app
-                        .players
-                        .iter()
-                        .map(|p| {
-                            (
-                                p.playerid.clone(),
-                                app.player_volumes.get(&p.playerid).copied().unwrap_or(50),
-                            )
-                        })
-                        .collect();
-                    let c = client.clone();
-                    tokio::spawn(async move {
-                        for (pid, vol) in targets {
-                            let _ = c.set_volume(&pid, vol.saturating_sub(5)).await;
-                        }
-                    });
+                    let pids: Vec<String> =
+                        app.players.iter().map(|p| p.playerid.clone()).collect();
+                    for pid in pids {
+                        let new_vol = app
+                            .player_volumes
+                            .get(&pid)
+                            .copied()
+                            .unwrap_or(50)
+                            .saturating_sub(5);
+                        app.player_volumes.insert(pid.clone(), new_vol);
+                        let _ = vol_sync_tx.try_send((pid, new_vol));
+                    }
                 } else if let Some(player) = app.players.get(app.main_selected) {
                     let pid = player.playerid.clone();
-                    let vol = app.player_volumes.get(&pid).copied().unwrap_or(50);
-                    let c = client.clone();
-                    tokio::spawn(async move {
-                        let _ = c.set_volume(&pid, vol.saturating_sub(5)).await;
-                    });
+                    let new_vol = app
+                        .player_volumes
+                        .get(&pid)
+                        .copied()
+                        .unwrap_or(50)
+                        .saturating_sub(5);
+                    app.player_volumes.insert(pid.clone(), new_vol);
+                    if app.active_player.as_deref() == Some(&pid)
+                        && let Some(np) = app.now_playing.as_mut()
+                    {
+                        np.volume = new_vol;
+                    }
+                    let _ = vol_sync_tx.try_send((pid, new_vol));
                 }
             } else if let Some(pid) = app.active_player.clone() {
-                let vol = app.now_playing.as_ref().map(|n| n.volume).unwrap_or(50);
-                let c = client.clone();
-                tokio::spawn(async move {
-                    let _ = c.set_volume(&pid, vol.saturating_sub(5)).await;
-                });
+                let new_vol = app
+                    .now_playing
+                    .as_ref()
+                    .map(|n| n.volume)
+                    .unwrap_or(50)
+                    .saturating_sub(5);
+                if let Some(np) = app.now_playing.as_mut() {
+                    np.volume = new_vol;
+                }
+                app.player_volumes.insert(pid.clone(), new_vol);
+                let _ = vol_sync_tx.try_send((pid, new_vol));
             }
         }
 
