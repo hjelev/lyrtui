@@ -230,19 +230,19 @@ pub fn draw(
                     ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
                     ("t", "power"), ("Spc", "play/pause"), ("n/p", "next/prev"),
                     ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
-                ])
+                ], app.accent_color)
             } else if matches!(app.main_view, MainView::Search) {
                 if app.search_input_active {
-                    hint_line(&[("Type", "query"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")])
+                    hint_line(&[("Type", "query"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")], app.accent_color)
                 } else {
-                    hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("i//", "edit query"), ("Esc", "back"), ("q", "quit")])
+                    hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("i//", "edit query"), ("Esc", "back"), ("q", "quit")], app.accent_color)
                 }
             } else {
                 hint_line(&[
                     ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
                     ("a", "add to queue"), ("Spc", "play/pause"), ("n/p", "next/prev"),
                     ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
-                ])
+                ], app.accent_color)
             };
             f.render_widget(Paragraph::new(footer), notif_area);
         }
@@ -253,7 +253,7 @@ pub fn draw(
     }
 
     if let Some(modal) = &app.config_modal {
-        draw_config_modal(f, modal);
+        draw_config_modal(f, modal, app.accent_color);
     }
 
     if app.confirm_clear_queue {
@@ -349,7 +349,10 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .map(|item| {
             let label = app.sidebar_label(item);
             if app.use_nerd_icons {
-                ListItem::new(format!("  {} {}", sidebar_nerd_icon(item), label))
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("  {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.accent_color))),
+                    Span::raw(label.to_string()),
+                ]))
             } else {
                 ListItem::new(format!("  {}", label))
             }
@@ -439,7 +442,7 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
     let items: Vec<ListItem> = entries.iter().map(|(icon, label, sub)| {
         ListItem::new(Line::from(vec![
-            Span::styled(format!("  {}  ", icon), Style::default().fg(Color::Cyan)),
+            Span::styled(format!("  {}  ", icon), Style::default().fg(focus_border_color(app.accent_color))),
             Span::raw(label.to_string()),
             Span::styled(format!("  — {}", sub), Style::default().fg(mid)),
         ]))
@@ -918,6 +921,10 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         header("Navigation"),
         shortcut("j / ↓",        "Move down",                          mid),
         shortcut("k / ↑",        "Move up",                            mid),
+        shortcut("PgDn",         "Jump down 10 items",                 mid),
+        shortcut("PgUp",         "Jump up 10 items",                   mid),
+        shortcut("Home",         "Jump to top",                        mid),
+        shortcut("End",          "Jump to bottom",                     mid),
         shortcut("Enter / l / →", "Select / enter / focus main",       mid),
         shortcut("Esc / h / ←",  "Back / focus sidebar",               mid),
         Line::from(""),
@@ -955,15 +962,16 @@ fn shortcut(key: &'static str, desc: &'static str, mid: Color) -> Line<'static> 
     ])
 }
 
-/// Builds a styled hint line: keys are White, separators and descriptions are DarkGray.
-fn hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
+/// Builds a styled hint line: keys are White, separators and descriptions use accent mid-tone.
+fn hint_line(pairs: &[(&str, &str)], accent: Option<[u8; 3]>) -> Line<'static> {
+    let dim = mid_accent_color(accent);
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (i, (key, action)) in pairs.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled("  ", Style::default().fg(dim)));
         }
         spans.push(Span::styled(key.to_string(), Style::default().fg(Color::White)));
-        spans.push(Span::styled(format!(":{action}"), Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(format!(":{action}"), Style::default().fg(dim)));
     }
     Line::from(spans)
 }
@@ -1096,9 +1104,9 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             .unwrap_or("—");
         let vol_icon = if app.use_nerd_icons { "\u{F028}" } else { "♪" };  // nf-fa-volume-up
         let player_vol_line = Line::from(vec![
-            Span::styled(format!(" {} ", vol_icon), Style::default().fg(Color::DarkGray)),
-            Span::styled(player_name.to_string(), Style::default().fg(Color::Gray)),
-            Span::styled(format!("  {}%", np.volume), Style::default().fg(Color::DarkGray)),
+            Span::styled(format!(" {} ", vol_icon), Style::default().fg(mid)),
+            Span::styled(player_name.to_string(), Style::default().fg(accent)),
+            Span::styled(format!("  {}%", np.volume), Style::default().fg(mid)),
         ]);
         f.render_widget(Paragraph::new(player_vol_line), rows[4]);
     }
@@ -1294,7 +1302,7 @@ fn draw_full_art_mode(
     let footer = hint_line(&[
         ("`", "exit art"), ("Spc", "play/pause"), ("n/p", "next/prev"),
         ("+/-", "vol"), ("c", "config"), ("q", "quit"),
-    ]);
+    ], app.accent_color);
     f.render_widget(Paragraph::new(footer), footer_area);
 }
 
@@ -1560,7 +1568,7 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
 
     f.render_stateful_widget(list, rows[0], &mut state);
 
-    let hint = Paragraph::new(hint_line(&[("↑/↓", "move"), ("Enter", "confirm"), ("Esc", "cancel")]));
+    let hint = Paragraph::new(hint_line(&[("↑/↓", "move"), ("Enter", "confirm"), ("Esc", "cancel")], app.accent_color));
     f.render_widget(hint, rows[1]);
 }
 
@@ -1618,21 +1626,26 @@ fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
         .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    let hint = Paragraph::new(hint_line(&[("y / Enter", "confirm"), ("any key", "cancel")]))
+    let hint = Paragraph::new(hint_line(&[("y / Enter", "confirm"), ("any key", "cancel")], None))
         .alignment(Alignment::Center);
     f.render_widget(hint, rows[3]);
 }
 
-fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
+fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>) {
     let area = f.area();
     let popup = centered_rect_abs(54, 17, area);
 
     f.render_widget(Clear, popup);
 
+    let accent_bright = focus_border_color(accent);
+    let accent_mid    = mid_accent_color(accent);
+    let accent_dim    = unfocus_border_color(accent);
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(accent_bright))
+        .title_style(Style::default().fg(accent_bright))
         .title(" Configuration ");
 
     let inner = block.inner(popup);
@@ -1673,17 +1686,17 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
         let display = format!("{}{}", value, cursor);
 
         let val_style = if is_editing {
-            Style::default().fg(Color::Black).bg(Color::Cyan)
+            Style::default().fg(Color::Black).bg(accent_bright)
         } else if is_selected {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
 
         let label_style = if is_selected {
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(accent_bright)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(accent_mid)
         };
         let line = Line::from(vec![
             Span::styled(format!("  {:>8}: ", label), label_style),
@@ -1696,7 +1709,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
     f.render_widget(
         Paragraph::new(Span::styled(
             "─".repeat(inner.width as usize),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(accent_dim),
         )),
         rows[5],
     );
@@ -1705,14 +1718,14 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
     let render_toggle = |f: &mut Frame, row: Rect, label: &str, checked: bool, selected: bool| {
         let checkbox = if checked { "[x]" } else { "[ ]" };
         let val_style = if selected {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
         let lbl_style = if selected {
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(accent_bright)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(accent_mid)
         };
         let line = Line::from(vec![
             Span::styled(format!("  {:>13}: ", label), lbl_style),
@@ -1731,16 +1744,16 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
         let cursor = if is_editing { "█" } else { "" };
         let display = format!("{}{}", modal.broadcast_mask, cursor);
         let val_style = if is_editing {
-            Style::default().fg(Color::Black).bg(Color::Cyan)
+            Style::default().fg(Color::Black).bg(accent_bright)
         } else if is_selected {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
         let lbl_style = if is_selected {
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(accent_bright)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(accent_mid)
         };
         let line = Line::from(vec![
             Span::styled("  Bcast mask: ", lbl_style),
@@ -1758,6 +1771,6 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal) {
 
     let help = Paragraph::new(hint_line(&[
         ("Enter/i", "edit"), ("j/k", "switch field"), ("Space", "toggle"), ("s", "save"), ("Esc", "close"),
-    ]));
+    ], accent));
     f.render_widget(help, rows[11]);
 }

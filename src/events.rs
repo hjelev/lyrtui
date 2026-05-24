@@ -42,6 +42,10 @@ pub enum Action {
     ToggleShuffle,
     ToggleRepeat,
     ToggleFullArtMode,
+    PageUp,
+    PageDown,
+    Home,
+    End,
     None,
 }
 
@@ -66,6 +70,10 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyCode::Char('s'), _) => Action::ToggleShuffle,
         (KeyCode::Char('r'), _) => Action::ToggleRepeat,
         (KeyCode::Char('`'), _) => Action::ToggleFullArtMode,
+        (KeyCode::PageUp, _) => Action::PageUp,
+        (KeyCode::PageDown, _) => Action::PageDown,
+        (KeyCode::Home, _) => Action::Home,
+        (KeyCode::End, _) => Action::End,
         _ => Action::None,
     }
 }

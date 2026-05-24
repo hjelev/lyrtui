@@ -613,6 +613,31 @@ pub async fn handle_action(
             }
         }
 
+        Action::PageUp => {
+            if !app.focus_sidebar {
+                app.main_selected = app.main_selected.saturating_sub(10);
+            }
+        }
+
+        Action::PageDown => {
+            if !app.focus_sidebar {
+                let max = utils::main_list_len(app).saturating_sub(1);
+                app.main_selected = (app.main_selected + 10).min(max);
+            }
+        }
+
+        Action::Home => {
+            if !app.focus_sidebar {
+                app.main_selected = 0;
+            }
+        }
+
+        Action::End => {
+            if !app.focus_sidebar {
+                app.main_selected = utils::main_list_len(app).saturating_sub(1);
+            }
+        }
+
         Action::Select => {
             if app.focus_sidebar {
                 app.main_selected = 0;

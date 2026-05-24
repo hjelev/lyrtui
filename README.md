@@ -85,6 +85,10 @@ The action menu can be navigated with `↑`/`↓` (or `j`/`k`), confirmed with `
 |-----|--------|
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
+| `PgDn` | Jump down 10 items |
+| `PgUp` | Jump up 10 items |
+| `Home` | Jump to top of list |
+| `End` | Jump to bottom of list |
 | `Enter` / `l` | Select / navigate; opens action menu on playable items |
 | `Esc` / `h` / `←` | Back / focus sidebar |
 | `Space` | Play / pause |
