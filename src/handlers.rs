@@ -29,16 +29,44 @@ pub async fn handle_mouse_event(
     sidebar_state: &ListState,
     main_state: &ListState,
     last_main_click: &mut Option<(Instant, usize)>,
+    cfg: &mut config::Config,
 ) {
     let (sidebar_area, main_area) = ui::compute_areas(terminal_area, app.status_height);
     let col = mouse.column;
     let row = mouse.row;
 
+    // Clear queue dialog intercepts all mouse events when open
+    if app.confirm_clear_queue {
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let (popup, [ok_rect, cancel_rect]) = ui::compute_clear_queue_button_rects(terminal_area);
+            if point_in(col, row, ok_rect) {
+                app.confirm_clear_queue = false;
+                if let Some(pid) = app.active_player.clone() {
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        if c.clear_queue(&pid).await.is_ok() {
+                            let _ = t.send(AppMsg::StatusMsg("Queue cleared".to_string())).await;
+                        }
+                    });
+                }
+            } else if point_in(col, row, cancel_rect) || !point_in(col, row, popup) {
+                app.confirm_clear_queue = false;
+            }
+        }
+        return;
+    }
+
     // Config modal intercepts all mouse events when open
     if app.config_modal.is_some() {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
             let (modal_area, field_rects) = ui::compute_config_modal_rects(terminal_area);
-            if point_in(col, row, modal_area) {
+            let (_, btn_rects) = ui::compute_config_modal_button_rects(terminal_area);
+            if point_in(col, row, btn_rects[0]) {
+                apply_config_save(app, cfg, client);
+            } else if point_in(col, row, btn_rects[1]) {
+                app.config_modal = None;
+            } else if point_in(col, row, modal_area) {
                 let modal = app.config_modal.as_mut().unwrap();
                 if point_in(col, row, field_rects[0]) {
                     modal.selected_field = 0;
@@ -247,8 +275,12 @@ pub async fn handle_confirm_clear_queue_key(
     tx: &mpsc::Sender<AppMsg>,
 ) {
     match key.code {
-        KeyCode::Char('y') | KeyCode::Enter => {
+        KeyCode::Tab | KeyCode::Right | KeyCode::Left => {
+            app.clear_queue_selected_button = 1 - app.clear_queue_selected_button;
+        }
+        KeyCode::Char('y') => {
             app.confirm_clear_queue = false;
+            app.clear_queue_selected_button = 0;
             if let Some(pid) = app.active_player.clone() {
                 let c = client.clone();
                 let t = tx.clone();
@@ -259,9 +291,27 @@ pub async fn handle_confirm_clear_queue_key(
                 });
             }
         }
-        _ => {
+        KeyCode::Enter => {
+            let confirmed = app.clear_queue_selected_button == 0;
             app.confirm_clear_queue = false;
+            app.clear_queue_selected_button = 0;
+            if confirmed {
+                if let Some(pid) = app.active_player.clone() {
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        if c.clear_queue(&pid).await.is_ok() {
+                            let _ = t.send(AppMsg::StatusMsg("Queue cleared".to_string())).await;
+                        }
+                    });
+                }
+            }
         }
+        KeyCode::Esc => {
+            app.confirm_clear_queue = false;
+            app.clear_queue_selected_button = 0;
+        }
+        _ => {}
     }
 }
 
@@ -954,6 +1004,7 @@ pub async fn handle_action(
         Action::ClearQueue => {
             if app.active_player.is_some() && !app.queue.is_empty() {
                 app.confirm_clear_queue = true;
+                app.clear_queue_selected_button = 0;
             }
         }
 
@@ -989,6 +1040,60 @@ pub async fn handle_action(
         Action::OpenConfig | Action::None => {}
     }
     false
+}
+
+fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsClient>) {
+    let (host, port_str, username, password, use_nerd_icons, auto_discover, broadcast_mask) = {
+        let modal = app.config_modal.as_ref().unwrap();
+        (
+            modal.host.trim().to_string(),
+            modal.port.trim().to_string(),
+            modal.username.trim().to_string(),
+            modal.password.clone(),
+            modal.use_nerd_icons,
+            modal.auto_discover,
+            modal.broadcast_mask.trim().to_string(),
+        )
+    };
+    if host.is_empty() {
+        app.config_modal.as_mut().unwrap().error = Some("Host cannot be empty".to_string());
+    } else if broadcast_mask.is_empty() {
+        app.config_modal.as_mut().unwrap().error = Some("Broadcast mask cannot be empty".to_string());
+    } else {
+        match port_str.parse::<u16>() {
+            Ok(port) if port > 0 => {
+                cfg.host = host;
+                cfg.port = port;
+                cfg.use_nerd_icons = use_nerd_icons;
+                cfg.auto_discover = auto_discover;
+                cfg.broadcast_mask = broadcast_mask;
+                cfg.username = if username.is_empty() { None } else { Some(username.clone()) };
+                cfg.password = if password.is_empty() { None } else { Some(password.clone()) };
+                match cfg.save() {
+                    Ok(()) => {
+                        client.update_base_url(cfg.base_url());
+                        let creds = cfg.username.as_ref()
+                            .zip(cfg.password.as_ref())
+                            .map(|(u, p)| (u.clone(), p.clone()));
+                        client.update_credentials(creds);
+                        app.use_nerd_icons = use_nerd_icons;
+                        app.config_modal = None;
+                        app.connection = ConnectionState::Reconnecting;
+                        app.players = vec![];
+                        app.active_player = None;
+                        app.now_playing = None;
+                        app.status_message = Some("Reconnecting...".to_string());
+                    }
+                    Err(e) => {
+                        app.config_modal.as_mut().unwrap().error = Some(format!("Save error: {e}"));
+                    }
+                }
+            }
+            _ => {
+                app.config_modal.as_mut().unwrap().error = Some("Invalid port (1–65535)".to_string());
+            }
+        }
+    }
 }
 
 pub fn handle_config_key(
@@ -1042,16 +1147,23 @@ pub fn handle_config_key(
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 let modal = app.config_modal.as_mut().unwrap();
-                if modal.selected_field < 6 {
+                if modal.selected_field < 8 {
                     modal.selected_field += 1;
                 }
             }
-            KeyCode::Enter | KeyCode::Char('i') => {
+            KeyCode::Tab => {
                 let modal = app.config_modal.as_mut().unwrap();
-                match modal.selected_field {
-                    4 => modal.use_nerd_icons = !modal.use_nerd_icons,
-                    5 => modal.auto_discover = !modal.auto_discover,
+                modal.selected_field = (modal.selected_field + 1) % 9;
+            }
+            KeyCode::Enter | KeyCode::Char('i') => {
+                let selected = app.config_modal.as_ref().unwrap().selected_field;
+                match selected {
+                    4 => { app.config_modal.as_mut().unwrap().use_nerd_icons ^= true; }
+                    5 => { app.config_modal.as_mut().unwrap().auto_discover ^= true; }
+                    7 => { apply_config_save(app, cfg, client); }
+                    8 => { app.config_modal = None; }
                     _ => {
+                        let modal = app.config_modal.as_mut().unwrap();
                         modal.editing = true;
                         modal.error = None;
                     }
@@ -1066,61 +1178,7 @@ pub fn handle_config_key(
                 }
             }
             KeyCode::Char('s') => {
-                let (host, port_str, username, password, use_nerd_icons, auto_discover, broadcast_mask) = {
-                    let modal = app.config_modal.as_ref().unwrap();
-                    (
-                        modal.host.trim().to_string(),
-                        modal.port.trim().to_string(),
-                        modal.username.trim().to_string(),
-                        modal.password.clone(),
-                        modal.use_nerd_icons,
-                        modal.auto_discover,
-                        modal.broadcast_mask.trim().to_string(),
-                    )
-                };
-                if host.is_empty() {
-                    app.config_modal.as_mut().unwrap().error =
-                        Some("Host cannot be empty".to_string());
-                } else if broadcast_mask.is_empty() {
-                    app.config_modal.as_mut().unwrap().error =
-                        Some("Broadcast mask cannot be empty".to_string());
-                } else {
-                    match port_str.parse::<u16>() {
-                        Ok(port) if port > 0 => {
-                            cfg.host = host;
-                            cfg.port = port;
-                            cfg.use_nerd_icons = use_nerd_icons;
-                            cfg.auto_discover = auto_discover;
-                            cfg.broadcast_mask = broadcast_mask;
-                            cfg.username = if username.is_empty() { None } else { Some(username.clone()) };
-                            cfg.password = if password.is_empty() { None } else { Some(password.clone()) };
-                            match cfg.save() {
-                                Ok(()) => {
-                                    client.update_base_url(cfg.base_url());
-                                    let creds = cfg.username.as_ref()
-                                        .zip(cfg.password.as_ref())
-                                        .map(|(u, p)| (u.clone(), p.clone()));
-                                    client.update_credentials(creds);
-                                    app.use_nerd_icons = use_nerd_icons;
-                                    app.config_modal = None;
-                                    app.connection = ConnectionState::Reconnecting;
-                                    app.players = vec![];
-                                    app.active_player = None;
-                                    app.now_playing = None;
-                                    app.status_message = Some("Reconnecting...".to_string());
-                                }
-                                Err(e) => {
-                                    app.config_modal.as_mut().unwrap().error =
-                                        Some(format!("Save error: {e}"));
-                                }
-                            }
-                        }
-                        _ => {
-                            app.config_modal.as_mut().unwrap().error =
-                                Some("Invalid port (1–65535)".to_string());
-                        }
-                    }
-                }
+                apply_config_save(app, cfg, client);
             }
             KeyCode::Esc | KeyCode::Char('c') | KeyCode::Char('q') => {
                 app.config_modal = None;

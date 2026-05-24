@@ -312,6 +312,7 @@ async fn run(
                     &sidebar_state,
                     &main_state,
                     &mut last_main_click,
+                    &mut cfg,
                 )
                 .await;
             }

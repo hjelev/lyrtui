@@ -59,7 +59,7 @@ pub struct ConfigModal {
     pub use_nerd_icons: bool,
     pub auto_discover: bool,
     pub broadcast_mask: String,
-    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask
+    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask, 7=OK, 8=Cancel
     pub selected_field: usize,
     pub editing: bool,
     pub error: Option<String>,
@@ -187,6 +187,7 @@ pub struct App {
     pub config_modal: Option<ConfigModal>,
     pub context_menu: Option<ContextMenu>,
     pub confirm_clear_queue: bool,
+    pub clear_queue_selected_button: u8, // 0 = OK, 1 = Cancel
     /// Height (in terminal rows) of the Now Playing panel, computed from font metrics.
     pub status_height: u16,
     /// Width (in terminal columns) of the album-art cell in the Now Playing panel.
@@ -247,6 +248,7 @@ impl App {
             config_modal: None,
             context_menu: None,
             confirm_clear_queue: false,
+            clear_queue_selected_button: 0,
             status_height: 11, // overwritten in run() from picker font metrics
             art_col_w: 16,     // overwritten in run() from picker font metrics
             search_query: String::new(),

@@ -267,7 +267,7 @@ pub fn draw(
     }
 
     if app.confirm_clear_queue {
-        draw_confirm_clear_queue(f, app.queue.len());
+        draw_confirm_clear_queue(f, app.queue.len(), app.clear_queue_selected_button, app.accent_color);
     }
 
     if app.context_menu.is_some() {
@@ -299,7 +299,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
         .unwrap_or("—");
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("▶ ", Style::default().fg(mid)),
+            Span::styled(if app.use_nerd_icons { "\u{f075a} " } else { "▶ " }, Style::default().fg(mid)),
             Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
         ])),
         rows[0],
@@ -1225,10 +1225,17 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             .map(|p| p.name.as_str())
             .unwrap_or("—");
         let vol_icon = if app.use_nerd_icons { "\u{F028}" } else { "♪" };  // nf-fa-volume-up
+        let globe_icon = if app.global_volume_control {
+            if app.use_nerd_icons { " \u{F0AC}" } else { " ◎" }
+        } else {
+            ""
+        };
         let player_vol_line = Line::from(vec![
-            Span::styled(format!(" {} ", vol_icon), Style::default().fg(mid)),
-            Span::styled(player_name.to_string(), Style::default().fg(accent)),
-            Span::styled(format!("  {}%", np.volume), Style::default().fg(mid)),
+            Span::styled(if app.use_nerd_icons { " \u{f075a} " } else { " ▶ " }, Style::default().fg(mid)),
+            Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
+            Span::styled(format!("  {} ", vol_icon), Style::default().fg(mid)),
+            Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
+            Span::styled(globe_icon, Style::default().fg(accent)),
         ]);
         f.render_widget(Paragraph::new(player_vol_line), rows[4]);
     }
@@ -1724,16 +1731,21 @@ pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 7]) {
     (popup, [host_rect, port_rect, user_rect, pass_rect, nerd_rect, auto_rect, mask_rect])
 }
 
-fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
+fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize, selected_button: u8, accent: Option<[u8; 3]>) {
     let area = f.area();
     let popup = centered_rect_abs(44, 7, area);
 
     f.render_widget(Clear, popup);
 
+    let accent_color = accent
+        .map(|c| Color::Rgb(c[0], c[1], c[2]))
+        .unwrap_or(Color::Yellow);
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Yellow))
+        .border_style(Style::default().fg(accent_color))
+        .title_style(Style::default().fg(accent_color))
         .title(" Clear Queue ");
 
     let inner = block.inner(popup);
@@ -1755,9 +1767,44 @@ fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize) {
         .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    let hint = Paragraph::new(hint_line(&[("y / Enter", "confirm"), ("any key", "cancel")], None))
-        .alignment(Alignment::Center);
-    f.render_widget(hint, rows[3]);
+    let btn_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[3]);
+
+    let ok_style = if selected_button == 0 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let cancel_style = if selected_button == 1 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    f.render_widget(
+        Paragraph::new("[ OK ]").alignment(Alignment::Center).style(ok_style),
+        btn_cols[0],
+    );
+    f.render_widget(
+        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        btn_cols[1],
+    );
+}
+
+/// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
+pub fn compute_clear_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
+    let popup = centered_rect_abs(44, 7, area);
+    let inner_x = popup.x + 1;
+    let inner_y = popup.y + 1;
+    let inner_w = popup.width.saturating_sub(2);
+    // Layout rows: pad(1), message(1), spacer(min→2), buttons(1) → buttons at offset 4
+    let btn_y = inner_y + 4;
+    let half_w = inner_w / 2;
+    let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
+    let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
+    (popup, [ok_rect, cancel_rect])
 }
 
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>) {
@@ -1898,8 +1945,42 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         f.render_widget(p, rows[9]);
     }
 
-    let help = Paragraph::new(hint_line(&[
-        ("Enter/i", "edit"), ("j/k", "switch field"), ("Space", "toggle"), ("s", "save"), ("Esc", "close"),
-    ], accent));
-    f.render_widget(help, rows[11]);
+    let btn_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[11]);
+
+    let ok_style = if modal.selected_field == 7 {
+        Style::default().fg(Color::Black).bg(accent_bright).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let cancel_style = if modal.selected_field == 8 {
+        Style::default().fg(Color::Black).bg(accent_bright).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    f.render_widget(
+        Paragraph::new("[ OK ]").alignment(Alignment::Center).style(ok_style),
+        btn_cols[0],
+    );
+    f.render_widget(
+        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        btn_cols[1],
+    );
+}
+
+/// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
+pub fn compute_config_modal_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
+    let popup = centered_rect_abs(54, 17, area);
+    let inner_x = popup.x + 1;
+    let inner_y = popup.y + 1;
+    let inner_w = popup.width.saturating_sub(2);
+    // Layout rows: 10 fixed (0-9) + spacer(min→4) + buttons(1) → buttons at offset 14
+    let btn_y = inner_y + 14;
+    let half_w = inner_w / 2;
+    let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
+    let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
+    (popup, [ok_rect, cancel_rect])
 }
