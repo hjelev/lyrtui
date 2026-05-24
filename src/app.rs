@@ -57,19 +57,32 @@ pub struct ConfigModal {
     pub username: String,
     pub password: String,
     pub use_nerd_icons: bool,
-    pub selected_field: usize, // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons
+    pub auto_discover: bool,
+    pub broadcast_mask: String,
+    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask
+    pub selected_field: usize,
     pub editing: bool,
     pub error: Option<String>,
 }
 
 impl ConfigModal {
-    pub fn new(host: &str, port: u16, username: Option<&str>, password: Option<&str>, use_nerd_icons: bool) -> Self {
+    pub fn new(
+        host: &str,
+        port: u16,
+        username: Option<&str>,
+        password: Option<&str>,
+        use_nerd_icons: bool,
+        auto_discover: bool,
+        broadcast_mask: &str,
+    ) -> Self {
         Self {
             host: host.to_string(),
             port: port.to_string(),
             username: username.unwrap_or("").to_string(),
             password: password.unwrap_or("").to_string(),
             use_nerd_icons,
+            auto_discover,
+            broadcast_mask: broadcast_mask.to_string(),
             selected_field: 0,
             editing: false,
             error: None,

@@ -14,6 +14,10 @@ pub struct Config {
     pub use_nerd_icons: bool,
     pub username: Option<String>,
     pub password: Option<String>,
+    #[serde(default = "default_auto_discover")]
+    pub auto_discover: bool,
+    #[serde(default = "default_broadcast_mask")]
+    pub broadcast_mask: String,
 }
 
 fn default_host() -> String {
@@ -22,6 +26,14 @@ fn default_host() -> String {
 
 fn default_port() -> u16 {
     9000
+}
+
+fn default_auto_discover() -> bool {
+    true
+}
+
+fn default_broadcast_mask() -> String {
+    "255.255.255.255".to_string()
 }
 
 impl Default for Config {
@@ -33,6 +45,8 @@ impl Default for Config {
             use_nerd_icons: false,
             username: None,
             password: None,
+            auto_discover: default_auto_discover(),
+            broadcast_mask: default_broadcast_mask(),
         }
     }
 }
@@ -66,7 +80,7 @@ impl Config {
     }
 }
 
-fn config_path() -> PathBuf {
+pub fn config_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("lyrtui")
