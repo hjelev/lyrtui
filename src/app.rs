@@ -210,6 +210,9 @@ pub struct App {
     pub accent_color: Option<[u8; 3]>,
     pub disable_auto_colors: bool,
 
+    /// True while a background navigation fetch is in-flight (triggers loading indicator in UI).
+    pub is_loading: bool,
+
     pub help_scroll: u16,
     /// Updated each frame by draw_help; used by handlers to clamp scrolling.
     pub help_visible_lines: Cell<u16>,
@@ -273,6 +276,7 @@ impl App {
             search_query: String::new(),
             search_results: vec![],
             search_input_active: false,
+            is_loading: false,
             use_nerd_icons: false,
             full_art_mode: false,
             accent_color: None,

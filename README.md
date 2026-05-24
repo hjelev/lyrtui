@@ -21,13 +21,13 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 - Browse your music library: Artists → Albums → Tracks, or jump straight to All Tracks
 - **Search** your music library (artists, albums, tracks, playlists) — type a query, press Enter, then drill in or play results directly
 - Browse and play internet radio via Lyrion's radio services (TuneIn, etc.) with full hierarchical navigation
-- Browse and play installed Lyrion apps (Spotify, Deezer, Bandcamp, etc.) with the same hierarchical navigation
+- Browse and play installed Lyrion apps (Spotify, Deezer, Bandcamp, etc.) with the same hierarchical navigation — shows a **Loading...** indicator while fetching remote content so navigation never blocks
 - View and jump to items in the playback queue
 - Select and switch between multiple players; toggle player power on/off
 - **Global volume control** — toggle a persistent checkbox in the Players view to make `+`/`-` adjust all players simultaneously from any screen; a globe icon (◎) appears in the status panel when active
 - Playback controls: play/pause, next, previous, volume up/down (keyboard and clickable buttons)
 - Toggle **shuffle** (`s`) and cycle **repeat** modes (`r`): off → one → all → repeat-all
-- Expanded now-playing panel with album art (supports Kitty, Sixel, iTerm2, and halfblock protocols — auto-detected)
+- Expanded now-playing panel with album art that **dynamically fills the available height** — the Now Playing bar scales to ~1/3 of the terminal height so the cover art grows when you expand your terminal (supports Kitty, Sixel, iTerm2, and halfblock protocols — auto-detected)
 - **Adaptive theme** — accent color is auto-generated from the current track's album art and applied to the progress bar and UI borders
 - Live now-playing bar with progress and volume display
 - Scrollbar in the navigation panel for long lists

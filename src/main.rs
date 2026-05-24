@@ -85,6 +85,7 @@ async fn run(
     app.disable_auto_colors = cfg.disable_auto_colors;
     // Compute Now Playing panel height: art column is 18 cols; height = ceil(18 * fw / fh) + 2 borders.
     // art_col_w is the actual cell width the square image fills (inner_h * fh / fw).
+    let base_status_height;
     {
         let fs = picker.font_size();
         let art_rows = (18u16 * fs.width).div_ceil(fs.height);
@@ -93,6 +94,7 @@ async fn run(
         app.status_height = art_rows;
         app.art_col_w = art_col_w.max(4);
         app.font_size = (fs.width, fs.height);
+        base_status_height = art_rows;
     }
     let mut album_art: Option<StatefulProtocol> = None;
     let mut last_artwork_image: Option<image::DynamicImage> = None;
@@ -179,6 +181,17 @@ async fn run(
     }
 
     loop {
+        // Resize the Now Playing bar to fill ~1/3 of the terminal height
+        if let Ok(sz) = terminal.size() {
+            let dyn_sh = (sz.height / 3).max(base_status_height);
+            if dyn_sh != app.status_height {
+                app.status_height = dyn_sh;
+                let inner_h = dyn_sh.saturating_sub(2);
+                let fw = app.font_size.0.max(1) as u32;
+                let fh = app.font_size.1.max(1) as u32;
+                app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
+            }
+        }
         terminal.draw(|f| {
             ui::draw(
                 f,
@@ -350,10 +363,10 @@ async fn run(
             || app.confirm_clear_queue
             || app.config_modal.is_some()
             || app.context_menu.is_some();
-        if had_overlay && !has_overlay {
-            if let Some(img) = &last_artwork_image {
-                album_art = Some(picker.new_resize_protocol(img.clone()));
-            }
+        if had_overlay && !has_overlay
+            && let Some(img) = &last_artwork_image
+        {
+            album_art = Some(picker.new_resize_protocol(img.clone()));
         }
     }
 
@@ -395,11 +408,18 @@ async fn handle_msg(
             }
         }
         AppMsg::ArtistsLoaded(a) => app.artists = a,
-        AppMsg::AlbumsLoaded(a) => app.albums = a,
-        AppMsg::TracksLoaded(t) => app.tracks = t,
+        AppMsg::AlbumsLoaded(a) => {
+            app.albums = a;
+            app.is_loading = false;
+        }
+        AppMsg::TracksLoaded(t) => {
+            app.tracks = t;
+            app.is_loading = false;
+        }
         AppMsg::RadioItemsLoaded(items) => {
             app.radio_items = items;
             app.main_selected = 0;
+            app.is_loading = false;
         }
         AppMsg::AppItemsLoaded(items) => {
             if app.app_nav_stack.is_empty() {
@@ -407,14 +427,17 @@ async fn handle_msg(
             }
             app.app_items = items;
             app.main_selected = 0;
+            app.is_loading = false;
         }
         AppMsg::FavItemsLoaded(items) => {
             app.fav_items = items;
             app.main_selected = 0;
+            app.is_loading = false;
         }
         AppMsg::FolderItemsLoaded(items) => {
             app.folder_items = items;
             app.main_selected = 0;
+            app.is_loading = false;
         }
         AppMsg::PlayerVolumesLoaded(volumes) => {
             app.player_volumes = volumes;

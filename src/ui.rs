@@ -173,12 +173,12 @@ pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w
             Constraint::Length(1), // title
             Constraint::Length(1), // artist
             Constraint::Length(1), // album
+            Constraint::Min(0),    // flexible spacer
             Constraint::Length(1), // controls
-            Constraint::Min(0),    // filler
             Constraint::Length(1), // progress
         ])
         .split(cols[2]);
-    let ctrl = rows[3];
+    let ctrl = rows[4];
     let btn_w: u16 = 3;
     let gap: u16 = 1;
     let sep: u16 = 2;
@@ -523,7 +523,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 line1: Line::from(Span::raw(format!("  {}", a.artist))),
                 line2: Line::from(Span::styled("  artist", Style::default().fg(mid))),
             }).collect();
-            draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, state, thumbnails, app.effective_accent());
+            draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
         }
         LibraryView::Albums { .. } => {
             let items = app.albums.iter().map(|a| {
@@ -534,7 +534,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     line2: Line::from(Span::styled(format!("  {}", sub), Style::default().fg(mid))),
                 }
             }).collect();
-            draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, state, thumbnails, app.effective_accent());
+            draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
         }
         LibraryView::Tracks { album_id } => {
             let title = if album_id.is_some() { " Tracks " } else { " All Tracks " };
@@ -550,7 +550,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     )),
                 }
             }).collect();
-            draw_two_row_list(f, area, title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
+            draw_two_row_list(f, area, title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
         }
         LibraryView::Folder { .. } => {
             let breadcrumb = breadcrumb_str(
@@ -586,7 +586,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     )),
                 }
             }).collect();
-            draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
+            draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
         }
     }
 }
@@ -618,7 +618,7 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
         }
     }).collect();
 
-    draw_two_row_list(f, area, " Queue ", items, app.main_selected, focused, state, thumbnails, app.effective_accent());
+    draw_two_row_list(f, area, " Queue ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
 }
 
 fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
@@ -788,7 +788,7 @@ fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
             )),
         }
     }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
 }
 
 fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
@@ -807,7 +807,7 @@ fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
             )),
         }
     }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
 }
 
 fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
@@ -826,7 +826,7 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
             )),
         }
     }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, state, thumbnails, app.effective_accent());
+    draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
 }
 
 fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
@@ -1131,10 +1131,16 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         return;
     };
 
+    // Compute art column width from the actual rendered inner height so the image fills all
+    // available vertical space in the Now Playing bar regardless of terminal resize.
+    let fw = app.font_size.0.max(1) as u32;
+    let fh = app.font_size.1.max(1) as u32;
+    let art_col_w = ((inner.height as u32 * fh) / fw).max(4) as u16;
+
     // Split: art column | 1-col gap | info column
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(app.art_col_w), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([Constraint::Length(art_col_w), Constraint::Length(1), Constraint::Min(1)])
         .split(inner);
 
     if let Some(proto) = album_art {
@@ -1146,6 +1152,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
 }
 
 fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, bigscreen: bool) {
+    // Controls and progress bar are pinned to the bottom; metadata fills the top.
     let rows = if bigscreen {
         Layout::default()
             .direction(Direction::Vertical)
@@ -1155,11 +1162,9 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 Constraint::Length(1), // [2] album
                 Constraint::Length(1), // [3] empty line
                 Constraint::Length(1), // [4] player + volume
-                Constraint::Length(1), // [5] empty line
+                Constraint::Min(0),    // [5] flexible spacer
                 Constraint::Length(1), // [6] playback controls
-                Constraint::Length(1), // [7] spacer
-                Constraint::Length(1), // [8] progress bar
-                Constraint::Min(0),    // [9] remaining space
+                Constraint::Length(1), // [7] progress bar
             ])
             .split(area)
     } else {
@@ -1169,15 +1174,14 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 Constraint::Length(1), // [0] title
                 Constraint::Length(1), // [1] artist
                 Constraint::Length(1), // [2] album
-                Constraint::Length(1), // [3] playback controls
-                Constraint::Length(1), // [4] spacer
+                Constraint::Min(0),    // [3] flexible spacer
+                Constraint::Length(1), // [4] playback controls
                 Constraint::Length(1), // [5] progress bar
-                Constraint::Min(0),    // [6] remaining space
             ])
             .split(area)
     };
-    let ctrl_row = if bigscreen { 6 } else { 3 };
-    let progress_row = if bigscreen { 8 } else { 5 };
+    let ctrl_row = if bigscreen { 6 } else { 4 };
+    let progress_row = if bigscreen { 7 } else { 5 };
     let indent: &str = if bigscreen { " " } else { "" };
     let mid = mid_accent_color(app.effective_accent());
 
@@ -1555,6 +1559,7 @@ fn draw_two_row_list(
     items: Vec<RowItem>,
     selected: usize,
     focused: bool,
+    is_loading: bool,
     state: &mut ListState,
     thumbnails: &mut HashMap<String, StatefulProtocol>,
     accent: Option<[u8; 3]>,
@@ -1573,8 +1578,9 @@ fn draw_two_row_list(
 
     if items.is_empty() {
         state.select(None);
+        let msg = if is_loading { "  Loading..." } else { "(empty)" };
         f.render_widget(
-            Paragraph::new("(empty)").block(block).style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new(msg).block(block).style(Style::default().fg(Color::DarkGray)),
             area,
         );
         return;
@@ -1729,22 +1735,41 @@ pub fn compute_full_art_control_rects(area: Rect, app: &App) -> [Rect; 8] {
         .constraints([Constraint::Length(image_col_w), Constraint::Min(1)])
         .split(content_area);
     let info_area = cols[1];
-    // np_block border (+1) + rows[3] controls in the non-bigscreen layout = info_area.y + 4
-    let ctrl_y = info_area.y + 4;
-    let ctrl_x = info_area.x + 1; // left border of the Now Playing block
+    let info_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(8), Constraint::Min(1)])
+        .split(info_area);
+    let np_inner = Rect::new(
+        info_rows[0].x + 1,
+        info_rows[0].y + 1,
+        info_rows[0].width.saturating_sub(2),
+        info_rows[0].height.saturating_sub(2),
+    );
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // title
+            Constraint::Length(1), // artist
+            Constraint::Length(1), // album
+            Constraint::Min(0),    // flexible spacer
+            Constraint::Length(1), // controls
+            Constraint::Length(1), // progress
+        ])
+        .split(np_inner);
+    let ctrl = rows[4];
     let btn_w: u16 = 3;
     let gap: u16 = 1;
     let sep: u16 = 2;
     std::array::from_fn(|i| {
         let x = if i < 4 {
-            ctrl_x + (i as u16) * (btn_w + gap)
+            ctrl.x + (i as u16) * (btn_w + gap)
         } else if i < 6 {
-            ctrl_x + 4 * (btn_w + gap) + sep + ((i - 4) as u16) * (btn_w + gap)
+            ctrl.x + 4 * (btn_w + gap) + sep + ((i - 4) as u16) * (btn_w + gap)
         } else {
             // volume down (6) and volume up (7) after a second sep gap
-            ctrl_x + 4 * (btn_w + gap) + sep + 2 * (btn_w + gap) + sep + ((i - 6) as u16) * (btn_w + gap)
+            ctrl.x + 4 * (btn_w + gap) + sep + 2 * (btn_w + gap) + sep + ((i - 6) as u16) * (btn_w + gap)
         };
-        Rect::new(x, ctrl_y, btn_w, 1)
+        Rect::new(x, ctrl.y, btn_w, 1)
     })
 }
 

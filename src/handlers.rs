@@ -69,22 +69,22 @@ pub async fn handle_mouse_event(
             let (popup, [ok_rect, cancel_rect]) = ui::compute_delete_queue_button_rects(terminal_area);
             if point_in(col, row, ok_rect) {
                 app.confirm_delete_queue_item = None;
-                if let Some(pid) = app.active_player.clone() {
-                    if idx < app.queue.len() {
-                        let name = app.queue[idx].title.clone();
-                        let c = client.clone();
-                        let t = tx.clone();
-                        tokio::spawn(async move {
-                            if c.delete_queue_item(&pid, idx).await.is_ok() {
-                                let _ = t
-                                    .send(AppMsg::StatusMsg(format!("Removed \"{}\" from queue", name)))
-                                    .await;
-                            }
-                        });
-                        app.queue.remove(idx);
-                        if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
-                            app.main_selected = app.queue.len() - 1;
+                if let Some(pid) = app.active_player.clone()
+                    && idx < app.queue.len()
+                {
+                    let name = app.queue[idx].title.clone();
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        if c.delete_queue_item(&pid, idx).await.is_ok() {
+                            let _ = t
+                                .send(AppMsg::StatusMsg(format!("Removed \"{}\" from queue", name)))
+                                .await;
                         }
+                    });
+                    app.queue.remove(idx);
+                    if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
+                        app.main_selected = app.queue.len() - 1;
                     }
                 }
             } else if point_in(col, row, cancel_rect) || !point_in(col, row, popup) {
@@ -418,22 +418,22 @@ pub async fn handle_confirm_delete_queue_item_key(
         KeyCode::Char('y') => {
             if let Some(idx) = app.confirm_delete_queue_item.take() {
                 app.delete_queue_selected_button = 0;
-                if let Some(pid) = app.active_player.clone() {
-                    if idx < app.queue.len() {
-                        let name = app.queue[idx].title.clone();
-                        let c = client.clone();
-                        let t = tx.clone();
-                        tokio::spawn(async move {
-                            if c.delete_queue_item(&pid, idx).await.is_ok() {
-                                let _ = t
-                                    .send(AppMsg::StatusMsg(format!("Removed \"{}\" from queue", name)))
-                                    .await;
-                            }
-                        });
-                        app.queue.remove(idx);
-                        if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
-                            app.main_selected = app.queue.len() - 1;
+                if let Some(pid) = app.active_player.clone()
+                    && idx < app.queue.len()
+                {
+                    let name = app.queue[idx].title.clone();
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        if c.delete_queue_item(&pid, idx).await.is_ok() {
+                            let _ = t
+                                .send(AppMsg::StatusMsg(format!("Removed \"{}\" from queue", name)))
+                                .await;
                         }
+                    });
+                    app.queue.remove(idx);
+                    if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
+                        app.main_selected = app.queue.len() - 1;
                     }
                 }
             }
@@ -442,24 +442,23 @@ pub async fn handle_confirm_delete_queue_item_key(
             let confirmed = app.delete_queue_selected_button == 0;
             if let Some(idx) = app.confirm_delete_queue_item.take() {
                 app.delete_queue_selected_button = 0;
-                if confirmed {
-                    if let Some(pid) = app.active_player.clone() {
-                        if idx < app.queue.len() {
-                            let name = app.queue[idx].title.clone();
-                            let c = client.clone();
-                            let t = tx.clone();
-                            tokio::spawn(async move {
-                                if c.delete_queue_item(&pid, idx).await.is_ok() {
-                                    let _ = t
-                                        .send(AppMsg::StatusMsg(format!("Removed \"{}\" from queue", name)))
-                                        .await;
-                                }
-                            });
-                            app.queue.remove(idx);
-                            if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
-                                app.main_selected = app.queue.len() - 1;
-                            }
+                if confirmed
+                    && let Some(pid) = app.active_player.clone()
+                    && idx < app.queue.len()
+                {
+                    let name = app.queue[idx].title.clone();
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        if c.delete_queue_item(&pid, idx).await.is_ok() {
+                            let _ = t
+                                .send(AppMsg::StatusMsg(format!("Removed \"{}\" from queue", name)))
+                                .await;
                         }
+                    });
+                    app.queue.remove(idx);
+                    if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
+                        app.main_selected = app.queue.len() - 1;
                     }
                 }
             }
@@ -938,6 +937,7 @@ pub async fn handle_action(
                         app.radio_title = "Radio".to_string();
                         app.main_view = MainView::Radio;
                         app.focus_sidebar = false;
+                        app.is_loading = true;
                         background::load_radio_services(client.clone(), tx.clone());
                     }
                     Some(SidebarItem::Apps) => {
@@ -946,6 +946,7 @@ pub async fn handle_action(
                         app.app_title = "Apps".to_string();
                         app.main_view = MainView::Apps;
                         app.focus_sidebar = false;
+                        app.is_loading = true;
                         background::load_app_services(client.clone(), tx.clone());
                     }
                     Some(SidebarItem::Favourites) => {
@@ -954,6 +955,7 @@ pub async fn handle_action(
                         app.fav_title = "Favourites".to_string();
                         app.main_view = MainView::Favourites;
                         app.focus_sidebar = false;
+                        app.is_loading = true;
                         background::load_fav_items(
                             app.active_player.clone().unwrap_or_default(),
                             None,
@@ -1344,11 +1346,13 @@ pub async fn handle_main_select(
                 app.main_selected = 0;
             }
             1 => {
+                app.is_loading = true;
                 background::load_albums(None, client.clone(), tx.clone());
                 app.main_view = MainView::Library(LibraryView::Albums { artist_id: None });
                 app.main_selected = 0;
             }
             2 => {
+                app.is_loading = true;
                 background::load_all_tracks(client.clone(), tx.clone());
                 app.main_view = MainView::Library(LibraryView::Tracks { album_id: None });
                 app.main_selected = 0;
@@ -1359,6 +1363,7 @@ pub async fn handle_main_select(
                 app.folder_title = "Folders".to_string();
                 app.main_view = MainView::Library(LibraryView::Folder { folder_id: None });
                 app.main_selected = 0;
+                app.is_loading = true;
                 background::load_folder_items(None, client.clone(), tx.clone());
             }
             _ => {}
@@ -1366,6 +1371,7 @@ pub async fn handle_main_select(
         MainView::Library(LibraryView::Artists) => {
             if let Some(artist) = app.artists.get(app.main_selected) {
                 let id = utils::json_id_to_string(&artist.id);
+                app.is_loading = true;
                 background::load_albums(Some(id.clone()), client.clone(), tx.clone());
                 app.main_view = MainView::Library(LibraryView::Albums {
                     artist_id: Some(id),
@@ -1376,6 +1382,7 @@ pub async fn handle_main_select(
         MainView::Library(LibraryView::Albums { .. }) => {
             if let Some(album) = app.albums.get(app.main_selected) {
                 let id = utils::json_id_to_string(&album.id);
+                app.is_loading = true;
                 background::load_tracks(id.clone(), client.clone(), tx.clone());
                 app.main_view = MainView::Library(LibraryView::Tracks {
                     album_id: Some(id),
@@ -1399,6 +1406,7 @@ pub async fn handle_main_select(
                             folder_id: Some(item.id),
                         });
                         app.main_selected = 0;
+                        app.is_loading = true;
                         background::load_folder_items(Some(item.id), client.clone(), tx.clone());
                     }
                     FolderItemType::Track => {
@@ -1471,6 +1479,7 @@ pub async fn handle_main_select(
                     app.radio_nav_stack.push(nav);
                     app.radio_title = item.name;
                     app.main_selected = 0;
+                    app.is_loading = true;
                     background::load_radio_items(pid, cmd, item_id, client.clone(), tx.clone());
                 } else if item.is_playable()
                     && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
@@ -1497,6 +1506,7 @@ pub async fn handle_main_select(
                     app.app_nav_stack.push(nav);
                     app.app_title = item.name;
                     app.main_selected = 0;
+                    app.is_loading = true;
                     background::load_app_items(pid, cmd, item_id, client.clone(), tx.clone());
                 } else if item.is_playable()
                     && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
@@ -1522,6 +1532,7 @@ pub async fn handle_main_select(
                     app.fav_nav_stack.push(nav);
                     app.fav_title = item.name;
                     app.main_selected = 0;
+                    app.is_loading = true;
                     background::load_fav_items(pid, Some(item_id), client.clone(), tx.clone());
                 } else if item.is_playable()
                     && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
