@@ -818,7 +818,22 @@ pub async fn handle_action(
         }
 
         Action::VolumeUp => {
-            if let MainView::Players = &app.main_view {
+            if app.global_volume_control {
+                let pids: Vec<String> =
+                    app.players.iter().map(|p| p.playerid.clone()).collect();
+                for pid in &pids {
+                    let new_vol =
+                        (app.player_volumes.get(pid).copied().unwrap_or(50) + 5).min(100);
+                    app.player_volumes.insert(pid.clone(), new_vol);
+                    let _ = vol_sync_tx.try_send((pid.clone(), new_vol));
+                }
+                if let Some(active_pid) = app.active_player.clone()
+                    && let Some(new_vol) = app.player_volumes.get(&active_pid).copied()
+                    && let Some(np) = app.now_playing.as_mut()
+                {
+                    np.volume = new_vol;
+                }
+            } else if let MainView::Players = &app.main_view {
                 if app.players_focus_global {
                     let pids: Vec<String> =
                         app.players.iter().map(|p| p.playerid.clone()).collect();
@@ -852,7 +867,26 @@ pub async fn handle_action(
         }
 
         Action::VolumeDown => {
-            if let MainView::Players = &app.main_view {
+            if app.global_volume_control {
+                let pids: Vec<String> =
+                    app.players.iter().map(|p| p.playerid.clone()).collect();
+                for pid in &pids {
+                    let new_vol = app
+                        .player_volumes
+                        .get(pid)
+                        .copied()
+                        .unwrap_or(50)
+                        .saturating_sub(5);
+                    app.player_volumes.insert(pid.clone(), new_vol);
+                    let _ = vol_sync_tx.try_send((pid.clone(), new_vol));
+                }
+                if let Some(active_pid) = app.active_player.clone()
+                    && let Some(new_vol) = app.player_volumes.get(&active_pid).copied()
+                    && let Some(np) = app.now_playing.as_mut()
+                {
+                    np.volume = new_vol;
+                }
+            } else if let MainView::Players = &app.main_view {
                 if app.players_focus_global {
                     let pids: Vec<String> =
                         app.players.iter().map(|p| p.playerid.clone()).collect();
@@ -1212,9 +1246,9 @@ pub async fn handle_main_select(
             }
         }
         MainView::Players => {
-            if !app.players_focus_global
-                && let Some(player) = app.players.get(app.main_selected)
-            {
+            if app.players_focus_global {
+                app.global_volume_control = !app.global_volume_control;
+            } else if let Some(player) = app.players.get(app.main_selected) {
                 let pid = player.playerid.clone();
                 app.active_player = Some(pid.clone());
                 background::start_now_playing_loop(pid, client.clone(), tx.clone());

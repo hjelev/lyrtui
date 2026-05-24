@@ -307,10 +307,16 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
 
     // Volume
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
+    let globe_icon = if app.global_volume_control {
+        if app.use_nerd_icons { " \u{F0AC}" } else { " ◎" }  // nf-fa-globe
+    } else {
+        ""
+    };
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("Vol ", Style::default().fg(mid)),
             Span::styled(format!("{vol}%"), Style::default().fg(Color::White)),
+            Span::styled(globe_icon, Style::default().fg(focus_border_color(app.accent_color))),
         ])),
         rows[1],
     );
@@ -642,16 +648,24 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let glob_bg = if glob_focused { Color::Rgb(45, 100, 170) } else { Color::Reset };
     let glob_fg = if glob_focused { Color::Rgb(220, 235, 255) } else { mid };
 
-    let label = " ◎ Global  ";
+    let checkbox = if app.global_volume_control { "[x]" } else { "[ ]" };
+    let label = format!(" {} Global vol  ", checkbox);
     let vol_str = format!(" {}%", global_avg);
     // Use char count (display width) so bar aligns with player rows.
-    let label_w: usize = label.chars().count(); // = 11
+    let label_w: usize = label.chars().count();
     let bar_w = (chunks[0].width as usize).saturating_sub(label_w + vol_str.len() + 1);
     let filled = if bar_w > 0 { (global_avg as usize * bar_w) / 100 } else { 0 };
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
 
+    let checkbox_color = if app.global_volume_control {
+        focus_border_color(app.accent_color)
+    } else {
+        mid
+    };
     let global_line = Line::from(vec![
-        Span::styled(label, Style::default().fg(glob_fg).bg(glob_bg)),
+        Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
+        Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
+        Span::styled(" Global vol  ", Style::default().fg(glob_fg).bg(glob_bg)),
         Span::styled(bar, Style::default().fg(if glob_focused { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) }).bg(glob_bg)),
         Span::styled(&vol_str, Style::default().fg(if glob_focused { Color::White } else { mid }).bg(glob_bg)),
     ]);
@@ -671,9 +685,9 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let total = app.players.len();
     let visible = list_area.height as usize;
 
-    // Pin name column to the same inner width as the global label (" ◎ Global  " = 11 chars,
-    // minus the 3-char surrounding padding), so all rows share one bar-start column.
-    let name_col_w: usize = label_w - 3; // = 8
+    // Pin name column so all rows share one bar-start column.
+    // label_w = len(" [x] Global vol  ") = 17; subtract 3 for the " ○ " prefix.
+    let name_col_w: usize = label_w - 3;
 
     // Sync scroll offset.
     let offset = {
@@ -1052,6 +1066,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         header("Players"),
         shortcut("t",  "Toggle player power",                           mid),
+        shortcut("Enter (on Global vol)", "Toggle global volume control", mid),
         Line::from(""),
         header("App"),
         shortcut("c",         "Open server configuration",              mid),

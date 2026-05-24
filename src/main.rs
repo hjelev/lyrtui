@@ -77,6 +77,7 @@ async fn run(
     let (vol_sync_tx, mut vol_sync_rx) = mpsc::channel::<(String, u8)>(32);
     let mut app = App::new(cfg.default_player.clone());
     app.use_nerd_icons = cfg.use_nerd_icons;
+    app.global_volume_control = cfg.global_volume_control;
     // Compute Now Playing panel height: art column is 18 cols; height = ceil(18 * fw / fh) + 2 borders.
     // art_col_w is the actual cell width the square image fills (inner_h * fh / fw).
     {
@@ -287,8 +288,15 @@ async fn run(
                             cfg.auto_discover,
                             &cfg.broadcast_mask,
                         ));
-                    } else if handlers::handle_action(&mut app, action, &client, &tx, &vol_sync_tx).await {
-                        break;
+                    } else {
+                        let prev_gvc = app.global_volume_control;
+                        if handlers::handle_action(&mut app, action, &client, &tx, &vol_sync_tx).await {
+                            break;
+                        }
+                        if app.global_volume_control != prev_gvc {
+                            cfg.global_volume_control = app.global_volume_control;
+                            let _ = cfg.save();
+                        }
                     }
                 }
             }

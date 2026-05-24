@@ -181,6 +181,7 @@ pub struct App {
     pub main_view: MainView,
     pub focus_sidebar: bool,
     pub players_focus_global: bool,
+    pub global_volume_control: bool,
 
     pub status_message: Option<String>,
     pub config_modal: Option<ConfigModal>,
@@ -241,6 +242,7 @@ impl App {
             main_view: MainView::MyMusic,
             focus_sidebar: true,
             players_focus_global: false,
+            global_volume_control: false,
             status_message: None,
             config_modal: None,
             context_menu: None,

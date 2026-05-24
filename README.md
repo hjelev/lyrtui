@@ -14,6 +14,7 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 - Browse and play installed Lyrion apps (Spotify, Deezer, Bandcamp, etc.) with the same hierarchical navigation
 - View and jump to items in the playback queue
 - Select and switch between multiple players; toggle player power on/off
+- **Global volume control** — toggle a persistent checkbox in the Players view to make `+`/`-` adjust all players simultaneously from any screen; a globe icon (◎) appears in the status panel when active
 - Playback controls: play/pause, next, previous, volume up/down (keyboard and clickable buttons)
 - Toggle **shuffle** (`s`) and cycle **repeat** modes (`r`): off → one → all → repeat-all
 - Expanded now-playing panel with album art (supports Kitty, Sixel, iTerm2, and halfblock protocols — auto-detected)
