@@ -588,10 +588,10 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
 fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
-    let playing_title = app.now_playing.as_ref().map(|n| n.title.as_str()).unwrap_or("");
+    let cur_idx = app.now_playing.as_ref().and_then(|n| n.playlist_cur_index);
 
     let items = app.queue.iter().enumerate().map(|(i, t)| {
-        let is_current = t.title == playing_title && !playing_title.is_empty();
+        let is_current = cur_idx.map(|idx| idx == i).unwrap_or(false);
         let (icon_style, title_style, l2_style) = if is_current {
             (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
              Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
