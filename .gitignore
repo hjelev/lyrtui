@@ -1,1 +1,19 @@
 /target
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
+# Rust backup files
+**/*.rs.bk
+
+# Environment variables
+.env
+.env.local
+
+# Editor directories
+.idea/
+.vscode/settings.json
+
+# OS-specific
+.DS_Store
+Thumbs.db

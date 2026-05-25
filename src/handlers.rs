@@ -265,8 +265,18 @@ pub async fn handle_mouse_event(
                     app.full_art_mode = true;
                     cfg.full_art_mode = true;
                     let _ = cfg.save();
+                    app.main_selected = now_playing_queue_index(app);
                 }
             }
+            let server_status_area = ui::compute_server_status_area(terminal_area, app.status_height);
+            if point_in(col, row, server_status_area) {
+                app.main_view = MainView::Players;
+                app.focus_sidebar = false;
+                app.players_focus_global = false;
+                app.main_selected = 0;
+                return;
+            }
+
             if !app.full_art_mode && point_in(col, row, sidebar_area) {
                 app.focus_sidebar = true;
                 let inner_top = sidebar_area.y + 1;
@@ -966,6 +976,7 @@ pub async fn handle_action(
                     Some(SidebarItem::Queue) => {
                         app.main_view = MainView::Queue;
                         app.focus_sidebar = false;
+                        app.main_selected = now_playing_queue_index(app);
                     }
                     Some(SidebarItem::Players) => {
                         app.main_view = MainView::Players;
@@ -1162,6 +1173,7 @@ pub async fn handle_action(
             app.full_art_mode = !app.full_art_mode;
             if app.full_art_mode {
                 app.focus_sidebar = false;
+                app.main_selected = now_playing_queue_index(app);
             }
         }
 
@@ -1179,6 +1191,24 @@ pub async fn handle_action(
         Action::OpenConfig | Action::None => {}
     }
     false
+}
+
+/// Returns the queue index of the currently playing track.
+/// Uses `playlist_cur_index` from NowPlaying when available, otherwise falls
+/// back to matching by title in the queue vec.
+fn now_playing_queue_index(app: &App) -> usize {
+    let np = match app.now_playing.as_ref() {
+        Some(np) => np,
+        None => return 0,
+    };
+    if let Some(idx) = np.playlist_cur_index {
+        if idx < app.queue.len() {
+            return idx;
+        }
+    }
+    // Fallback: find by title
+    let title = &np.title;
+    app.queue.iter().position(|t| &t.title == title).unwrap_or(0)
 }
 
 fn set_modal_error(app: &mut App, msg: &str) {

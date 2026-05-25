@@ -138,6 +138,23 @@ struct RowItem {
     line2: Line<'static>,
 }
 
+/// Returns the Rect of the server-status (Vol%) block at the bottom of the sidebar.
+pub fn compute_server_status_area(area: Rect, status_height: u16) -> Rect {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .split(area);
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(20), Constraint::Min(1)])
+        .split(outer[0]);
+    let sidebar_split = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(3)])
+        .split(panes[0]);
+    sidebar_split[1]
+}
+
 /// Returns (sidebar_area, main_area) for a given terminal area.
 pub fn compute_areas(area: Rect, status_height: u16) -> (Rect, Rect) {
     let outer = Layout::default()
@@ -175,6 +192,7 @@ pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w
             Constraint::Length(1), // album
             Constraint::Min(0),    // flexible spacer
             Constraint::Length(1), // controls
+            Constraint::Length(1), // empty line
             Constraint::Length(1), // progress
         ])
         .split(cols[2]);
@@ -227,15 +245,8 @@ pub fn draw(
             .constraints([Constraint::Length(20), Constraint::Min(1)])
             .split(main_area);
 
-        // Split sidebar column into navigation (shrinks) + server status (fixed 6 rows)
-        let sidebar_split = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(6)])
-            .split(panes[0]);
-
         let base = format!("http://{}:{}", server_host, server_port);
-        draw_sidebar(f, app, sidebar_split[0], sidebar_state);
-        draw_server_status(f, app, sidebar_split[1], server_host, server_port);
+        draw_sidebar(f, app, panes[0], sidebar_state);
         draw_main(f, app, panes[1], main_state, thumbnails, &base);
         draw_statusbar(f, app, status_area, album_art);
 
@@ -289,35 +300,22 @@ pub fn draw(
     }
 }
 
-fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, server_port: u16) {
+fn draw_server_status(f: &mut Frame, app: &App, area: Rect, _server_host: &str, _server_port: u16) {
+    let player_name = app.active_player.as_ref()
+        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
+        .map(|p| p.name.as_str())
+        .unwrap_or("Status");
+    let title = format!(" {} ", player_name);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(unfocus_border_color(app.effective_accent())))
         .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
-        .title(" Status ");
+        .title(title);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Length(1), Constraint::Length(1)])
-        .split(inner);
-
     let mid = mid_accent_color(app.effective_accent());
-
-    // Active player
-    let player_name = app.active_player.as_ref()
-        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
-        .map(|p| p.name.as_str())
-        .unwrap_or("—");
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(if app.use_nerd_icons { "\u{f075a} " } else { "▶ " }, Style::default().fg(mid)),
-            Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
-        ])),
-        rows[0],
-    );
 
     // Volume
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
@@ -328,30 +326,7 @@ fn draw_server_status(f: &mut Frame, app: &App, area: Rect, server_host: &str, s
             Span::styled(format!("{vol}%"), Style::default().fg(Color::White)),
             Span::styled(globe_icon, Style::default().fg(focus_border_color(app.effective_accent()))),
         ])),
-        rows[1],
-    );
-
-    // Connection state
-    let (dot, dot_color, label) = match &app.connection {
-        ConnectionState::Connected    => ("●", Color::Green,  "Connected"),
-        ConnectionState::Disconnected => ("●", Color::Red,    "Offline"),
-        ConnectionState::Reconnecting => ("◌", Color::Yellow, "Reconnecting"),
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(dot, Style::default().fg(dot_color)),
-            Span::styled(format!(" {label}"), Style::default().fg(mid)),
-        ])),
-        rows[2],
-    );
-
-    // Server address
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            format!("{server_host}:{server_port}"),
-            Style::default().fg(mid),
-        )),
-        rows[3],
+        inner,
     );
 }
 
@@ -520,8 +495,8 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
         LibraryView::Artists => {
             let items = app.artists.iter().map(|a| RowItem {
                 thumb_url: Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
-                line1: Line::from(Span::raw(format!("  {}", a.artist))),
-                line2: Line::from(Span::styled("  artist", Style::default().fg(mid))),
+                line1: Line::from(Span::raw(a.artist.clone())),
+                line2: Line::from(Span::styled("artist", Style::default().fg(mid))),
             }).collect();
             draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
         }
@@ -530,8 +505,8 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
                 RowItem {
                     thumb_url: Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&a.id))),
-                    line1: Line::from(Span::raw(format!("  {}", a.album))),
-                    line2: Line::from(Span::styled(format!("  {}", sub), Style::default().fg(mid))),
+                    line1: Line::from(Span::raw(a.album.clone())),
+                    line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
                 }
             }).collect();
             draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
@@ -543,9 +518,9 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 let artist = t.artist.as_deref().unwrap_or("");
                 RowItem {
                     thumb_url: t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, value_id_str(id))),
-                    line1: Line::from(Span::raw(format!("  {:>3}. {}", i + 1, t.title))),
+                    line1: Line::from(Span::raw(format!("{:>3}. {}", i + 1, t.title))),
                     line2: Line::from(Span::styled(
-                        format!("  {}  {}", artist, dur),
+                        format!("{}  {}", artist, dur),
                         Style::default().fg(mid),
                     )),
                 }
@@ -577,11 +552,11 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                         None
                     },
                     line1: Line::from(Span::styled(
-                        format!("  {}{}", icon, item.filename),
+                        format!("{}{}", icon, item.filename),
                         Style::default().fg(fg),
                     )),
                     line2: Line::from(Span::styled(
-                        format!("  {}", sub),
+                        sub.clone(),
                         Style::default().fg(mid),
                     )),
                 }
@@ -605,7 +580,6 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
             (Style::default().fg(Color::White),
              Style::default().fg(mid))
         };
-        let marker = if is_current { "▶ " } else { "  " };
         let artist_album = match (t.artist.as_deref(), t.album.as_deref()) {
             (Some(ar), Some(al)) => format!("{} — {}", ar, al),
             (Some(ar), None) => ar.to_string(),
@@ -613,8 +587,8 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
         };
         RowItem {
             thumb_url: t.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("{}{:>3}. {}", marker, i + 1, t.title), l1_style)),
-            line2: Line::from(Span::styled(format!("    {}", artist_album), l2_style)),
+            line1: Line::from(Span::styled(format!("{:>3}. {}", i + 1, t.title), l1_style)),
+            line2: Line::from(Span::styled(artist_album, l2_style)),
         }
     }).collect();
 
@@ -781,9 +755,9 @@ fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
         let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
         RowItem {
             thumb_url: item.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("  {}{}", icon, item.name), Style::default().fg(fg))),
+            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(fg))),
             line2: Line::from(Span::styled(
-                format!("  {}", if item.is_playable() { "stream" } else { "folder" }),
+                if item.is_playable() { "stream" } else { "folder" },
                 Style::default().fg(mid),
             )),
         }
@@ -800,9 +774,9 @@ fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
         let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
         RowItem {
             thumb_url: item.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("  {}{}", icon, item.name), Style::default().fg(fg))),
+            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(fg))),
             line2: Line::from(Span::styled(
-                format!("  {}", if item.is_playable() { "stream" } else { "folder" }),
+                if item.is_playable() { "stream" } else { "folder" },
                 Style::default().fg(mid),
             )),
         }
@@ -819,9 +793,9 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
         let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
         RowItem {
             thumb_url: item.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("  {}{}", icon, item.name), Style::default().fg(fg))),
+            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(fg))),
             line2: Line::from(Span::styled(
-                format!("  {}", if item.is_playable() { "stream" } else { "folder" }),
+                if item.is_playable() { "stream" } else { "folder" },
                 Style::default().fg(mid),
             )),
         }
@@ -931,44 +905,44 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
         let (line1, line2) = match &app.search_results[vis_i] {
             SearchResultItem::Artist(a) => (
                 Line::from(vec![
-                    Span::styled("  ▸ ", Style::default().fg(Color::White)),
+                    Span::styled("▸ ", Style::default().fg(Color::White)),
                     Span::styled(a.artist.clone(), Style::default().fg(Color::White)),
                 ]),
-                Line::from(Span::styled("  artist", Style::default().fg(mid))),
+                Line::from(Span::styled("artist", Style::default().fg(mid))),
             ),
             SearchResultItem::Album(alb) => (
                 Line::from(vec![
-                    Span::styled("  ▸ ", Style::default().fg(Color::Rgb(100, 160, 220))),
+                    Span::styled("▸ ", Style::default().fg(Color::Rgb(100, 160, 220))),
                     Span::styled(alb.album.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled(
-                    format!("  album  {}", alb.artist.as_deref().unwrap_or("")),
+                    format!("album  {}", alb.artist.as_deref().unwrap_or("")),
                     Style::default().fg(mid),
                 )),
             ),
             SearchResultItem::Track(t) => (
                 Line::from(vec![
-                    Span::styled("  ▶ ", Style::default().fg(Color::Cyan)),
+                    Span::styled("▶ ", Style::default().fg(Color::Cyan)),
                     Span::styled(t.title.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled(
-                    format!("  {}", t.artist.as_deref().unwrap_or("")),
+                    t.artist.as_deref().unwrap_or("").to_string(),
                     Style::default().fg(mid),
                 )),
             ),
             SearchResultItem::Playlist(pl) => (
                 Line::from(vec![
-                    Span::styled("  ▸ ", Style::default().fg(Color::Rgb(220, 180, 80))),
+                    Span::styled("▸ ", Style::default().fg(Color::Rgb(220, 180, 80))),
                     Span::styled(pl.name.clone(), Style::default().fg(Color::White)),
                 ]),
-                Line::from(Span::styled("  playlist", Style::default().fg(mid))),
+                Line::from(Span::styled("playlist", Style::default().fg(mid))),
             ),
             SearchResultItem::AppItem(item) => (
                 Line::from(vec![
-                    Span::styled("  ▸ ", Style::default().fg(Color::Rgb(180, 120, 220))),
+                    Span::styled("▸ ", Style::default().fg(Color::Rgb(180, 120, 220))),
                     Span::styled(item.name.clone(), Style::default().fg(Color::White)),
                 ]),
-                Line::from(Span::styled("  app", Style::default().fg(mid))),
+                Line::from(Span::styled("app", Style::default().fg(mid))),
             ),
         };
 
@@ -1116,11 +1090,34 @@ fn hint_line(pairs: &[(&str, &str)], accent: Option<[u8; 3]>) -> Line<'static> {
 }
 
 fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut StatefulProtocol>) {
+    let player_name = app.active_player.as_ref()
+        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "Now Playing".to_string());
+    let mid = mid_accent_color(app.effective_accent());
+    let accent = focus_border_color(app.effective_accent());
+    let player_icon = icon_player_dot(app.use_nerd_icons);
+    let title_line = if let Some(np) = &app.now_playing {
+        let vol_icon = icon_vol(app.use_nerd_icons);
+        let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
+        Line::from(vec![
+            Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
+            Span::styled(player_name, Style::default().fg(Color::White)),
+            Span::styled(format!("  {} ", vol_icon), Style::default().fg(mid)),
+            Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
+            Span::styled(format!("{} ", globe), Style::default().fg(accent)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
+            Span::styled(format!("{} ", player_name), Style::default().fg(Color::White)),
+        ])
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(focus_border_color(app.effective_accent())))
-        .title(" Now Playing ");
+        .border_style(Style::default().fg(accent))
+        .title(title_line);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -1164,7 +1161,8 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 Constraint::Length(1), // [4] player + volume
                 Constraint::Min(0),    // [5] flexible spacer
                 Constraint::Length(1), // [6] playback controls
-                Constraint::Length(1), // [7] progress bar
+                Constraint::Length(1), // [7] empty line
+                Constraint::Length(1), // [8] progress bar
             ])
             .split(area)
     } else {
@@ -1176,12 +1174,13 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 Constraint::Length(1), // [2] album
                 Constraint::Min(0),    // [3] flexible spacer
                 Constraint::Length(1), // [4] playback controls
-                Constraint::Length(1), // [5] progress bar
+                Constraint::Length(1), // [5] empty line
+                Constraint::Length(1), // [6] progress bar
             ])
             .split(area)
     };
     let ctrl_row = if bigscreen { 6 } else { 4 };
-    let progress_row = if bigscreen { 7 } else { 5 };
+    let progress_row = if bigscreen { 8 } else { 6 };
     let indent: &str = if bigscreen { " " } else { "" };
     let mid = mid_accent_color(app.effective_accent());
 
@@ -1753,6 +1752,7 @@ pub fn compute_full_art_control_rects(area: Rect, app: &App) -> [Rect; 8] {
             Constraint::Length(1), // album
             Constraint::Min(0),    // flexible spacer
             Constraint::Length(1), // controls
+            Constraint::Length(1), // empty line
             Constraint::Length(1), // progress
         ])
         .split(np_inner);

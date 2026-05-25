@@ -29,6 +29,7 @@ pub struct NowPlaying {
     pub shuffle: u8,
     pub repeat: u8,
     pub artwork_url: Option<String>,
+    pub playlist_cur_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -218,6 +219,10 @@ impl LmsClient {
             shuffle: result["playlist shuffle"].as_u64().unwrap_or(0) as u8,
             repeat: result["playlist repeat"].as_u64().unwrap_or(0) as u8,
             artwork_url,
+            playlist_cur_index: result["playlist_cur_index"]
+                .as_u64()
+                .or_else(|| result["playlist_cur_index"].as_str().and_then(|s| s.parse().ok()))
+                .map(|i| i as usize),
         })
     }
 
