@@ -2146,7 +2146,7 @@ fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, ar
     }
 
     // Buttons row
-    let btn_row = rows[1 + n + 2];
+    let btn_row = rows[n + 2];
     let btn_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])

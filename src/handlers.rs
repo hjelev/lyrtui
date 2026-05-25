@@ -364,6 +364,10 @@ pub async fn handle_mouse_event(
                                     let _ = c.set_power(&pid, turn_on).await;
                                 }
                             });
+                        } else if col >= pwr_end_x + 1 && col < pwr_end_x + 4 {
+                            // Checkbox "[x]"/"[ ]": toggle global volume control
+                            app.players_focus_global = true;
+                            app.global_volume_control = !app.global_volume_control;
                         } else {
                             app.players_focus_global = true;
                         }
