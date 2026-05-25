@@ -1727,7 +1727,10 @@ pub async fn handle_main_select(
             } else if let Some(player) = app.players.get(app.main_selected) {
                 let pid = player.playerid.clone();
                 app.active_player = Some(pid.clone());
-                background::start_now_playing_loop(pid, client.clone(), tx.clone());
+                if let Some(h) = app.now_playing_handle.take() {
+                    h.abort();
+                }
+                app.now_playing_handle = Some(background::start_now_playing_loop(pid, client.clone(), tx.clone()));
             }
         }
         MainView::Radio => {

@@ -122,10 +122,8 @@ async fn run(
                             let mut volumes = std::collections::HashMap::new();
                             let mut sync_groups = std::collections::HashMap::new();
                             for pid in &pids {
-                                if let Ok(vol) = c.get_player_volume(pid).await {
+                                if let Ok((vol, synced)) = c.get_player_status_info(pid).await {
                                     volumes.insert(pid.clone(), vol);
-                                }
-                                if let Ok(synced) = c.get_synced_players(pid).await {
                                     sync_groups.insert(pid.clone(), synced);
                                 }
                             }
@@ -411,18 +409,24 @@ async fn handle_msg(
         }
         AppMsg::Disconnected => app.connection = ConnectionState::Disconnected,
         AppMsg::PlayersLoaded(players) => {
-            if let Some(pid) = app.active_player.clone() {
-                // Restore saved player: start its loop if it exists in the list.
+            let new_pid = if let Some(pid) = app.active_player.clone() {
                 if players.iter().any(|p| p.playerid == pid) {
-                    background::start_now_playing_loop(pid, client.clone(), tx.clone());
-                } else if let Some(p) = players.first() {
-                    // Saved player gone; fall back to first available.
-                    background::start_now_playing_loop(p.playerid.clone(), client.clone(), tx.clone());
-                    app.active_player = Some(p.playerid.clone());
+                    Some(pid)
+                } else {
+                    players.first().map(|p| p.playerid.clone())
                 }
-            } else if let Some(p) = players.first() {
-                background::start_now_playing_loop(p.playerid.clone(), client.clone(), tx.clone());
-                app.active_player = Some(p.playerid.clone());
+            } else {
+                players.first().map(|p| p.playerid.clone())
+            };
+
+            if let Some(pid) = new_pid {
+                if app.active_player.as_deref() != Some(&pid) || app.now_playing_handle.is_none() {
+                    if let Some(h) = app.now_playing_handle.take() {
+                        h.abort();
+                    }
+                    app.now_playing_handle = Some(background::start_now_playing_loop(pid.clone(), client.clone(), tx.clone()));
+                }
+                app.active_player = Some(pid);
             }
             app.players = players;
         }

@@ -236,6 +236,8 @@ pub struct App {
     pub art_image_size: Option<(u32, u32)>,
     /// Terminal font size in pixels (width, height), set once from the picker.
     pub font_size: (u16, u16),
+
+    pub now_playing_handle: Option<tokio::task::AbortHandle>,
 }
 
 impl App {
@@ -302,6 +304,7 @@ impl App {
             help_visible_lines: Cell::new(u16::MAX),
             art_image_size: None,
             font_size: (8, 16),
+            now_playing_handle: None,
         }
     }
 

@@ -19,7 +19,7 @@ where
     });
 }
 
-pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
+pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) -> tokio::task::AbortHandle {
     tokio::spawn(async move {
         let mut last_queue_timestamp: f64 = -1.0;
         loop {
@@ -36,7 +36,8 @@ pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sen
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-    });
+    })
+    .abort_handle()
 }
 
 pub fn trigger_search(
