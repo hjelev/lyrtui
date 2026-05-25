@@ -28,6 +28,7 @@ pub enum LibraryView {
     Albums { artist_id: Option<String> },
     Tracks { album_id: Option<String> }, // None = all tracks
     Folder { folder_id: Option<u32> },
+    Playlists,
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +177,7 @@ pub struct App {
     pub album_artists: Vec<Artist>,
     pub albums: Vec<Album>,
     pub tracks: Vec<Track>,
+    pub playlists: Vec<Playlist>,
 
     // Radio data
     pub radio_items: Vec<RadioItem>,
@@ -263,6 +265,7 @@ impl App {
             album_artists: vec![],
             albums: vec![],
             tracks: vec![],
+            playlists: vec![],
             radio_items: vec![],
             radio_nav_stack: vec![],
             radio_title: "Radio".to_string(),
@@ -358,6 +361,7 @@ pub enum AppMsg {
     AppItemsLoaded(Vec<RadioItem>),
     FavItemsLoaded(Vec<RadioItem>),
     FolderItemsLoaded(Vec<FolderItem>),
+    PlaylistsLoaded(Vec<Playlist>),
     ArtworkLoaded(Vec<u8>),
     ThumbnailLoaded(String, image::DynamicImage), // url, decoded image
     ThumbnailFailed(String),          // url

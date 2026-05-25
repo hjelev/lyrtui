@@ -403,13 +403,14 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" My Music ");
 
-    let entries: [(&str, &str, &str); 5] = if app.use_nerd_icons {
+    let entries: [(&str, &str, &str); 6] = if app.use_nerd_icons {
         [
             ("\u{F0C0}", "Artists",       "your music library by artist"), // nf-fa-users
             ("\u{F007}", "Album Artists", "artists with full albums"),     // nf-fa-user
             ("\u{F025}", "Albums",        "all albums"),                   // nf-fa-headphones
             ("\u{F001}", "Tracks",        "all tracks"),                   // nf-fa-music
             ("\u{F07B}", "Folders",       "browse by folder"),             // nf-fa-folder
+            ("\u{F0C9}", "Playlists",     "saved playlists"),              // nf-fa-list
         ]
     } else {
         [
@@ -418,6 +419,7 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             ("▸", "Albums",        "all albums"),
             ("▸", "Tracks",        "all tracks"),
             ("▸", "Folders",       "browse by folder"),
+            ("▸", "Playlists",     "saved playlists"),
         ]
     };
 
@@ -581,6 +583,21 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 }
             }).collect();
             draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
+        }
+        LibraryView::Playlists => {
+            let items = app.playlists.iter().map(|p| RowItem {
+                thumb_url: Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&p.id))),
+                line1: if app.use_nerd_icons {
+                    Line::from(vec![
+                        Span::styled("\u{F0C9} ", Style::default().fg(focus_border_color(app.effective_accent()))),  // nf-fa-list
+                        Span::raw(p.name.clone()),
+                    ])
+                } else {
+                    Line::from(Span::raw(p.name.clone()))
+                },
+                line2: Line::from(Span::styled("playlist", Style::default().fg(mid))),
+            }).collect();
+            draw_two_row_list(f, area, " Playlists ", items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
         }
     }
 }

@@ -264,6 +264,22 @@ impl LmsClient {
             .collect())
     }
 
+    pub async fn get_playlists(&self) -> Result<Vec<Playlist>> {
+        let result = self.rpc("", &[json!("playlists"), json!(0), json!(10000)]).await?;
+        let playlists: Vec<Playlist> = result["playlists_loop"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| {
+                let name = v["playlist"].as_str()?.to_string();
+                let id = json!(v["id"].as_u64()?);
+                Some(Playlist { id, name })
+            })
+            .collect();
+        Ok(playlists)
+    }
+
     pub async fn get_artists(&self) -> Result<Vec<Artist>> {
         let result = self.rpc("", &[json!("artists"), json!(0), json!(10000)]).await?;
         let artists: Vec<Artist> = serde_json::from_value(

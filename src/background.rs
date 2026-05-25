@@ -139,6 +139,10 @@ pub fn load_folder_items(folder_id: Option<u32>, client: Arc<LmsClient>, tx: mps
     spawn_if_ok(client, tx, move |c| async move { c.browse_music_folder(folder_id).await }, AppMsg::FolderItemsLoaded);
 }
 
+pub fn load_playlists(client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
+    spawn_if_ok(client, tx, |c| async move { c.get_playlists().await }, AppMsg::PlaylistsLoaded);
+}
+
 pub fn load_all_tracks(client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
     spawn_if_ok(client, tx, |c| async move { c.get_all_tracks().await }, AppMsg::TracksLoaded);
 }
