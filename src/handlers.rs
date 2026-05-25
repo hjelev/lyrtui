@@ -294,6 +294,53 @@ pub async fn handle_mouse_event(
                 app.focus_sidebar = false;
                 let inner_top = main_area.y + 1;
                 let inner_bot = main_area.y + main_area.height.saturating_sub(1);
+
+                // Players view has a special layout: power buttons + global row on top,
+                // then per-player rows. Handle it independently.
+                if matches!(app.main_view, MainView::Players) {
+                    let inner_x = main_area.x + 1;
+                    let pwr_end_x = inner_x + ui::PLAYERS_PWR_BTN_W;
+
+                    if row == inner_top {
+                        // Global row
+                        if col >= inner_x && col < pwr_end_x {
+                            // Global power button: toggle all players on/off
+                            let all_on = !app.players.is_empty()
+                                && app.players.iter().all(|p| p.power > 0);
+                            let turn_on = !all_on;
+                            let pids: Vec<String> =
+                                app.players.iter().map(|p| p.playerid.clone()).collect();
+                            let c = client.clone();
+                            tokio::spawn(async move {
+                                for pid in pids {
+                                    let _ = c.set_power(&pid, turn_on).await;
+                                }
+                            });
+                        } else {
+                            app.players_focus_global = true;
+                        }
+                    } else if row > inner_top && row < inner_bot {
+                        let vis_i = (row - inner_top - 1) as usize;
+                        let player_i = main_state.offset() + vis_i;
+                        if col >= inner_x && col < pwr_end_x {
+                            // Individual player power button
+                            if let Some(p) = app.players.get(player_i) {
+                                let pid = p.playerid.clone();
+                                let turn_on = p.power == 0;
+                                let c = client.clone();
+                                tokio::spawn(async move {
+                                    let _ = c.set_power(&pid, turn_on).await;
+                                });
+                            }
+                        } else if player_i < app.players.len() {
+                            app.players_focus_global = false;
+                            app.main_selected = player_i;
+                            handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
+                        }
+                    }
+                    return;
+                }
+
                 if row >= inner_top && row < inner_bot {
                     let rel = (row - inner_top) as usize;
                     let row_h = if utils::uses_two_row_layout(&app.main_view) {
@@ -1119,16 +1166,23 @@ pub async fn handle_action(
         Action::VolumeDown => adjust_volume(app, vol_sync_tx, -5),
 
         Action::TogglePower => {
-            if let MainView::Players = &app.main_view
-                && !app.players_focus_global
-                && let Some(player) = app.players.get(app.main_selected)
-            {
-                let pid = player.playerid.clone();
-                let turn_on = player.power == 0;
-                let c = client.clone();
-                tokio::spawn(async move {
-                    let _ = c.set_power(&pid, turn_on).await;
-                });
+            if let MainView::Players = &app.main_view {
+                if app.players_focus_global {
+                    let all_on = !app.players.is_empty() && app.players.iter().all(|p| p.power > 0);
+                    let turn_on = !all_on;
+                    let pids: Vec<String> = app.players.iter().map(|p| p.playerid.clone()).collect();
+                    let c = client.clone();
+                    tokio::spawn(async move {
+                        for pid in pids { let _ = c.set_power(&pid, turn_on).await; }
+                    });
+                } else if let Some(player) = app.players.get(app.main_selected) {
+                    let pid = player.playerid.clone();
+                    let turn_on = player.power == 0;
+                    let c = client.clone();
+                    tokio::spawn(async move {
+                        let _ = c.set_power(&pid, turn_on).await;
+                    });
+                }
             }
         }
 
@@ -1202,10 +1256,10 @@ fn now_playing_queue_index(app: &App) -> usize {
         Some(np) => np,
         None => return 0,
     };
-    if let Some(idx) = np.playlist_cur_index {
-        if idx < app.queue.len() {
-            return idx;
-        }
+    if let Some(idx) = np.playlist_cur_index
+        && idx < app.queue.len()
+    {
+        return idx;
     }
     // Fallback: find by title
     let title = &np.title;

@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 const THUMB_W: u16 = 4; // image column width in cells
 const THUMB_SEP: u16 = 1; // gap between image and text
+pub const PLAYERS_PWR_BTN_W: u16 = 3; // width of the power button column in the Players screen
 
 fn sidebar_nerd_icon(item: &SidebarItem) -> &'static str {
     match item {
@@ -96,6 +97,10 @@ fn pill_endcap_right(bg: Color) -> Span<'static> {
 
 fn icon_vol(nerd: bool) -> &'static str {
     if nerd { "\u{F028}" } else { "♪" }
+}
+
+fn icon_power(nerd: bool) -> &'static str {
+    if nerd { "\u{F011}" } else { "⏻" }  // nf-fa-power-off
 }
 
 fn icon_player_dot(nerd: bool) -> &'static str {
@@ -351,7 +356,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             area.height.saturating_sub(2),
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent());
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), app.focus_sidebar);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -569,6 +574,9 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(inner);
 
+    let pwr_w = PLAYERS_PWR_BTN_W as usize;
+    let pwr_icon = icon_power(app.use_nerd_icons);
+
     // --- Global volume row ---
     let global_avg: u8 = if app.players.is_empty() {
         0
@@ -584,20 +592,27 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let glob_fg = if glob_focused { Color::Rgb(220, 235, 255) } else { mid };
 
     let checkbox = if app.global_volume_control { "[x]" } else { "[ ]" };
-    let label = format!(" {} Global vol  ", checkbox);
+    let label_content = format!(" {} Global vol  ", checkbox);
     let vol_str = format!(" {}%", global_avg);
-    // Use char count (display width) so bar aligns with player rows.
-    let label_w: usize = label.chars().count();
-    let bar_w = (chunks[0].width as usize).saturating_sub(label_w + vol_str.len() + 1);
+    // label_w is the width of the non-power-button label prefix — used to align bars.
+    let label_w: usize = label_content.chars().count();
+    let bar_w = (chunks[0].width as usize).saturating_sub(pwr_w + label_w + vol_str.len() + 1);
     let filled = if bar_w > 0 { (global_avg as usize * bar_w) / 100 } else { 0 };
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
 
+    let all_powered = !app.players.is_empty() && app.players.iter().all(|p| p.power > 0);
+    let glob_pwr_fg = if all_powered {
+        focus_border_color(app.effective_accent())
+    } else {
+        btn_dim_color(app.effective_accent())
+    };
     let checkbox_color = if app.global_volume_control {
         focus_border_color(app.effective_accent())
     } else {
         mid
     };
     let global_line = Line::from(vec![
+        Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(btn_bg_color(app.effective_accent()))),
         Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
         Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
         Span::styled(" Global vol  ", Style::default().fg(glob_fg).bg(glob_bg)),
@@ -621,7 +636,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let visible = list_area.height as usize;
 
     // Pin name column so all rows share one bar-start column.
-    // label_w = len(" [x] Global vol  ") = 17; subtract 3 for the " ○ " prefix.
+    // label_content = " [x] Global vol  " = 17 chars; subtract 3 for the " ○ " marker prefix.
     let name_col_w: usize = label_w - 3;
 
     let offset = if !app.players_focus_global {
@@ -642,10 +657,9 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
 
         let marker = if active { "● " } else { "○ " };
-        let power_tag = if powered { "" } else { " [off]" };
-        let name_raw = format!("{}{}{}", marker, p.name, power_tag);
+        let name_raw = format!("{}{}", marker, p.name);
 
-        // Pad/truncate to name_col_w display chars — use > so exact-fit names aren't truncated.
+        // Pad/truncate to name_col_w display chars.
         let name_padded = if name_raw.chars().count() > name_col_w {
             let s: String = name_raw.chars().take(name_col_w.saturating_sub(1)).collect();
             format!("{}…", s)
@@ -662,14 +676,22 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let bar_color = if is_sel { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) };
         let vol_fg = if is_sel { Color::White } else { mid };
 
-        // Use fixed display width (= global label_w) so all bars start and end at the same column.
+        // Power button: accent when on, dim when off (always uses btn_bg_color background).
+        let player_pwr_fg = if powered {
+            focus_border_color(app.effective_accent())
+        } else {
+            btn_dim_color(app.effective_accent())
+        };
+
+        // Use fixed display width (pwr_w + label_w) so all bars start at the same column.
         let vol_str = format!(" {}%", vol);
         let row_w = list_area.width as usize;
-        let bar_w = row_w.saturating_sub(label_w + vol_str.len() + 1);
+        let bar_w = row_w.saturating_sub(pwr_w + label_w + vol_str.len() + 1);
         let filled = if bar_w > 0 { (vol as usize * bar_w) / 100 } else { 0 };
         let bar_str = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
 
         let line = Line::from(vec![
+            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(btn_bg_color(app.effective_accent()))),
             Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
             Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
             Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
@@ -685,7 +707,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             list_area.height,
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent());
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -722,10 +744,10 @@ fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
     let breadcrumb = breadcrumb_str(app.app_nav_stack.iter().map(|n| n.title.as_str()), &app.app_title);
     let title = format!(" {} ", breadcrumb);
     let items = app.app_items.iter().map(|item| {
-        let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
+        let icon = if item.is_playable() { "▶ " } else { "󱍙 " };
         RowItem {
             thumb_url: item.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(fg))),
+            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(Color::White))),
             line2: Line::from(Span::styled(
                 if item.is_playable() { "stream" } else { "folder" },
                 Style::default().fg(mid),
@@ -741,10 +763,10 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
     let breadcrumb = breadcrumb_str(app.fav_nav_stack.iter().map(|n| n.title.as_str()), &app.fav_title);
     let title = format!(" ★ {} ", breadcrumb);
     let items = app.fav_items.iter().map(|item| {
-        let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
+        let icon = if item.is_playable() { "▶ " } else { "󱍙 " };
         RowItem {
             thumb_url: item.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(fg))),
+            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(Color::White))),
             line2: Line::from(Span::styled(
                 if item.is_playable() { "stream" } else { "folder" },
                 Style::default().fg(mid),
@@ -915,7 +937,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             results_area.height,
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent());
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), results_focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -1007,7 +1029,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
             inner.height,
         );
         let mut ss = ScrollbarState::new(max_scroll as usize).position(scroll as usize);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent());
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -1597,7 +1619,7 @@ fn draw_two_row_list(
         );
         let mut ss = ScrollbarState::new(items.len().saturating_sub(visible))
             .position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(accent);
+        let (track_style, thumb_style) = scrollbar_accent_styles(accent, focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -1610,21 +1632,11 @@ fn draw_two_row_list(
 }
 
 /// Returns (track_style, thumb_style) for a scrollbar tinted from the accent color.
-/// Track gets a very dark muted tint; thumb gets the accent at full strength.
-fn scrollbar_accent_styles(accent: Option<[u8; 3]>) -> (Style, Style) {
-    let (tr, tg, tb, ar, ag, ab) = match accent {
-        Some([r, g, b]) => {
-            let tr = (r as u16 * 20 / 100 + 20) as u8;
-            let tg = (g as u16 * 20 / 100 + 20) as u8;
-            let tb = (b as u16 * 20 / 100 + 30) as u8;
-            (tr, tg, tb, r, g, b)
-        }
-        None => (30, 30, 45, 180, 160, 60),
-    };
-    (
-        Style::default().fg(Color::Rgb(tr, tg, tb)),
-        Style::default().fg(Color::Rgb(ar, ag, ab)),
-    )
+/// Uses focus/unfocus border color to match the surrounding panel border.
+fn scrollbar_accent_styles(accent: Option<[u8; 3]>, focused: bool) -> (Style, Style) {
+    let color = if focused { focus_border_color(accent) } else { unfocus_border_color(accent) };
+    let style = Style::default().fg(color);
+    (style, style)
 }
 
 fn value_id_str(v: &Value) -> String {
@@ -1780,10 +1792,13 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
     let popup = compute_context_menu_rect(area, menu.option_count());
     f.render_widget(Clear, popup);
 
+    let accent = focus_border_color(app.effective_accent());
+    let (pill_bg, pill_fg) = pill_colors(true);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(accent))
+        .title_style(Style::default().fg(accent))
         .title(" What do you want to do? ");
 
     let inner = block.inner(popup);
@@ -1795,8 +1810,6 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
         .split(inner);
 
     let options = menu.options();
-    let pill_bg = Color::Cyan;
-    let pill_fg = Color::Black;
     let items: Vec<ListItem> = options.iter().enumerate().map(|(i, o)| {
         if i == menu.selected {
             ListItem::new(Line::from(vec![
