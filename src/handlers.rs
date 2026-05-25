@@ -794,7 +794,7 @@ async fn handle_insert_next(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {
-                    if c.insert_url_next(&pid, &url).await.is_ok() {
+                    if c.insert_url_next_with_title(&pid, &url, &name).await.is_ok() {
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("\"{}\" will play next", name)))
                             .await;
@@ -810,7 +810,7 @@ async fn handle_insert_next(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {
-                    if c.insert_url_next(&pid, &url).await.is_ok() {
+                    if c.insert_url_next_with_title(&pid, &url, &name).await.is_ok() {
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("\"{}\" will play next", name)))
                             .await;
@@ -826,7 +826,7 @@ async fn handle_insert_next(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {
-                    if c.insert_url_next(&pid, &url).await.is_ok() {
+                    if c.insert_url_next_with_title(&pid, &url, &name).await.is_ok() {
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("\"{}\" will play next", name)))
                             .await;
@@ -1750,9 +1750,10 @@ pub async fn handle_main_select(
                 } else if item.is_playable()
                     && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
                 {
+                    let name = item.name.clone();
                     let c = client.clone();
                     tokio::spawn(async move {
-                        let _ = c.play_url(&pid, &url).await;
+                        let _ = c.play_url_with_title(&pid, &url, &name).await;
                     });
                 }
             }
@@ -1777,9 +1778,10 @@ pub async fn handle_main_select(
                 } else if item.is_playable()
                     && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
                 {
+                    let name = item.name.clone();
                     let c = client.clone();
                     tokio::spawn(async move {
-                        let _ = c.play_url(&pid, &url).await;
+                        let _ = c.play_url_with_title(&pid, &url, &name).await;
                     });
                 }
             }
@@ -1803,9 +1805,10 @@ pub async fn handle_main_select(
                 } else if item.is_playable()
                     && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
                 {
+                    let name = item.name.clone();
                     let c = client.clone();
                     tokio::spawn(async move {
-                        let _ = c.play_url(&pid, &url).await;
+                        let _ = c.play_url_with_title(&pid, &url, &name).await;
                     });
                 }
             }
@@ -1900,18 +1903,18 @@ async fn handle_add_parent_to_queue(
             });
         }
         MainView::Radio => {
-            let urls: Vec<String> = app
+            let items: Vec<(String, String)> = app
                 .radio_items
                 .iter()
-                .filter_map(|i| i.url.clone())
+                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
                 .collect();
             let title = app.radio_title.clone();
             let c = client.clone();
             let t = tx.clone();
             tokio::spawn(async move {
                 let mut added = 0usize;
-                for url in &urls {
-                    if c.add_url_to_queue(&pid, url).await.is_ok() {
+                for (name, url) in &items {
+                    if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
                         added += 1;
                     }
                 }
@@ -1927,18 +1930,18 @@ async fn handle_add_parent_to_queue(
             });
         }
         MainView::Apps => {
-            let urls: Vec<String> = app
+            let items: Vec<(String, String)> = app
                 .app_items
                 .iter()
-                .filter_map(|i| i.url.clone())
+                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
                 .collect();
             let title = app.app_title.clone();
             let c = client.clone();
             let t = tx.clone();
             tokio::spawn(async move {
                 let mut added = 0usize;
-                for url in &urls {
-                    if c.add_url_to_queue(&pid, url).await.is_ok() {
+                for (name, url) in &items {
+                    if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
                         added += 1;
                     }
                 }
@@ -1954,18 +1957,18 @@ async fn handle_add_parent_to_queue(
             });
         }
         MainView::Favourites => {
-            let urls: Vec<String> = app
+            let items: Vec<(String, String)> = app
                 .fav_items
                 .iter()
-                .filter_map(|i| i.url.clone())
+                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
                 .collect();
             let title = app.fav_title.clone();
             let c = client.clone();
             let t = tx.clone();
             tokio::spawn(async move {
                 let mut added = 0usize;
-                for url in &urls {
-                    if c.add_url_to_queue(&pid, url).await.is_ok() {
+                for (name, url) in &items {
+                    if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
                         added += 1;
                     }
                 }
@@ -2100,7 +2103,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {
-                    if c.add_url_to_queue(&pid, &url).await.is_ok() {
+                    if c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok() {
                         if queue_was_empty { let _ = c.play(&pid).await; }
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
@@ -2117,7 +2120,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {
-                    if c.add_url_to_queue(&pid, &url).await.is_ok() {
+                    if c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok() {
                         if queue_was_empty { let _ = c.play(&pid).await; }
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
@@ -2134,7 +2137,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {
-                    if c.add_url_to_queue(&pid, &url).await.is_ok() {
+                    if c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok() {
                         if queue_was_empty { let _ = c.play(&pid).await; }
                         let _ = t
                             .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))

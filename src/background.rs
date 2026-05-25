@@ -21,12 +21,18 @@ where
 
 pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
     tokio::spawn(async move {
+        let mut last_queue_timestamp: f64 = -1.0;
         loop {
             if let Ok(np) = client.get_now_playing(&pid).await {
+                let ts = np.playlist_timestamp;
                 let _ = tx.send(AppMsg::NowPlayingUpdated(pid.clone(), np)).await;
-            }
-            if let Ok(q) = client.get_queue(&pid).await {
-                let _ = tx.send(AppMsg::QueueLoaded(pid.clone(), q)).await;
+
+                if ts != last_queue_timestamp
+                    && let Ok(q) = client.get_queue(&pid).await
+                {
+                    last_queue_timestamp = ts;
+                    let _ = tx.send(AppMsg::QueueLoaded(pid.clone(), q)).await;
+                }
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         }

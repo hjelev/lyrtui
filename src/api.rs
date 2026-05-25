@@ -30,6 +30,7 @@ pub struct NowPlaying {
     pub repeat: u8,
     pub artwork_url: Option<String>,
     pub playlist_cur_index: Option<usize>,
+    pub playlist_timestamp: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -223,6 +224,7 @@ impl LmsClient {
                 .as_u64()
                 .or_else(|| result["playlist_cur_index"].as_str().and_then(|s| s.parse().ok()))
                 .map(|i| i as usize),
+            playlist_timestamp: result["playlist_timestamp"].as_f64().unwrap_or(0.0),
         })
     }
 
@@ -488,6 +490,11 @@ impl LmsClient {
         Ok(())
     }
 
+    pub async fn play_url_with_title(&self, player_id: &str, url: &str, title: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("play"), json!(url), json!(title)]).await?;
+        Ok(())
+    }
+
     pub async fn add_track_to_queue(&self, player_id: &str, track_id: &str) -> Result<()> {
         self.playlistcontrol(player_id, "add", "track_id", track_id).await
     }
@@ -516,6 +523,11 @@ impl LmsClient {
 
     pub async fn add_url_to_queue(&self, player_id: &str, url: &str) -> Result<()> {
         self.rpc(player_id, &[json!("playlist"), json!("add"), json!(url)]).await?;
+        Ok(())
+    }
+
+    pub async fn add_url_with_title_to_queue(&self, player_id: &str, url: &str, title: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("add"), json!(url), json!(title)]).await?;
         Ok(())
     }
 
@@ -550,6 +562,11 @@ impl LmsClient {
 
     pub async fn insert_url_next(&self, player_id: &str, url: &str) -> Result<()> {
         self.rpc(player_id, &[json!("playlist"), json!("insert"), json!(url)]).await?;
+        Ok(())
+    }
+
+    pub async fn insert_url_next_with_title(&self, player_id: &str, url: &str, title: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("playlist"), json!("insert"), json!(url), json!(title)]).await?;
         Ok(())
     }
 

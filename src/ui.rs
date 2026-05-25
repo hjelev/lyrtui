@@ -545,22 +545,39 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
 
     let items = app.queue.iter().enumerate().map(|(i, t)| {
         let is_current = t.title == playing_title && !playing_title.is_empty();
-        let (l1_style, l2_style) = if is_current {
+        let (icon_style, title_style, l2_style) = if is_current {
             (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
              Style::default().fg(Color::Green))
         } else {
-            (Style::default().fg(Color::White),
+            (Style::default().fg(mid),
+             Style::default().fg(Color::White),
              Style::default().fg(mid))
+        };
+        let icon = if is_current {
+            if app.use_nerd_icons { "\u{F04B} " } else { "▶ " }
+        } else if app.use_nerd_icons {
+            "\u{F0C7} "
+        } else {
+            "▸ "
         };
         let artist_album = match (t.artist.as_deref(), t.album.as_deref()) {
             (Some(ar), Some(al)) => format!("{} — {}", ar, al),
             (Some(ar), None) => ar.to_string(),
             _ => String::new(),
         };
+        let subtitle = if artist_album.is_empty() {
+            format!("{}", i + 1)
+        } else {
+            format!("{}  {}", i + 1, artist_album)
+        };
         RowItem {
             thumb_url: t.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("{:>3}. {}", i + 1, t.title), l1_style)),
-            line2: Line::from(Span::styled(artist_album, l2_style)),
+            line1: Line::from(vec![
+                Span::styled(icon, icon_style),
+                Span::styled(t.title.clone(), title_style),
+            ]),
+            line2: Line::from(Span::styled(subtitle, l2_style)),
         }
     }).collect();
 
