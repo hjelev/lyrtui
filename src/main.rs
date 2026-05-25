@@ -387,6 +387,11 @@ async fn run(
         }
     }
 
+    if app.active_player != cfg.default_player {
+        cfg.default_player = app.active_player.clone();
+        let _ = cfg.save();
+    }
+
     Ok(())
 }
 
@@ -406,9 +411,16 @@ async fn handle_msg(
         }
         AppMsg::Disconnected => app.connection = ConnectionState::Disconnected,
         AppMsg::PlayersLoaded(players) => {
-            if app.active_player.is_none()
-                && let Some(p) = players.first()
-            {
+            if let Some(pid) = app.active_player.clone() {
+                // Restore saved player: start its loop if it exists in the list.
+                if players.iter().any(|p| p.playerid == pid) {
+                    background::start_now_playing_loop(pid, client.clone(), tx.clone());
+                } else if let Some(p) = players.first() {
+                    // Saved player gone; fall back to first available.
+                    background::start_now_playing_loop(p.playerid.clone(), client.clone(), tx.clone());
+                    app.active_player = Some(p.playerid.clone());
+                }
+            } else if let Some(p) = players.first() {
                 background::start_now_playing_loop(p.playerid.clone(), client.clone(), tx.clone());
                 app.active_player = Some(p.playerid.clone());
             }

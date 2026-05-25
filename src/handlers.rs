@@ -337,6 +337,18 @@ pub async fn handle_mouse_event(
                     let inner_x = main_area.x + 1;
                     let pwr_end_x = inner_x + ui::PLAYERS_PWR_BTN_W;
 
+                    // Mirror the ui.rs dynamic label-width calculation so sync_btn_x matches rendering.
+                    let vol_icon_w: usize = if app.use_nerd_icons { 2 } else { 0 };
+                    let vol_str_w = 1 + vol_icon_w + 4;
+                    let row_w = (main_area.width.saturating_sub(2)) as usize;
+                    let pwr_w = ui::PLAYERS_PWR_BTN_W as usize;
+                    let player_fixed_w = pwr_w + ui::PLAYERS_SYNC_BTN_W as usize + vol_str_w + 1 + 3;
+                    let player_total_flex = row_w.saturating_sub(player_fixed_w);
+                    let player_bar_w = player_total_flex / 2;
+                    let player_name_col_w = player_total_flex.saturating_sub(player_bar_w);
+                    // label = " {name}  " → 1 + name_col_w + 2 = name_col_w + 3
+                    let label_w = player_name_col_w + 3;
+
                     if row == inner_top {
                         // Global row
                         if col >= inner_x && col < pwr_end_x {
@@ -358,8 +370,7 @@ pub async fn handle_mouse_event(
                     } else if row > inner_top && row < inner_bot {
                         let vis_i = (row - inner_top - 1) as usize;
                         let player_i = main_state.offset() + vis_i;
-                        // Sync button starts after power button + fixed label column
-                        let sync_btn_x = pwr_end_x + ui::PLAYERS_LABEL_W as u16;
+                        let sync_btn_x = pwr_end_x + label_w as u16;
                         let sync_btn_end = sync_btn_x + ui::PLAYERS_SYNC_BTN_W;
                         if col >= inner_x && col < pwr_end_x {
                             // Individual player power button

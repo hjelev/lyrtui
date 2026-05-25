@@ -18,7 +18,6 @@ const THUMB_W: u16 = 4; // image column width in cells
 const THUMB_SEP: u16 = 1; // gap between image and text
 pub const PLAYERS_PWR_BTN_W: u16 = 3; // width of the power button column in the Players screen
 pub const PLAYERS_SYNC_BTN_W: u16 = 3; // width of the sync button column " ⇄ "
-pub const PLAYERS_LABEL_W: usize = 17; // matches " [x] Global vol  " — keeps all bars aligned
 
 fn sidebar_nerd_icon(item: &SidebarItem) -> &'static str {
     match item {
@@ -457,7 +456,14 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
         LibraryView::Artists => {
             let items = app.artists.iter().map(|a| RowItem {
                 thumb_url: Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
-                line1: Line::from(Span::raw(a.artist.clone())),
+                line1: if app.use_nerd_icons {
+                    Line::from(vec![
+                        Span::styled("\u{F007} ", Style::default().fg(focus_border_color(app.effective_accent()))),  // nf-fa-user
+                        Span::raw(a.artist.clone()),
+                    ])
+                } else {
+                    Line::from(Span::raw(a.artist.clone()))
+                },
                 line2: Line::from(Span::styled("artist", Style::default().fg(mid))),
             }).collect();
             draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
@@ -467,7 +473,14 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
                 RowItem {
                     thumb_url: Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&a.id))),
-                    line1: Line::from(Span::raw(a.album.clone())),
+                    line1: if app.use_nerd_icons {
+                        Line::from(vec![
+                            Span::styled("\u{F025} ", Style::default().fg(focus_border_color(app.effective_accent()))),  // nf-fa-headphones
+                            Span::raw(a.album.clone()),
+                        ])
+                    } else {
+                        Line::from(Span::raw(a.album.clone()))
+                    },
                     line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
                 }
             }).collect();
@@ -481,10 +494,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 RowItem {
                     thumb_url: t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, value_id_str(id))),
                     line1: Line::from(Span::raw(format!("{:>3}. {}", i + 1, t.title))),
-                    line2: Line::from(Span::styled(
-                        format!("{}  {}", artist, dur),
-                        Style::default().fg(mid),
-                    )),
+                    line2: Line::from(Span::styled(format!("{}  {}", artist, dur), Style::default().fg(mid))),
                 }
             }).collect();
             draw_two_row_list(f, area, title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
@@ -498,7 +508,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
             let items = app.folder_items.iter().map(|item| {
                 let is_track = item.item_type == FolderItemType::Track;
                 let (icon, fg) = if is_track {
-                    ("▶ ", Color::Cyan)
+                    ("▶ ", focus_border_color(app.effective_accent()))
                 } else {
                     ("▸ ", Color::White)
                 };
@@ -583,6 +593,18 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let pwr_w = PLAYERS_PWR_BTN_W as usize;
     let pwr_icon = icon_power(app.use_nerd_icons);
 
+    // Shared layout: compute bar width once so global row and per-player rows are aligned.
+    let vol_icon_str: &str = if app.use_nerd_icons { "\u{F028} " } else { "" };
+    // Pad volume to 3 digits so vol_str width is constant (" 🔊  75%" / "  75%").
+    let vol_str_w = 1 + vol_icon_str.chars().count() + 4; // 1 space + icon + 3 digits + '%'
+    let row_w = chunks[0].width as usize; // same for all rows (vertical split)
+    // Fixed: pwr btn + sync btn + vol string + 1 gap + 3 label padding (" " + "  ")
+    let player_fixed_w = pwr_w + PLAYERS_SYNC_BTN_W as usize + vol_str_w + 1 + 3;
+    let player_total_flex = row_w.saturating_sub(player_fixed_w);
+    let player_bar_w = player_total_flex / 2;
+    // Name column width; also used to align the global label so bars share the same column.
+    let player_name_col_w = player_total_flex.saturating_sub(player_bar_w);
+
     // --- Global volume row ---
     let global_avg: u8 = if app.players.is_empty() {
         0
@@ -598,13 +620,16 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let glob_fg = if glob_focused { Color::Rgb(220, 235, 255) } else { mid };
 
     let checkbox = if app.global_volume_control { "[x]" } else { "[ ]" };
-    let label_content = format!(" {} Global vol  ", checkbox);
-    let vol_str = format!(" {}%", global_avg);
-    // label_w is the width of the non-power-button label prefix — used to align bars.
-    let label_w: usize = label_content.chars().count();
-    let bar_w = (chunks[0].width as usize).saturating_sub(pwr_w + label_w + vol_str.len() + 1);
-    let filled = if bar_w > 0 { (global_avg as usize * bar_w) / 100 } else { 0 };
-    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
+    let vol_str = format!(" {}{:3}%", vol_icon_str, global_avg);
+    let filled = if player_bar_w > 0 { (global_avg as usize * player_bar_w) / 100 } else { 0 };
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(player_bar_w.saturating_sub(filled)));
+
+    // Pad the label suffix so the bar starts at the same column as per-player bars.
+    // Per-player bar starts at: pwr(3) + label(player_name_col_w+3) + sync(3) = player_name_col_w+9.
+    // Global bar must start at: pwr(3) + " "(1) + checkbox(3) + suffix = player_name_col_w+9.
+    // So suffix must be player_name_col_w+9-3-1-3 = player_name_col_w+2 chars.
+    let glob_suffix_w = player_name_col_w + 2; // " Global vol" = 11 core chars + padding
+    let glob_suffix = format!("{:<width$}", " Global vol", width = glob_suffix_w);
 
     let all_powered = !app.players.is_empty() && app.players.iter().all(|p| p.power > 0);
     let glob_pwr_fg = if all_powered {
@@ -618,10 +643,10 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         mid
     };
     let global_line = Line::from(vec![
-        Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(btn_bg_color(app.effective_accent()))),
+        Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
         Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
         Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
-        Span::styled(" Global vol  ", Style::default().fg(glob_fg).bg(glob_bg)),
+        Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
         Span::styled(bar, Style::default().fg(if glob_focused { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) }).bg(glob_bg)),
         Span::styled(&vol_str, Style::default().fg(if glob_focused { Color::White } else { mid }).bg(glob_bg)),
     ]);
@@ -641,10 +666,6 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let total = app.players.len();
     let visible = list_area.height as usize;
 
-    // Pin name column so all rows share one bar-start column.
-    // label_content = " [x] Global vol  " = 17 chars; subtract 3 for the " ○ " marker prefix.
-    let name_col_w: usize = label_w - 3;
-
     let offset = if !app.players_focus_global {
         sync_scroll_offset(state, app.main_selected, visible)
     } else {
@@ -661,6 +682,13 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let powered = p.power > 0;
         let is_sel = focused && !app.players_focus_global && vis_i == app.main_selected;
         let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
+
+        // Use shared bar/name widths so all rows (global + per-player) are aligned.
+        let vol_str = format!(" {}{:3}%", vol_icon_str, vol);
+        let bar_w = player_bar_w;
+        let name_col_w = player_name_col_w;
+        let filled = if bar_w > 0 { (vol as usize * bar_w) / 100 } else { 0 };
+        let bar_str = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
 
         let marker = if active { "● " } else { "○ " };
         let name_raw = format!("{}{}", marker, p.name);
@@ -700,17 +728,10 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             btn_dim_color(app.effective_accent())
         };
 
-        // Use fixed display width (pwr_w + PLAYERS_LABEL_W + sync_btn_w) so all bars align.
-        let vol_str = format!(" {}%", vol);
-        let row_w = list_area.width as usize;
-        let bar_w = row_w.saturating_sub(pwr_w + PLAYERS_LABEL_W + PLAYERS_SYNC_BTN_W as usize + vol_str.len() + 1);
-        let filled = if bar_w > 0 { (vol as usize * bar_w) / 100 } else { 0 };
-        let bar_str = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
-
         let line = Line::from(vec![
-            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(btn_bg_color(app.effective_accent()))),
+            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
             Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
-            Span::styled(" ⇄ ",   Style::default().fg(sync_fg).bg(btn_bg_color(app.effective_accent()))),
+            Span::styled(" ⇄ ",   Style::default().fg(sync_fg).bg(row_bg)),
             Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
             Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
         ]);
@@ -743,7 +764,12 @@ fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
     let breadcrumb = breadcrumb_str(app.radio_nav_stack.iter().map(|n| n.title.as_str()), &app.radio_title);
     let title = format!(" {} ", breadcrumb);
     let items = app.radio_items.iter().map(|item| {
-        let (icon, fg) = if item.is_playable() { ("▶ ", Color::Cyan) } else { ("▸ ", Color::White) };
+        let (icon, fg): (&str, Color) = match (app.use_nerd_icons, item.is_playable()) {
+            (true,  true)  => ("\u{F130} ", focus_border_color(app.effective_accent())),  // nf-fa-microphone
+            (true,  false) => ("\u{F07B} ", Color::White),                                 // nf-fa-folder
+            (false, true)  => ("▶ ", focus_border_color(app.effective_accent())),
+            (false, false) => ("▸ ", Color::White),
+        };
         RowItem {
             thumb_url: item.artwork_url.clone(),
             line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(fg))),
@@ -762,7 +788,12 @@ fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
     let breadcrumb = breadcrumb_str(app.app_nav_stack.iter().map(|n| n.title.as_str()), &app.app_title);
     let title = format!(" {} ", breadcrumb);
     let items = app.app_items.iter().map(|item| {
-        let icon = if item.is_playable() { "▶ " } else { "󱍙 " };
+        let icon = match (app.use_nerd_icons, item.is_playable()) {
+            (true,  true)  => "\u{F130} ",  // nf-fa-microphone
+            (true,  false) => "\u{F07B} ",  // nf-fa-folder
+            (false, true)  => "▶ ",
+            (false, false) => "▸ ",
+        };
         RowItem {
             thumb_url: item.artwork_url.clone(),
             line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(Color::White))),
@@ -781,7 +812,12 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
     let breadcrumb = breadcrumb_str(app.fav_nav_stack.iter().map(|n| n.title.as_str()), &app.fav_title);
     let title = format!(" ★ {} ", breadcrumb);
     let items = app.fav_items.iter().map(|item| {
-        let icon = if item.is_playable() { "▶ " } else { "󱍙 " };
+        let icon = match (app.use_nerd_icons, item.is_playable()) {
+            (true,  true)  => "\u{F130} ",  // nf-fa-microphone
+            (true,  false) => "\u{F07B} ",  // nf-fa-folder
+            (false, true)  => "▶ ",
+            (false, false) => "▸ ",
+        };
         RowItem {
             thumb_url: item.artwork_url.clone(),
             line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(Color::White))),
@@ -896,14 +932,20 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
         let (line1, line2) = match &app.search_results[vis_i] {
             SearchResultItem::Artist(a) => (
                 Line::from(vec![
-                    Span::styled("▸ ", Style::default().fg(Color::White)),
+                    Span::styled(
+                        if app.use_nerd_icons { "\u{F007} " } else { "▸ " },  // nf-fa-user
+                        Style::default().fg(focus_border_color(app.effective_accent())),
+                    ),
                     Span::styled(a.artist.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled("artist", Style::default().fg(mid))),
             ),
             SearchResultItem::Album(alb) => (
                 Line::from(vec![
-                    Span::styled("▸ ", Style::default().fg(Color::Rgb(100, 160, 220))),
+                    Span::styled(
+                        if app.use_nerd_icons { "\u{F025} " } else { "▸ " },  // nf-fa-headphones
+                        Style::default().fg(focus_border_color(app.effective_accent())),
+                    ),
                     Span::styled(alb.album.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled(
@@ -913,7 +955,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             ),
             SearchResultItem::Track(t) => (
                 Line::from(vec![
-                    Span::styled("▶ ", Style::default().fg(Color::Cyan)),
+                    Span::styled("▶ ", Style::default().fg(focus_border_color(app.effective_accent()))),
                     Span::styled(t.title.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled(
@@ -1212,9 +1254,10 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     f.render_widget(Paragraph::new(title_line), rows[0]);
 
     let accent = focus_border_color(app.effective_accent());
+    let artist_label = if app.use_nerd_icons { "  \u{F007} " } else { "  by " };  // nf-fa-user
     let artist_line = Line::from(vec![
         Span::raw(indent),
-        Span::styled("  by ", Style::default().fg(mid)),
+        Span::styled(artist_label, Style::default().fg(mid)),
         Span::styled(np.artist.clone(), Style::default().fg(accent)),
     ]);
     f.render_widget(Paragraph::new(artist_line), rows[1]);
@@ -1223,9 +1266,10 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         Some(y) => format!("  {} ({})", np.album, y),
         None => format!("  {}", np.album),
     };
+    let album_label = if app.use_nerd_icons { "  \u{F025} " } else { "  from " };  // nf-fa-headphones
     let album_line = Line::from(vec![
         Span::raw(indent),
-        Span::styled("  from ", Style::default().fg(mid)),
+        Span::styled(album_label, Style::default().fg(mid)),
         Span::styled(album_text.trim_start().to_string(), Style::default().fg(accent)),
     ]);
     f.render_widget(Paragraph::new(album_line), rows[2]);
