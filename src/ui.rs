@@ -2087,7 +2087,7 @@ fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, ar
     }
 
     // Buttons row
-    let btn_row = rows[1 + n + 1];
+    let btn_row = rows[1 + n + 2];
     let btn_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -2113,12 +2113,12 @@ fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, ar
         btn_cols[1],
     );
 
-    // Hint row
-    let hint_row = rows[1 + n + 2];
-    let hint = Paragraph::new("↑/↓:move  Space:toggle  Tab:buttons  Enter:confirm  Esc:cancel")
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::DarkGray));
-    f.render_widget(hint, hint_row);
+    // // Hint row
+    // let hint_row = rows[1 + n + 2];
+    // let hint = Paragraph::new("↑/↓:move  Space:toggle  Tab:buttons  Enter:confirm  Esc:cancel")
+    //     .alignment(Alignment::Center)
+    //     .style(Style::default().fg(Color::DarkGray));
+    // f.render_widget(hint, hint_row);
 }
 
 /// Returns (popup_rect, player_row_rects, [sync_button_rect, cancel_button_rect]).
