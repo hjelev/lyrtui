@@ -24,6 +24,7 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 - Browse and play installed Lyrion apps (Spotify, Deezer, Bandcamp, etc.) with the same hierarchical navigation — shows a **Loading...** indicator while fetching remote content so navigation never blocks
 - View and jump to items in the playback queue
 - Select and switch between multiple players; toggle player power on/off
+- **Player sync** — click the `⇄` sync button next to any player in the Players view to open a sync modal; check/uncheck other players to join or leave a sync group; confirms or cancels with keyboard or mouse
 - **Global volume control** — toggle a persistent checkbox in the Players view to make `+`/`-` adjust all players simultaneously from any screen; a globe icon (◎) appears in the status panel when active
 - Playback controls: play/pause, next, previous, volume up/down (keyboard and clickable buttons)
 - Toggle **shuffle** (`s`) and cycle **repeat** modes (`r`): off → one → all → repeat-all
@@ -74,6 +75,7 @@ On first launch, lyrtui broadcasts a UDP discovery packet to find a Lyrion serve
 ### Mouse support
 
 - **Left click** on a sidebar item — navigate to that section
+- **Left click** on the `⇄` sync button next to a player (Players view) — opens the sync modal to manage that player's sync group
 - **Left click** on a playable item (track, radio stream, queue entry) — opens an action menu:
   - **Play now** — immediately start playing
   - **Play next** — insert after the current track
@@ -110,6 +112,8 @@ The action menu can be navigated with `↑`/`↓` (or `j`/`k`), confirmed with `
 | `r` | Cycle repeat mode (off → one → all → repeat-all) |
 | `a` | Add selected item to queue |
 | `t` | Toggle player power (in Players view) |
+| `Space` | Toggle sync checkbox (in sync modal) |
+| `Tab` | Switch focus between player list and buttons (in sync modal) |
 | `c` | Open server configuration |
 | ``` | Enable/disable Big Art Mode |
 | `q` / `Ctrl-c` | Quit |
@@ -140,7 +144,7 @@ When `auto_discover = true` (the default), lyrtui sends a SLIM-protocol UDP broa
 
 #### Nerd Font icons
 
-Set `use_nerd_icons = true` to enable Nerd Font glyphs in the sidebar, now-playing bar, and search box. Requires a [Nerd Font](https://www.nerdfonts.com/) installed in your terminal.
+Set `use_nerd_icons = true` to enable Nerd Font glyphs in the sidebar, now-playing bar, search box, and library lists (artist/album icons and volume indicator). Requires a [Nerd Font](https://www.nerdfonts.com/) installed in your terminal.
 
 #### Adaptive theme
 
