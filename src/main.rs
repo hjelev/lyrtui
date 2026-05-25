@@ -481,13 +481,34 @@ async fn handle_msg(
             app.player_sync_groups = groups;
         }
         AppMsg::StatusMsg(msg) => {
+            app.status_message_gen += 1;
+            let seq = app.status_message_gen;
             app.status_message = Some(msg);
+            let t = tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(4)).await;
+                let _ = t.send(AppMsg::ClearStatusMsg(seq)).await;
+            });
+        }
+        AppMsg::ClearStatusMsg(seq) => {
+            if app.status_message_gen == seq {
+                app.status_message = None;
+            }
         }
         AppMsg::SearchResultsLoaded(results) => {
             app.search_results = results;
             app.main_selected = 0;
         }
-        AppMsg::Error(e) => app.status_message = Some(e),
+        AppMsg::Error(e) => {
+            app.status_message_gen += 1;
+            let seq = app.status_message_gen;
+            app.status_message = Some(e);
+            let t = tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(4)).await;
+                let _ = t.send(AppMsg::ClearStatusMsg(seq)).await;
+            });
+        }
         AppMsg::ArtworkLoaded(_) | AppMsg::ThumbnailLoaded(..) | AppMsg::ThumbnailFailed(_) => {
             // handled inline in the event loop
         }

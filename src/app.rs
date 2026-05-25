@@ -213,6 +213,7 @@ pub struct App {
     pub global_volume_control: bool,
 
     pub status_message: Option<String>,
+    pub status_message_gen: u64,
     pub config_modal: Option<ConfigModal>,
     pub context_menu: Option<ContextMenu>,
     pub sync_modal: Option<SyncModal>,
@@ -294,6 +295,7 @@ impl App {
             players_focus_global: false,
             global_volume_control: false,
             status_message: None,
+            status_message_gen: 0,
             config_modal: None,
             context_menu: None,
             sync_modal: None,
@@ -362,6 +364,7 @@ pub enum AppMsg {
     PlayerVolumesLoaded(HashMap<String, u8>),
     PlayerSyncGroupsLoaded(HashMap<String, Vec<String>>),
     StatusMsg(String),
+    ClearStatusMsg(u64),
     SearchResultsLoaded(Vec<SearchResultItem>),
     #[allow(dead_code)]
     Error(String),
