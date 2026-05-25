@@ -268,8 +268,9 @@ pub async fn handle_mouse_event(
                     app.main_selected = now_playing_queue_index(app);
                 }
             }
-            let server_status_area = ui::compute_server_status_area(terminal_area, app.status_height);
-            if point_in(col, row, server_status_area) {
+
+            let title_rect = ui::compute_statusbar_title_area(terminal_area, app.status_height);
+            if point_in(col, row, title_rect) {
                 app.main_view = MainView::Players;
                 app.focus_sidebar = false;
                 app.players_focus_global = false;
@@ -1740,6 +1741,19 @@ async fn handle_add_parent_to_queue(
                             "Added {} items from \"{}\" to queue",
                             added, title
                         )))
+                        .await;
+                }
+            });
+        }
+        MainView::Library(LibraryView::Folder { folder_id: Some(folder_id) }) => {
+            let title = app.folder_title.clone();
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                if c.add_folder_to_queue(&pid, folder_id).await.is_ok() {
+                    if queue_was_empty { let _ = c.play(&pid).await; }
+                    let _ = t
+                        .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", title)))
                         .await;
                 }
             });

@@ -138,23 +138,6 @@ struct RowItem {
     line2: Line<'static>,
 }
 
-/// Returns the Rect of the server-status (Vol%) block at the bottom of the sidebar.
-pub fn compute_server_status_area(area: Rect, status_height: u16) -> Rect {
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
-        .split(area);
-    let panes = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(20), Constraint::Min(1)])
-        .split(outer[0]);
-    let sidebar_split = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(3)])
-        .split(panes[0]);
-    sidebar_split[1]
-}
-
 /// Returns (sidebar_area, main_area) for a given terminal area.
 pub fn compute_areas(area: Rect, status_height: u16) -> (Rect, Rect) {
     let outer = Layout::default()
@@ -257,7 +240,6 @@ pub fn draw(
         } else {
             let footer = if matches!(app.main_view, MainView::Players) {
                 hint_line(&[
-                    ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
                     ("t", "power"), ("Spc", "play/pause"), ("n/p", "next/prev"),
                     ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
                 ], app.effective_accent())
@@ -269,7 +251,6 @@ pub fn draw(
                 }
             } else {
                 hint_line(&[
-                    ("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"),
                     ("a", "add to queue"), ("Spc", "play/pause"), ("n/p", "next/prev"),
                     ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
                 ], app.effective_accent())
@@ -298,36 +279,6 @@ pub fn draw(
     if app.context_menu.is_some() {
         draw_context_menu(f, app, area);
     }
-}
-
-fn draw_server_status(f: &mut Frame, app: &App, area: Rect, _server_host: &str, _server_port: u16) {
-    let player_name = app.active_player.as_ref()
-        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
-        .map(|p| p.name.as_str())
-        .unwrap_or("Status");
-    let title = format!(" {} ", player_name);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(unfocus_border_color(app.effective_accent())))
-        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
-        .title(title);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    let mid = mid_accent_color(app.effective_accent());
-
-    // Volume
-    let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
-    let globe_icon = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("Vol ", Style::default().fg(mid)),
-            Span::styled(format!("{vol}%"), Style::default().fg(Color::White)),
-            Span::styled(globe_icon, Style::default().fg(focus_border_color(app.effective_accent()))),
-        ])),
-        inner,
-    );
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
@@ -1793,6 +1744,15 @@ pub fn compute_full_art_image_rect(area: Rect, app: &App) -> Rect {
         .constraints([Constraint::Length(image_col_w), Constraint::Min(1)])
         .split(content_area);
     cols[0]
+}
+
+/// Returns the top border row of the Now Playing status bar (player name + volume title area).
+pub fn compute_statusbar_title_area(area: Rect, status_height: u16) -> Rect {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .split(area);
+    Rect::new(outer[1].x, outer[1].y, outer[1].width, 1)
 }
 
 /// Returns the album art column rect inside the Now Playing status bar.

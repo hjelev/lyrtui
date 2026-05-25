@@ -81,6 +81,9 @@ pub fn compute_parent_label(app: &App) -> Option<String> {
         MainView::Favourites if !app.fav_items.is_empty() => {
             Some(format!("Add \"{}\" folder to queue", app.fav_title))
         }
+        MainView::Library(LibraryView::Folder { folder_id: Some(_) }) => {
+            Some(format!("Add \"{}\" to queue", app.folder_title))
+        }
         _ => None,
     }
 }
