@@ -273,6 +273,15 @@ impl LmsClient {
         Ok(artists)
     }
 
+    pub async fn get_album_artists(&self) -> Result<Vec<Artist>> {
+        let result = self.rpc("", &[json!("artists"), json!(0), json!(10000), json!("role_id:ALBUMARTIST")]).await?;
+        let artists: Vec<Artist> = serde_json::from_value(
+            result["artists_loop"].clone(),
+        )
+        .unwrap_or_default();
+        Ok(artists)
+    }
+
     pub async fn get_albums(&self, artist_id: Option<&str>) -> Result<Vec<Album>> {
         let mut params = vec![json!("albums"), json!(0), json!(10000), json!("tags:al")];
         if let Some(id) = artist_id {

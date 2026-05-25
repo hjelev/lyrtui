@@ -17,6 +17,10 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
             .artists
             .get(idx)
             .map(|a| format!("{}/music/{}/artist.jpg", base, json_id_to_string(&a.id))),
+        MainView::Library(LibraryView::AlbumArtists) => app
+            .album_artists
+            .get(idx)
+            .map(|a| format!("{}/music/{}/artist.jpg", base, json_id_to_string(&a.id))),
         MainView::Library(LibraryView::Albums { .. }) => app
             .albums
             .get(idx)
@@ -129,8 +133,9 @@ pub fn main_list_len(app: &App) -> usize {
         return app.queue.len();
     }
     match &app.main_view {
-        MainView::MyMusic => 4,
+        MainView::MyMusic => 5,
         MainView::Library(LibraryView::Artists) => app.artists.len(),
+        MainView::Library(LibraryView::AlbumArtists) => app.album_artists.len(),
         MainView::Library(LibraryView::Albums { .. }) => app.albums.len(),
         MainView::Library(LibraryView::Tracks { .. }) => app.tracks.len(),
         MainView::Library(LibraryView::Folder { .. }) => app.folder_items.len(),

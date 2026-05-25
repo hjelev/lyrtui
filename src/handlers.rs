@@ -1257,6 +1257,7 @@ pub async fn handle_action(
                         }
                     }
                     MainView::Library(LibraryView::Artists)
+                    | MainView::Library(LibraryView::AlbumArtists)
                     | MainView::Library(LibraryView::Albums { artist_id: None })
                     | MainView::Library(LibraryView::Tracks { album_id: None }) => {
                         app.main_view = MainView::MyMusic;
@@ -1612,18 +1613,22 @@ pub async fn handle_main_select(
                 app.main_selected = 0;
             }
             1 => {
+                app.main_view = MainView::Library(LibraryView::AlbumArtists);
+                app.main_selected = 0;
+            }
+            2 => {
                 app.is_loading = true;
                 background::load_albums(None, client.clone(), tx.clone());
                 app.main_view = MainView::Library(LibraryView::Albums { artist_id: None });
                 app.main_selected = 0;
             }
-            2 => {
+            3 => {
                 app.is_loading = true;
                 background::load_all_tracks(client.clone(), tx.clone());
                 app.main_view = MainView::Library(LibraryView::Tracks { album_id: None });
                 app.main_selected = 0;
             }
-            3 => {
+            4 => {
                 app.folder_items = vec![];
                 app.folder_nav_stack = vec![];
                 app.folder_title = "Folders".to_string();
@@ -1636,6 +1641,17 @@ pub async fn handle_main_select(
         },
         MainView::Library(LibraryView::Artists) => {
             if let Some(artist) = app.artists.get(app.main_selected) {
+                let id = utils::json_id_to_string(&artist.id);
+                app.is_loading = true;
+                background::load_albums(Some(id.clone()), client.clone(), tx.clone());
+                app.main_view = MainView::Library(LibraryView::Albums {
+                    artist_id: Some(id),
+                });
+                app.main_selected = 0;
+            }
+        }
+        MainView::Library(LibraryView::AlbumArtists) => {
+            if let Some(artist) = app.album_artists.get(app.main_selected) {
                 let id = utils::json_id_to_string(&artist.id);
                 app.is_loading = true;
                 background::load_albums(Some(id.clone()), client.clone(), tx.clone());

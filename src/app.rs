@@ -24,6 +24,7 @@ pub enum SidebarItem {
 #[derive(Debug, Clone)]
 pub enum LibraryView {
     Artists,
+    AlbumArtists,
     Albums { artist_id: Option<String> },
     Tracks { album_id: Option<String> }, // None = all tracks
     Folder { folder_id: Option<u32> },
@@ -164,6 +165,7 @@ pub struct App {
 
     // Library data
     pub artists: Vec<Artist>,
+    pub album_artists: Vec<Artist>,
     pub albums: Vec<Album>,
     pub tracks: Vec<Track>,
 
@@ -249,6 +251,7 @@ impl App {
             now_playing: None,
             queue: vec![],
             artists: vec![],
+            album_artists: vec![],
             albums: vec![],
             tracks: vec![],
             radio_items: vec![],
@@ -338,6 +341,7 @@ pub enum AppMsg {
     NowPlayingUpdated(String, NowPlaying), // player_id, data
     QueueLoaded(String, Vec<Track>),       // player_id, data
     ArtistsLoaded(Vec<Artist>),
+    AlbumArtistsLoaded(Vec<Artist>),
     AlbumsLoaded(Vec<Album>),
     TracksLoaded(Vec<Track>),
     RadioItemsLoaded(Vec<RadioItem>),

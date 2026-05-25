@@ -152,6 +152,9 @@ async fn run(
             if let Ok(artists) = c.get_artists().await {
                 let _ = t.send(AppMsg::ArtistsLoaded(artists)).await;
             }
+            if let Ok(album_artists) = c.get_album_artists().await {
+                let _ = t.send(AppMsg::AlbumArtistsLoaded(album_artists)).await;
+            }
         });
     }
 
@@ -441,6 +444,7 @@ async fn handle_msg(
             }
         }
         AppMsg::ArtistsLoaded(a) => app.artists = a,
+        AppMsg::AlbumArtistsLoaded(a) => app.album_artists = a,
         AppMsg::AlbumsLoaded(a) => {
             app.albums = a;
             app.is_loading = false;

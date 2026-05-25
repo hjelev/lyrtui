@@ -403,19 +403,21 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" My Music ");
 
-    let entries: [(&str, &str, &str); 4] = if app.use_nerd_icons {
+    let entries: [(&str, &str, &str); 5] = if app.use_nerd_icons {
         [
-            ("\u{F0C0}", "Artists", "your music library by artist"), // nf-fa-users
-            ("\u{F025}", "Albums",  "all albums"),                   // nf-fa-headphones
-            ("\u{F001}", "Tracks",  "all tracks"),                   // nf-fa-music
-            ("\u{F07B}", "Folders", "browse by folder"),             // nf-fa-folder
+            ("\u{F0C0}", "Artists",       "your music library by artist"), // nf-fa-users
+            ("\u{F007}", "Album Artists", "artists with full albums"),     // nf-fa-user
+            ("\u{F025}", "Albums",        "all albums"),                   // nf-fa-headphones
+            ("\u{F001}", "Tracks",        "all tracks"),                   // nf-fa-music
+            ("\u{F07B}", "Folders",       "browse by folder"),             // nf-fa-folder
         ]
     } else {
         [
-            ("▸", "Artists", "your music library by artist"),
-            ("▸", "Albums",  "all albums"),
-            ("▸", "Tracks",  "all tracks"),
-            ("▸", "Folders", "browse by folder"),
+            ("▸", "Artists",       "your music library by artist"),
+            ("▸", "Album Artists", "artists with full albums"),
+            ("▸", "Albums",        "all albums"),
+            ("▸", "Tracks",        "all tracks"),
+            ("▸", "Folders",       "browse by folder"),
         ]
     };
 
@@ -467,6 +469,21 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 line2: Line::from(Span::styled("artist", Style::default().fg(mid))),
             }).collect();
             draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
+        }
+        LibraryView::AlbumArtists => {
+            let items = app.album_artists.iter().map(|a| RowItem {
+                thumb_url: Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
+                line1: if app.use_nerd_icons {
+                    Line::from(vec![
+                        Span::styled("\u{F007} ", Style::default().fg(focus_border_color(app.effective_accent()))),  // nf-fa-user
+                        Span::raw(a.artist.clone()),
+                    ])
+                } else {
+                    Line::from(Span::raw(a.artist.clone()))
+                },
+                line2: Line::from(Span::styled("album artist", Style::default().fg(mid))),
+            }).collect();
+            draw_two_row_list(f, area, " Album Artists ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
         }
         LibraryView::Albums { .. } => {
             let items = app.albums.iter().map(|a| {
