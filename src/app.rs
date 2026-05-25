@@ -120,6 +120,18 @@ pub struct ContextMenu {
     pub parent_label: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SyncModal {
+    pub player_id: String,
+    pub player_name: String,
+    pub other_players: Vec<Player>,
+    pub checked: Vec<bool>,
+    pub initial_synced_ids: Vec<String>,
+    pub list_selected: usize,
+    pub focus_buttons: bool,
+    pub selected_button: u8, // 0 = Synchronize, 1 = Cancel
+}
+
 impl ContextMenu {
     pub fn new(parent_label: Option<String>) -> Self {
         Self { selected: 0, parent_label }
@@ -178,6 +190,8 @@ pub struct App {
 
     // Per-player volumes (updated by background polling)
     pub player_volumes: HashMap<String, u8>,
+    // Per-player sync group members (updated by background polling)
+    pub player_sync_groups: HashMap<String, Vec<String>>,
 
     // UI state
     pub sidebar_selected: usize,
@@ -191,6 +205,7 @@ pub struct App {
     pub status_message: Option<String>,
     pub config_modal: Option<ConfigModal>,
     pub context_menu: Option<ContextMenu>,
+    pub sync_modal: Option<SyncModal>,
     pub confirm_clear_queue: bool,
     pub clear_queue_selected_button: u8, // 0 = OK, 1 = Cancel
     pub confirm_delete_queue_item: Option<usize>, // Some(idx) when pending confirmation
@@ -248,6 +263,7 @@ impl App {
             folder_nav_stack: vec![],
             folder_title: "Folders".to_string(),
             player_volumes: HashMap::new(),
+            player_sync_groups: HashMap::new(),
             sidebar_selected: 0,
             main_selected: 0,
             sidebar_items: vec![
@@ -267,6 +283,7 @@ impl App {
             status_message: None,
             config_modal: None,
             context_menu: None,
+            sync_modal: None,
             confirm_clear_queue: false,
             clear_queue_selected_button: 0,
             confirm_delete_queue_item: None,
@@ -328,6 +345,7 @@ pub enum AppMsg {
     ThumbnailLoaded(String, Vec<u8>), // url, bytes
     ThumbnailFailed(String),          // url
     PlayerVolumesLoaded(HashMap<String, u8>),
+    PlayerSyncGroupsLoaded(HashMap<String, Vec<String>>),
     StatusMsg(String),
     SearchResultsLoaded(Vec<SearchResultItem>),
     #[allow(dead_code)]

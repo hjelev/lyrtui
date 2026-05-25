@@ -1,5 +1,5 @@
 use crate::api::{FolderItemType, NowPlaying};
-use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView, SearchResultItem, SidebarItem};
+use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView, SearchResultItem, SidebarItem, SyncModal};
 use serde_json::Value;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -17,6 +17,8 @@ use std::collections::HashMap;
 const THUMB_W: u16 = 4; // image column width in cells
 const THUMB_SEP: u16 = 1; // gap between image and text
 pub const PLAYERS_PWR_BTN_W: u16 = 3; // width of the power button column in the Players screen
+pub const PLAYERS_SYNC_BTN_W: u16 = 3; // width of the sync button column " ⇄ "
+pub const PLAYERS_LABEL_W: usize = 17; // matches " [x] Global vol  " — keeps all bars aligned
 
 fn sidebar_nerd_icon(item: &SidebarItem) -> &'static str {
     match item {
@@ -245,7 +247,7 @@ pub fn draw(
         } else {
             let footer = if matches!(app.main_view, MainView::Players) {
                 hint_line(&[
-                    ("t", "power"), ("Spc", "play/pause"), ("n/p", "next/prev"),
+                    ("t", "power"), ("s", "sync"), ("Spc", "play/pause"), ("n/p", "next/prev"),
                     ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
                 ], app.effective_accent())
             } else if matches!(app.main_view, MainView::Search) {
@@ -270,6 +272,10 @@ pub fn draw(
 
     if let Some(modal) = &app.config_modal {
         draw_config_modal(f, modal, app.effective_accent());
+    }
+
+    if let Some(modal) = &app.sync_modal {
+        draw_sync_modal(f, modal, app.effective_accent(), area);
     }
 
     if app.confirm_clear_queue {
@@ -683,16 +689,28 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             btn_dim_color(app.effective_accent())
         };
 
-        // Use fixed display width (pwr_w + label_w) so all bars start at the same column.
+        // Sync button — bright accent if player is currently in a sync group, dim otherwise
+        let is_synced = app.player_sync_groups
+            .get(&p.playerid)
+            .map(|v| !v.is_empty())
+            .unwrap_or(false);
+        let sync_fg = if is_synced {
+            focus_border_color(app.effective_accent())
+        } else {
+            btn_dim_color(app.effective_accent())
+        };
+
+        // Use fixed display width (pwr_w + PLAYERS_LABEL_W + sync_btn_w) so all bars align.
         let vol_str = format!(" {}%", vol);
         let row_w = list_area.width as usize;
-        let bar_w = row_w.saturating_sub(pwr_w + label_w + vol_str.len() + 1);
+        let bar_w = row_w.saturating_sub(pwr_w + PLAYERS_LABEL_W + PLAYERS_SYNC_BTN_W as usize + vol_str.len() + 1);
         let filled = if bar_w > 0 { (vol as usize * bar_w) / 100 } else { 0 };
         let bar_str = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
 
         let line = Line::from(vec![
             Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(btn_bg_color(app.effective_accent()))),
             Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
+            Span::styled(" ⇄ ",   Style::default().fg(sync_fg).bg(btn_bg_color(app.effective_accent()))),
             Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
             Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
         ]);
@@ -1473,12 +1491,7 @@ fn draw_full_art_mode(
     let player_icon = icon_player_dot(app.use_nerd_icons);
     let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
     let vol_str = format!("{}%", vol);
-    let right_w = (1 + player_icon.chars().count() + 1
-        + player_name.chars().count()
-        + 2 + vol_icon.chars().count() + 1
-        + vol_str.chars().count()
-        + globe.chars().count()
-        + 1) as u16;
+    let right_w = art_footer_player_width(app);
 
     let footer_cols = Layout::default()
         .direction(Direction::Horizontal)
@@ -1743,6 +1756,39 @@ pub fn compute_full_art_footer_exit_rect(area: Rect) -> Rect {
     Rect::new(area.x, footer_y, 12, 1)
 }
 
+fn art_footer_player_width(app: &App) -> u16 {
+    let player_name = app.active_player.as_ref()
+        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "—".to_string());
+    let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
+    let vol_icon = icon_vol(app.use_nerd_icons);
+    let player_icon = icon_player_dot(app.use_nerd_icons);
+    let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
+    let vol_str = format!("{}%", vol);
+    (1 + player_icon.chars().count() + 1
+        + player_name.chars().count()
+        + 2 + vol_icon.chars().count() + 1
+        + vol_str.chars().count()
+        + globe.chars().count()
+        + 1) as u16
+}
+
+/// Returns the rect covering the player name + volume area in the art mode footer (right side).
+pub fn compute_full_art_footer_player_rect(area: Rect, app: &App) -> Rect {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(area);
+    let footer_area = outer[1];
+    let right_w = art_footer_player_width(app);
+    let footer_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(1), Constraint::Length(right_w)])
+        .split(footer_area);
+    footer_cols[1]
+}
+
 /// Returns the left-column image area in full art mode.
 pub fn compute_full_art_image_rect(area: Rect, app: &App) -> Rect {
     let outer = Layout::default()
@@ -1933,6 +1979,124 @@ pub fn compute_clear_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
     let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
     let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
     (popup, [ok_rect, cancel_rect])
+}
+
+fn sync_modal_popup_height(n_players: usize) -> u16 {
+    // border(2) + pad(1) + player_rows(n) + pad(1) + buttons(1) + hint(1) = n + 6
+    (n_players as u16) + 6
+}
+
+fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, area: Rect) {
+    let n = modal.other_players.len();
+    let height = sync_modal_popup_height(n);
+    let popup = centered_rect_abs(54, height, area);
+
+    f.render_widget(Clear, popup);
+
+    let accent_color = accent
+        .map(|c| Color::Rgb(c[0], c[1], c[2]))
+        .unwrap_or(Color::Yellow);
+
+    let title = format!(" Sync: {} ", modal.player_name);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent_color))
+        .title_style(Style::default().fg(accent_color))
+        .title(title);
+
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    // Layout: pad | player rows (n) | pad | buttons | hint
+    let mut constraints = vec![Constraint::Length(1)];
+    for _ in 0..n {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Length(1)); // pad
+    constraints.push(Constraint::Length(1)); // buttons
+    constraints.push(Constraint::Length(1)); // hint
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(inner);
+
+    // Player rows start at index 1
+    for (i, player) in modal.other_players.iter().enumerate() {
+        let row_idx = 1 + i;
+        let checked = modal.checked.get(i).copied().unwrap_or(false);
+        let is_sel = !modal.focus_buttons && modal.list_selected == i;
+
+        let checkbox = if checked { "[x]" } else { "[ ]" };
+        let check_fg = if checked { accent_color } else { Color::DarkGray };
+        let row_bg = if is_sel { Color::Rgb(45, 100, 170) } else { Color::Reset };
+        let name_fg = if is_sel { Color::Rgb(220, 235, 255) } else { Color::White };
+
+        let row_line = Line::from(vec![
+            Span::styled(" ", Style::default().bg(row_bg)),
+            Span::styled(checkbox, Style::default().fg(check_fg).bg(row_bg)),
+            Span::styled(" ", Style::default().bg(row_bg)),
+            Span::styled(player.name.clone(), Style::default().fg(name_fg).bg(row_bg)),
+        ]);
+        f.render_widget(Paragraph::new(row_line), rows[row_idx]);
+    }
+
+    // Buttons row
+    let btn_row = rows[1 + n + 1];
+    let btn_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(btn_row);
+
+    let sync_style = if modal.focus_buttons && modal.selected_button == 0 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let cancel_style = if modal.focus_buttons && modal.selected_button == 1 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    f.render_widget(
+        Paragraph::new("[ Synchronize ]").alignment(Alignment::Center).style(sync_style),
+        btn_cols[0],
+    );
+    f.render_widget(
+        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        btn_cols[1],
+    );
+
+    // Hint row
+    let hint_row = rows[1 + n + 2];
+    let hint = Paragraph::new("↑/↓:move  Space:toggle  Tab:buttons  Enter:confirm  Esc:cancel")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
+    f.render_widget(hint, hint_row);
+}
+
+/// Returns (popup_rect, player_row_rects, [sync_button_rect, cancel_button_rect]).
+pub fn compute_sync_modal_rects(area: Rect, n_players: usize) -> (Rect, Vec<Rect>, [Rect; 2]) {
+    let height = sync_modal_popup_height(n_players);
+    let popup = centered_rect_abs(54, height, area);
+    let inner_x = popup.x + 1;
+    let inner_y = popup.y + 1;
+    let inner_w = popup.width.saturating_sub(2);
+
+    // player rows start at inner_y + 1 (after top pad)
+    let player_rects: Vec<Rect> = (0..n_players)
+        .map(|i| Rect::new(inner_x, inner_y + 1 + i as u16, inner_w, 1))
+        .collect();
+
+    // buttons row: inner_y + 1(pad) + n(players) + 1(pad) = inner_y + n + 2
+    let btn_y = inner_y + 1 + n_players as u16 + 1;
+    let half_w = inner_w / 2;
+    let sync_rect = Rect::new(inner_x, btn_y, half_w, 1);
+    let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
+
+    (popup, player_rects, [sync_rect, cancel_rect])
 }
 
 fn draw_confirm_delete_queue_item(f: &mut Frame, title: &str, selected_button: u8, accent: Option<[u8; 3]>) {

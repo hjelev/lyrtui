@@ -9,7 +9,7 @@ use ratatui::widgets::ListState;
 use crate::api::{FolderItemType, LmsClient};
 use crate::app::{
     App, AppMsg, ConnectionState, ContextMenu, FolderNav, LibraryView, MainView,
-    RadioNav, SearchResultItem, SidebarItem,
+    RadioNav, SearchResultItem, SidebarItem, SyncModal,
 };
 use crate::events::Action;
 use crate::{background, config, ui, utils};
@@ -40,6 +40,31 @@ pub async fn handle_mouse_event(
     let (sidebar_area, main_area) = ui::compute_areas(terminal_area, app.status_height);
     let col = mouse.column;
     let row = mouse.row;
+
+    // Sync modal intercepts all mouse events when open
+    if app.sync_modal.is_some() {
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let n = app.sync_modal.as_ref().map(|m| m.other_players.len()).unwrap_or(0);
+            let (popup, player_rects, [sync_rect, cancel_rect]) =
+                ui::compute_sync_modal_rects(terminal_area, n);
+            if point_in(col, row, sync_rect) {
+                apply_sync(app, client);
+            } else if point_in(col, row, cancel_rect) {
+                app.sync_modal = None;
+            } else if let Some(modal) = app.sync_modal.as_mut() {
+                if let Some(i) = player_rects.iter().position(|r| point_in(col, row, *r)) {
+                    modal.focus_buttons = false;
+                    modal.list_selected = i;
+                    if let Some(c) = modal.checked.get_mut(i) {
+                        *c = !*c;
+                    }
+                } else if !point_in(col, row, popup) {
+                    app.sync_modal = None;
+                }
+            }
+        }
+        return;
+    }
 
     // Clear queue dialog intercepts all mouse events when open
     if app.confirm_clear_queue {
@@ -215,6 +240,17 @@ pub async fn handle_mouse_event(
                         }
                     }
                 }
+                let player_rect = ui::compute_full_art_footer_player_rect(terminal_area, app);
+                if point_in(col, row, player_rect) {
+                    app.full_art_mode = false;
+                    cfg.full_art_mode = false;
+                    let _ = cfg.save();
+                    app.main_view = MainView::Players;
+                    app.focus_sidebar = false;
+                    app.players_focus_global = false;
+                    app.main_selected = 0;
+                    return;
+                }
             }
             MouseEventKind::ScrollUp => {
                 let queue_rect = ui::compute_full_art_queue_rect(terminal_area, app);
@@ -322,6 +358,9 @@ pub async fn handle_mouse_event(
                     } else if row > inner_top && row < inner_bot {
                         let vis_i = (row - inner_top - 1) as usize;
                         let player_i = main_state.offset() + vis_i;
+                        // Sync button starts after power button + fixed label column
+                        let sync_btn_x = pwr_end_x + ui::PLAYERS_LABEL_W as u16;
+                        let sync_btn_end = sync_btn_x + ui::PLAYERS_SYNC_BTN_W;
                         if col >= inner_x && col < pwr_end_x {
                             // Individual player power button
                             if let Some(p) = app.players.get(player_i) {
@@ -332,6 +371,8 @@ pub async fn handle_mouse_event(
                                     let _ = c.set_power(&pid, turn_on).await;
                                 });
                             }
+                        } else if col >= sync_btn_x && col < sync_btn_end {
+                            open_sync_modal(app, player_i);
                         } else if player_i < app.players.len() {
                             app.players_focus_global = false;
                             app.main_selected = player_i;
@@ -413,6 +454,135 @@ pub async fn handle_context_menu_key(
         }
         KeyCode::Esc | KeyCode::Char('q') => {
             app.context_menu = None;
+        }
+        _ => {}
+    }
+}
+
+pub fn open_sync_modal(app: &mut App, player_index: usize) {
+    let Some(player) = app.players.get(player_index) else {
+        return;
+    };
+    let pid = player.playerid.clone();
+    let player_name = player.name.clone();
+    let synced_ids = app.player_sync_groups.get(&pid).cloned().unwrap_or_default();
+    let other_players: Vec<_> = app.players.iter().filter(|p| p.playerid != pid).cloned().collect();
+    let checked = other_players
+        .iter()
+        .map(|p| synced_ids.iter().any(|id| id.eq_ignore_ascii_case(&p.playerid)))
+        .collect();
+    app.sync_modal = Some(SyncModal {
+        player_id: pid,
+        player_name,
+        initial_synced_ids: synced_ids,
+        other_players,
+        checked,
+        list_selected: 0,
+        focus_buttons: false,
+        selected_button: 0,
+    });
+}
+
+fn apply_sync(app: &mut App, client: &Arc<LmsClient>) {
+    let Some(modal) = app.sync_modal.take() else {
+        return;
+    };
+    let now_checked: Vec<String> = modal.other_players.iter()
+        .zip(modal.checked.iter())
+        .filter(|(_, c)| **c)
+        .map(|(p, _)| p.playerid.clone())
+        .collect();
+
+    // Unsync players that were synced but are now unchecked
+    for pid in &modal.initial_synced_ids {
+        if !now_checked.contains(pid) {
+            let c = client.clone();
+            let pid = pid.clone();
+            tokio::spawn(async move { let _ = c.unsync(&pid).await; });
+        }
+    }
+    // Sync newly checked players (each joins player_id's group)
+    for pid in &now_checked {
+        let c = client.clone();
+        let pid = pid.clone();
+        let master = modal.player_id.clone();
+        tokio::spawn(async move { let _ = c.sync_with(&pid, &master).await; });
+    }
+    // If all are unchecked and self was in a group, unsync self too
+    if now_checked.is_empty() && !modal.initial_synced_ids.is_empty() {
+        let c = client.clone();
+        let pid = modal.player_id.clone();
+        tokio::spawn(async move { let _ = c.unsync(&pid).await; });
+    }
+}
+
+pub async fn handle_sync_modal_key(
+    app: &mut App,
+    key: KeyEvent,
+    client: &Arc<LmsClient>,
+) {
+    let Some(modal) = app.sync_modal.as_mut() else {
+        return;
+    };
+    let n = modal.other_players.len();
+    match key.code {
+        KeyCode::Esc => {
+            app.sync_modal = None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if !modal.focus_buttons {
+                if modal.list_selected > 0 {
+                    modal.list_selected -= 1;
+                }
+            } else {
+                modal.focus_buttons = false;
+                if n > 0 {
+                    modal.list_selected = n - 1;
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if !modal.focus_buttons {
+                if modal.list_selected + 1 < n {
+                    modal.list_selected += 1;
+                } else {
+                    modal.focus_buttons = true;
+                }
+            }
+        }
+        KeyCode::Tab => {
+            modal.focus_buttons = !modal.focus_buttons;
+        }
+        KeyCode::Char(' ') => {
+            if !modal.focus_buttons
+                && let Some(c) = modal.checked.get_mut(modal.list_selected)
+            {
+                *c = !*c;
+            }
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            if modal.focus_buttons {
+                modal.selected_button = 0;
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            if modal.focus_buttons {
+                modal.selected_button = 1;
+            }
+        }
+        KeyCode::Enter => {
+            if modal.focus_buttons {
+                if modal.selected_button == 0 {
+                    apply_sync(app, client);
+                } else {
+                    app.sync_modal = None;
+                }
+            } else {
+                // Toggle checkbox on Enter when list is focused
+                if let Some(c) = modal.checked.get_mut(modal.list_selected) {
+                    *c = !*c;
+                }
+            }
         }
         _ => {}
     }

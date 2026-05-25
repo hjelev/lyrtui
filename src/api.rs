@@ -349,6 +349,30 @@ impl LmsClient {
         Ok(result["mixer volume"].as_f64().unwrap_or(0.0) as u8)
     }
 
+    pub async fn get_synced_players(&self, player_id: &str) -> Result<Vec<String>> {
+        let result = self.rpc(player_id, &[json!("status"), json!("-"), json!(0)]).await?;
+        let mut ids = vec![];
+        if let Some(master) = result["sync_master"].as_str().filter(|s| !s.is_empty() && *s != player_id) {
+            ids.push(master.to_string());
+        }
+        if let Some(slaves) = result["sync_slaves"].as_str().filter(|s| !s.is_empty()) {
+            ids.extend(slaves.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != player_id));
+        }
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
+    }
+
+    pub async fn sync_with(&self, player_id: &str, target_id: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("sync"), json!(target_id)]).await?;
+        Ok(())
+    }
+
+    pub async fn unsync(&self, player_id: &str) -> Result<()> {
+        self.rpc(player_id, &[json!("sync"), json!("-")]).await?;
+        Ok(())
+    }
+
     pub async fn set_power(&self, player_id: &str, on: bool) -> Result<()> {
         self.rpc(player_id, &[json!("power"), json!(if on { 1 } else { 0 })]).await?;
         Ok(())

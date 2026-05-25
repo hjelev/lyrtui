@@ -120,13 +120,20 @@ async fn run(
                                 players.iter().map(|p| p.playerid.clone()).collect();
                             let _ = t.send(AppMsg::PlayersLoaded(players)).await;
                             let mut volumes = std::collections::HashMap::new();
-                            for pid in pids {
-                                if let Ok(vol) = c.get_player_volume(&pid).await {
-                                    volumes.insert(pid, vol);
+                            let mut sync_groups = std::collections::HashMap::new();
+                            for pid in &pids {
+                                if let Ok(vol) = c.get_player_volume(pid).await {
+                                    volumes.insert(pid.clone(), vol);
+                                }
+                                if let Ok(synced) = c.get_synced_players(pid).await {
+                                    sync_groups.insert(pid.clone(), synced);
                                 }
                             }
                             if !volumes.is_empty() {
                                 let _ = t.send(AppMsg::PlayerVolumesLoaded(volumes)).await;
+                            }
+                            if !sync_groups.is_empty() {
+                                let _ = t.send(AppMsg::PlayerSyncGroupsLoaded(sync_groups)).await;
                             }
                         }
                     }
@@ -295,12 +302,15 @@ async fn run(
         let had_overlay = app.confirm_delete_queue_item.is_some()
             || app.confirm_clear_queue
             || app.config_modal.is_some()
-            || app.context_menu.is_some();
+            || app.context_menu.is_some()
+            || app.sync_modal.is_some();
 
         match poll_event(TICK_RATE)? {
             InputEvent::Key(key) => {
                 if app.config_modal.is_some() {
                     handlers::handle_config_key(&mut app, key, &mut cfg, &client);
+                } else if app.sync_modal.is_some() {
+                    handlers::handle_sync_modal_key(&mut app, key, &client).await;
                 } else if app.confirm_clear_queue {
                     handlers::handle_confirm_clear_queue_key(&mut app, key, &client, &tx).await;
                 } else if app.confirm_delete_queue_item.is_some() {
@@ -309,6 +319,12 @@ async fn run(
                     handlers::handle_context_menu_key(&mut app, key, &client, &tx).await;
                 } else if matches!(app.main_view, MainView::Search) && app.search_input_active {
                     handlers::handle_search_input_key(&mut app, key, &client, &tx).await;
+                } else if matches!(app.main_view, MainView::Players)
+                    && !app.focus_sidebar
+                    && matches!(key.code, crossterm::event::KeyCode::Char('s'))
+                {
+                    let idx = app.main_selected;
+                    handlers::open_sync_modal(&mut app, idx);
                 } else {
                     let action = key_to_action(key);
                     if matches!(action, Action::OpenConfig) {
@@ -362,7 +378,8 @@ async fn run(
         let has_overlay = app.confirm_delete_queue_item.is_some()
             || app.confirm_clear_queue
             || app.config_modal.is_some()
-            || app.context_menu.is_some();
+            || app.context_menu.is_some()
+            || app.sync_modal.is_some();
         if had_overlay && !has_overlay
             && let Some(img) = &last_artwork_image
         {
@@ -441,6 +458,9 @@ async fn handle_msg(
         }
         AppMsg::PlayerVolumesLoaded(volumes) => {
             app.player_volumes = volumes;
+        }
+        AppMsg::PlayerSyncGroupsLoaded(groups) => {
+            app.player_sync_groups = groups;
         }
         AppMsg::StatusMsg(msg) => {
             app.status_message = Some(msg);
