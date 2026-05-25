@@ -64,9 +64,9 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
     }
 }
 
-pub fn compute_parent_label(app: &App) -> Option<String> {
+pub fn compute_parent_labels(app: &App) -> (Option<String>, Option<String>) {
     match &app.main_view {
-        MainView::Search => None,
+        MainView::Search => (None, None),
         MainView::Library(LibraryView::Tracks { album_id: Some(id) }) => {
             let name = app
                 .albums
@@ -74,21 +74,28 @@ pub fn compute_parent_label(app: &App) -> Option<String> {
                 .find(|a| json_id_to_string(&a.id) == *id)
                 .map(|a| a.album.clone())
                 .unwrap_or_else(|| "album".to_string());
-            Some(format!("Add \"{}\" to queue", name))
+            (
+                Some(format!("Add \"{}\" to queue", name)),
+                Some(format!("Replace queue with \"{}\"", name)),
+            )
         }
-        MainView::Radio if !app.radio_items.is_empty() => {
-            Some(format!("Add \"{}\" folder to queue", app.radio_title))
-        }
-        MainView::Apps if !app.app_items.is_empty() => {
-            Some(format!("Add \"{}\" folder to queue", app.app_title))
-        }
-        MainView::Favourites if !app.fav_items.is_empty() => {
-            Some(format!("Add \"{}\" folder to queue", app.fav_title))
-        }
-        MainView::Library(LibraryView::Folder { folder_id: Some(_) }) => {
-            Some(format!("Add \"{}\" to queue", app.folder_title))
-        }
-        _ => None,
+        MainView::Radio if !app.radio_items.is_empty() => (
+            Some(format!("Add \"{}\" folder to queue", app.radio_title)),
+            Some(format!("Replace queue with \"{}\" folder", app.radio_title)),
+        ),
+        MainView::Apps if !app.app_items.is_empty() => (
+            Some(format!("Add \"{}\" folder to queue", app.app_title)),
+            Some(format!("Replace queue with \"{}\" folder", app.app_title)),
+        ),
+        MainView::Favourites if !app.fav_items.is_empty() => (
+            Some(format!("Add \"{}\" folder to queue", app.fav_title)),
+            Some(format!("Replace queue with \"{}\" folder", app.fav_title)),
+        ),
+        MainView::Library(LibraryView::Folder { folder_id: Some(_) }) => (
+            Some(format!("Add \"{}\" to queue", app.folder_title)),
+            Some(format!("Replace queue with \"{}\"", app.folder_title)),
+        ),
+        _ => (None, None),
     }
 }
 

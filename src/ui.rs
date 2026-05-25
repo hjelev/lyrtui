@@ -505,13 +505,43 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
         }
         LibraryView::Tracks { album_id } => {
             let title = if album_id.is_some() { " Tracks " } else { " All Tracks " };
+            let playing_title = app.now_playing.as_ref().map(|n| n.title.as_str()).unwrap_or("");
             let items = app.tracks.iter().enumerate().map(|(i, t)| {
-                let dur = t.duration.map(format_duration).unwrap_or_default();
-                let artist = t.artist.as_deref().unwrap_or("");
+                let is_current = t.title == playing_title && !playing_title.is_empty();
+                let (icon_style, title_style, l2_style) = if is_current {
+                    (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                     Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                     Style::default().fg(Color::Green))
+                } else {
+                    (Style::default().fg(mid),
+                     Style::default().fg(Color::White),
+                     Style::default().fg(mid))
+                };
+                let icon = if is_current {
+                    if app.use_nerd_icons { "\u{F04B} " } else { "▶ " }
+                } else if app.use_nerd_icons {
+                    "\u{F001} "
+                } else {
+                    "▸ "
+                };
+                let artist_album = match (t.artist.as_deref(), t.album.as_deref()) {
+                    (Some(ar), Some(al)) => format!("{} — {}", ar, al),
+                    (Some(ar), None) => ar.to_string(),
+                    _ => String::new(),
+                };
+                let subtitle = if artist_album.is_empty() {
+                    format!("{}", i + 1)
+                } else {
+                    format!("{}  {}", i + 1, artist_album)
+                };
                 RowItem {
-                    thumb_url: t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, value_id_str(id))),
-                    line1: Line::from(Span::raw(format!("{:>3}. {}", i + 1, t.title))),
-                    line2: Line::from(Span::styled(format!("{}  {}", artist, dur), Style::default().fg(mid))),
+                    thumb_url: t.artwork_url.clone()
+                        .or_else(|| t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, value_id_str(id)))),
+                    line1: Line::from(vec![
+                        Span::styled(icon, icon_style),
+                        Span::styled(t.title.clone(), title_style),
+                    ]),
+                    line2: Line::from(Span::styled(subtitle, l2_style)),
                 }
             }).collect();
             draw_two_row_list(f, area, title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
@@ -574,7 +604,7 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
         let icon = if is_current {
             if app.use_nerd_icons { "\u{F04B} " } else { "▶ " }
         } else if app.use_nerd_icons {
-            "\u{F0C7} "
+            "\u{F001} "  // nf-fa-music (tracks icon)
         } else {
             "▸ "
         };
@@ -1907,7 +1937,7 @@ pub fn compute_statusbar_art_rect(area: Rect, status_height: u16, art_col_w: u16
 }
 
 pub fn compute_context_menu_rect(area: Rect, option_count: usize) -> Rect {
-    centered_rect_abs(44, (option_count + 3) as u16, area)
+    centered_rect_abs(44, (option_count + 2) as u16, area)
 }
 
 fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
@@ -1928,12 +1958,8 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
-        .split(inner);
-
     let options = menu.options();
+    let last = options.len() - 1;
     let items: Vec<ListItem> = options.iter().enumerate().map(|(i, o)| {
         if i == menu.selected {
             ListItem::new(Line::from(vec![
@@ -1941,6 +1967,8 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(format!(" {} ", o), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
                 pill_endcap_right(pill_bg),
             ]))
+        } else if i == last {
+            ListItem::new(Line::from(Span::styled(format!("  {}", o), Style::default().fg(Color::DarkGray))))
         } else {
             ListItem::new(Line::from(Span::raw(format!("  {}", o))))
         }
@@ -1953,10 +1981,7 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
         .highlight_style(Style::default())
         .highlight_symbol("");
 
-    f.render_stateful_widget(list, rows[0], &mut state);
-
-    let hint = Paragraph::new(hint_line(&[("↑/↓", "move"), ("Enter", "confirm"), ("Esc", "cancel")], app.effective_accent()));
-    f.render_widget(hint, rows[1]);
+    f.render_stateful_widget(list, inner, &mut state);
 }
 
 fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {

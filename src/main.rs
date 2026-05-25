@@ -236,13 +236,9 @@ async fn run(
                         last_artwork_image = Some(img);
                     }
                 }
-                AppMsg::ThumbnailLoaded(url, bytes) => {
+                AppMsg::ThumbnailLoaded(url, img) => {
                     pending_thumbs.remove(&url);
-                    if let Ok(img) = image::load_from_memory(&bytes) {
-                        thumbnails.insert(url, picker.new_resize_protocol(img));
-                    } else {
-                        failed_thumbs.insert(url);
-                    }
+                    thumbnails.insert(url, picker.new_resize_protocol(img));
                 }
                 AppMsg::ThumbnailFailed(url) => {
                     pending_thumbs.remove(&url);
@@ -290,10 +286,12 @@ async fn run(
                     let t = tx.clone();
                     let u = url.clone();
                     tokio::spawn(async move {
-                        if let Ok(bytes) = c.fetch_image_bytes(&u).await {
-                            let _ = t.send(AppMsg::ThumbnailLoaded(u, bytes)).await;
-                        } else {
-                            let _ = t.send(AppMsg::ThumbnailFailed(u)).await;
+                        match c.fetch_image_bytes(&u).await {
+                            Ok(bytes) => match image::load_from_memory(&bytes) {
+                                Ok(img) => { let _ = t.send(AppMsg::ThumbnailLoaded(u, img)).await; }
+                                Err(_)  => { let _ = t.send(AppMsg::ThumbnailFailed(u)).await; }
+                            },
+                            Err(_) => { let _ = t.send(AppMsg::ThumbnailFailed(u)).await; }
                         }
                     });
                 }

@@ -432,6 +432,14 @@ impl LmsClient {
         self.playlistcontrol(player_id, "load", "album_id", album_id).await
     }
 
+    pub async fn play_artist(&self, player_id: &str, artist_id: &str) -> Result<()> {
+        self.playlistcontrol(player_id, "load", "artist_id", artist_id).await
+    }
+
+    pub async fn play_folder(&self, player_id: &str, folder_id: u32) -> Result<()> {
+        self.playlistcontrol(player_id, "load", "folder_id", &folder_id.to_string()).await
+    }
+
     pub async fn play_track_index(&self, player_id: &str, index: usize) -> Result<()> {
         self.rpc(player_id, &[json!("playlist"), json!("index"), json!(index)]).await?;
         Ok(())

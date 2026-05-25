@@ -118,7 +118,8 @@ pub struct FolderNav {
 #[derive(Debug, Clone)]
 pub struct ContextMenu {
     pub selected: usize,
-    pub parent_label: Option<String>,
+    pub parent_add_label: Option<String>,
+    pub parent_replace_label: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,12 +135,14 @@ pub struct SyncModal {
 }
 
 impl ContextMenu {
-    pub fn new(parent_label: Option<String>) -> Self {
-        Self { selected: 0, parent_label }
+    pub fn new(parent_add_label: Option<String>, parent_replace_label: Option<String>) -> Self {
+        Self { selected: 0, parent_add_label, parent_replace_label }
     }
 
     pub fn option_count(&self) -> usize {
-        if self.parent_label.is_some() { 5 } else { 4 }
+        let parent_count = self.parent_add_label.is_some() as usize
+            + self.parent_replace_label.is_some() as usize;
+        6 + parent_count
     }
 
     pub fn options(&self) -> Vec<String> {
@@ -147,11 +150,16 @@ impl ContextMenu {
             "Play now".to_string(),
             "Play next".to_string(),
             "Add to end of queue".to_string(),
+            "Replace queue".to_string(),
             "Add to favourites".to_string(),
         ];
-        if let Some(label) = &self.parent_label {
+        if let Some(label) = &self.parent_add_label {
             opts.push(label.clone());
         }
+        if let Some(label) = &self.parent_replace_label {
+            opts.push(label.clone());
+        }
+        opts.push("Cancel".to_string());
         opts
     }
 }
@@ -349,7 +357,7 @@ pub enum AppMsg {
     FavItemsLoaded(Vec<RadioItem>),
     FolderItemsLoaded(Vec<FolderItem>),
     ArtworkLoaded(Vec<u8>),
-    ThumbnailLoaded(String, Vec<u8>), // url, bytes
+    ThumbnailLoaded(String, image::DynamicImage), // url, decoded image
     ThumbnailFailed(String),          // url
     PlayerVolumesLoaded(HashMap<String, u8>),
     PlayerSyncGroupsLoaded(HashMap<String, Vec<String>>),

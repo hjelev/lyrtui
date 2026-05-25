@@ -413,8 +413,8 @@ pub async fn handle_mouse_event(
                         if is_double || !utils::is_main_item_playable(app) {
                             handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
                         } else {
-                            app.context_menu =
-                                Some(ContextMenu::new(utils::compute_parent_label(app)));
+                            let (add, replace) = utils::compute_parent_labels(app);
+                            app.context_menu = Some(ContextMenu::new(add, replace));
                         }
                     }
                 }
@@ -722,8 +722,10 @@ async fn execute_context_menu_action(
         0 => handle_main_select(app, client, tx).await,
         1 => handle_insert_next(app, client, tx).await,
         2 => handle_add_to_queue(app, client, tx).await,
-        3 => handle_add_to_favorites(app, client, tx).await,
-        4 => handle_add_parent_to_queue(app, client, tx).await,
+        3 => handle_replace_queue(app, client, tx).await,
+        4 => handle_add_to_favorites(app, client, tx).await,
+        5 => handle_add_parent_to_queue(app, client, tx).await,
+        6 => handle_replace_queue_with_parent(app, client, tx).await,
         _ => {}
     }
 }
@@ -1225,7 +1227,8 @@ pub async fn handle_action(
                     None => {}
                 }
             } else if utils::is_main_item_playable(app) {
-                app.context_menu = Some(ContextMenu::new(utils::compute_parent_label(app)));
+                let (add, replace) = utils::compute_parent_labels(app);
+                app.context_menu = Some(ContextMenu::new(add, replace));
             } else {
                 handle_main_select(app, client, tx).await;
             }
@@ -2043,6 +2046,22 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 });
             }
         }
+        MainView::Library(LibraryView::AlbumArtists) => {
+            if let Some(artist) = app.album_artists.get(app.main_selected) {
+                let id = utils::json_id_to_string(&artist.id);
+                let name = artist.artist.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.add_artist_to_queue(&pid, &id).await.is_ok() {
+                        if queue_was_empty { let _ = c.play(&pid).await; }
+                        let _ = t
+                            .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
+                            .await;
+                    }
+                });
+            }
+        }
         MainView::Library(LibraryView::Albums { .. }) => {
             if let Some(album) = app.albums.get(app.main_selected) {
                 let id = utils::json_id_to_string(&album.id);
@@ -2227,6 +2246,310 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 }
                 _ => {}
             }
+        }
+        _ => {}
+    }
+}
+
+async fn handle_replace_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
+    let Some(pid) = app.active_player.clone() else {
+        app.status_message = Some("No active player".to_string());
+        return;
+    };
+
+    match app.main_view.clone() {
+        MainView::Library(LibraryView::Artists) => {
+            if let Some(artist) = app.artists.get(app.main_selected) {
+                let id = utils::json_id_to_string(&artist.id);
+                let name = artist.artist.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.play_artist(&pid, &id).await.is_ok() {
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                    }
+                });
+            }
+        }
+        MainView::Library(LibraryView::AlbumArtists) => {
+            if let Some(artist) = app.album_artists.get(app.main_selected) {
+                let id = utils::json_id_to_string(&artist.id);
+                let name = artist.artist.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.play_artist(&pid, &id).await.is_ok() {
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                    }
+                });
+            }
+        }
+        MainView::Library(LibraryView::Albums { .. }) => {
+            if let Some(album) = app.albums.get(app.main_selected) {
+                let id = utils::json_id_to_string(&album.id);
+                let name = album.album.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.play_album(&pid, &id).await.is_ok() {
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                    }
+                });
+            }
+        }
+        MainView::Library(LibraryView::Tracks { .. }) => {
+            if let Some(track) = app.tracks.get(app.main_selected) {
+                let id = utils::json_id_to_string(
+                    track.id.as_ref().unwrap_or(&serde_json::Value::Null),
+                );
+                let name = track.title.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.play_track(&pid, &id).await.is_ok() {
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                    }
+                });
+            }
+        }
+        MainView::Library(LibraryView::Folder { .. }) => {
+            if let Some(item) = app.folder_items.get(app.main_selected).cloned() {
+                let name = item.filename.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                match item.item_type {
+                    FolderItemType::Track => {
+                        let id = item.id.to_string();
+                        tokio::spawn(async move {
+                            if c.play_track(&pid, &id).await.is_ok() {
+                                let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                            }
+                        });
+                    }
+                    FolderItemType::Folder => {
+                        let folder_id = item.id;
+                        tokio::spawn(async move {
+                            if c.play_folder(&pid, folder_id).await.is_ok() {
+                                let _ = t.send(AppMsg::StatusMsg(format!("Playing folder \"{}\"", name))).await;
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        MainView::Radio => {
+            if let Some(item) = app.radio_items.get(app.main_selected).cloned()
+                && let Some(url) = item.url
+            {
+                let name = item.name.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.clear_queue(&pid).await.is_ok()
+                        && c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok()
+                    {
+                        let _ = c.play(&pid).await;
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                    }
+                });
+            }
+        }
+        MainView::Apps => {
+            if let Some(item) = app.app_items.get(app.main_selected).cloned()
+                && let Some(url) = item.url
+            {
+                let name = item.name.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.clear_queue(&pid).await.is_ok()
+                        && c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok()
+                    {
+                        let _ = c.play(&pid).await;
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                    }
+                });
+            }
+        }
+        MainView::Favourites => {
+            if let Some(item) = app.fav_items.get(app.main_selected).cloned()
+                && let Some(url) = item.url
+            {
+                let name = item.name.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.clear_queue(&pid).await.is_ok()
+                        && c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok()
+                    {
+                        let _ = c.play(&pid).await;
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                    }
+                });
+            }
+        }
+        MainView::Search => {
+            match app.search_results.get(app.main_selected).cloned() {
+                Some(SearchResultItem::Track(track)) => {
+                    let id = utils::json_id_to_string(
+                        track.id.as_ref().unwrap_or(&serde_json::Value::Null),
+                    );
+                    let name = track.title.clone();
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        if c.play_track(&pid, &id).await.is_ok() {
+                            let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                        }
+                    });
+                }
+                Some(SearchResultItem::Album(alb)) => {
+                    let id = utils::json_id_to_string(&alb.id);
+                    let name = alb.album.clone();
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        if c.play_album(&pid, &id).await.is_ok() {
+                            let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                        }
+                    });
+                }
+                Some(SearchResultItem::Artist(artist)) => {
+                    let id = utils::json_id_to_string(&artist.id);
+                    let name = artist.artist.clone();
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        if c.play_artist(&pid, &id).await.is_ok() {
+                            let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                        }
+                    });
+                }
+                Some(SearchResultItem::Playlist(pl)) => {
+                    let id = utils::json_id_to_string(&pl.id);
+                    let name = pl.name.clone();
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        if c.play_playlist(&pid, &id).await.is_ok() {
+                            let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                        }
+                    });
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn handle_replace_queue_with_parent(
+    app: &mut App,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    let Some(pid) = app.active_player.clone() else {
+        app.status_message = Some("No active player".to_string());
+        return;
+    };
+
+    match app.main_view.clone() {
+        MainView::Library(LibraryView::Tracks { album_id: Some(id) }) => {
+            let name = app
+                .albums
+                .iter()
+                .find(|a| utils::json_id_to_string(&a.id) == id)
+                .map(|a| a.album.clone())
+                .unwrap_or_else(|| "album".to_string());
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                if c.play_album(&pid, &id).await.is_ok() {
+                    let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+                }
+            });
+        }
+        MainView::Radio => {
+            let items: Vec<(String, String)> = app
+                .radio_items
+                .iter()
+                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
+                .collect();
+            let title = app.radio_title.clone();
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                if c.clear_queue(&pid).await.is_ok() {
+                    let mut added = 0usize;
+                    for (name, url) in &items {
+                        if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
+                            added += 1;
+                        }
+                    }
+                    if added > 0 {
+                        let _ = c.play(&pid).await;
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\" folder", title))).await;
+                    }
+                }
+            });
+        }
+        MainView::Apps => {
+            let items: Vec<(String, String)> = app
+                .app_items
+                .iter()
+                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
+                .collect();
+            let title = app.app_title.clone();
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                if c.clear_queue(&pid).await.is_ok() {
+                    let mut added = 0usize;
+                    for (name, url) in &items {
+                        if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
+                            added += 1;
+                        }
+                    }
+                    if added > 0 {
+                        let _ = c.play(&pid).await;
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\" folder", title))).await;
+                    }
+                }
+            });
+        }
+        MainView::Favourites => {
+            let items: Vec<(String, String)> = app
+                .fav_items
+                .iter()
+                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
+                .collect();
+            let title = app.fav_title.clone();
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                if c.clear_queue(&pid).await.is_ok() {
+                    let mut added = 0usize;
+                    for (name, url) in &items {
+                        if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
+                            added += 1;
+                        }
+                    }
+                    if added > 0 {
+                        let _ = c.play(&pid).await;
+                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\" folder", title))).await;
+                    }
+                }
+            });
+        }
+        MainView::Library(LibraryView::Folder { folder_id: Some(folder_id) }) => {
+            let title = app.folder_title.clone();
+            let c = client.clone();
+            let t = tx.clone();
+            tokio::spawn(async move {
+                if c.play_folder(&pid, folder_id).await.is_ok() {
+                    let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", title))).await;
+                }
+            });
         }
         _ => {}
     }
