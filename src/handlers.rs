@@ -335,12 +335,15 @@ pub async fn handle_mouse_event(
                 // then per-player rows. Handle it independently.
                 if matches!(app.main_view, MainView::Players) {
                     let inner_x = main_area.x + 1;
-                    let pwr_end_x = inner_x + ui::PLAYERS_PWR_BTN_W;
+                    // +1 for the pill endcap / leading space on each row
+                    let pwr_start_x = inner_x + 1;
+                    let pwr_end_x = pwr_start_x + ui::PLAYERS_PWR_BTN_W;
 
                     // Mirror the ui.rs dynamic label-width calculation so sync_btn_x matches rendering.
+                    // ui.rs uses row_w = inner_width - 1 to reserve space for pill endcaps.
                     let vol_icon_w: usize = if app.use_nerd_icons { 2 } else { 0 };
                     let vol_str_w = 1 + vol_icon_w + 4;
-                    let row_w = (main_area.width.saturating_sub(2)) as usize;
+                    let row_w = (main_area.width.saturating_sub(3)) as usize;
                     let pwr_w = ui::PLAYERS_PWR_BTN_W as usize;
                     let player_fixed_w = pwr_w + ui::PLAYERS_SYNC_BTN_W as usize + vol_str_w + 1 + 3;
                     let player_total_flex = row_w.saturating_sub(player_fixed_w);
@@ -351,7 +354,7 @@ pub async fn handle_mouse_event(
 
                     if row == inner_top {
                         // Global row
-                        if col >= inner_x && col < pwr_end_x {
+                        if col >= pwr_start_x && col < pwr_end_x {
                             // Global power button: toggle all players on/off
                             let all_on = !app.players.is_empty()
                                 && app.players.iter().all(|p| p.power > 0);
@@ -376,7 +379,7 @@ pub async fn handle_mouse_event(
                         let player_i = main_state.offset() + vis_i;
                         let sync_btn_x = pwr_end_x + label_w as u16;
                         let sync_btn_end = sync_btn_x + ui::PLAYERS_SYNC_BTN_W;
-                        if col >= inner_x && col < pwr_end_x {
+                        if col >= pwr_start_x && col < pwr_end_x {
                             // Individual player power button
                             if let Some(p) = app.players.get(player_i) {
                                 let pid = p.playerid.clone();
@@ -1073,15 +1076,30 @@ pub async fn handle_action(
 
         Action::FocusSidebar => {
             if !app.full_art_mode {
-                app.focus_sidebar = true;
-                app.players_focus_global = false;
-                app.search_input_active = false;
+                if matches!(app.main_view, MainView::Players) && !app.focus_sidebar {
+                    adjust_volume(app, vol_sync_tx, -5);
+                } else {
+                    app.focus_sidebar = true;
+                    app.players_focus_global = false;
+                    app.search_input_active = false;
+                }
             }
         }
         Action::FocusMain => {
-            app.focus_sidebar = false;
-            if matches!(app.main_view, MainView::Search) {
-                app.search_input_active = true;
+            if matches!(app.main_view, MainView::Players) && !app.focus_sidebar {
+                adjust_volume(app, vol_sync_tx, 5);
+            } else {
+                app.focus_sidebar = false;
+                if matches!(app.main_view, MainView::Search) {
+                    app.search_input_active = true;
+                }
+            }
+        }
+        Action::ToggleFocus => {
+            if !app.full_art_mode {
+                app.focus_sidebar = !app.focus_sidebar;
+                app.players_focus_global = false;
+                app.search_input_active = !app.focus_sidebar && matches!(app.main_view, MainView::Search);
             }
         }
 

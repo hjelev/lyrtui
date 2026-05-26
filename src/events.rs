@@ -47,6 +47,7 @@ pub enum Action {
     PageDown,
     Home,
     End,
+    ToggleFocus,
     None,
 }
 
@@ -76,6 +77,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyCode::PageDown, _) => Action::PageDown,
         (KeyCode::Home, _) => Action::Home,
         (KeyCode::End, _) => Action::End,
+        (KeyCode::Tab, _) | (KeyCode::BackTab, _) => Action::ToggleFocus,
         _ => Action::None,
     }
 }

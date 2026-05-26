@@ -88,12 +88,20 @@ fn sync_scroll_offset(state: &mut ListState, selected: usize, visible: usize) ->
     new_o
 }
 
-fn pill_endcap_left(bg: Color) -> Span<'static> {
-    Span::styled("\u{e0b6}", Style::default().fg(bg).bg(Color::Reset))
+fn pill_endcap_left(bg: Color, nerd: bool) -> Span<'static> {
+    if nerd {
+        Span::styled("\u{e0b6}", Style::default().fg(bg).bg(Color::Reset))
+    } else {
+        Span::raw(" ")
+    }
 }
 
-fn pill_endcap_right(bg: Color) -> Span<'static> {
-    Span::styled("\u{e0b4}", Style::default().fg(bg).bg(Color::Reset))
+fn pill_endcap_right(bg: Color, nerd: bool) -> Span<'static> {
+    if nerd {
+        Span::styled("\u{e0b4}", Style::default().fg(bg).bg(Color::Reset))
+    } else {
+        Span::raw("")
+    }
 }
 
 fn icon_vol(nerd: bool) -> &'static str {
@@ -317,16 +325,16 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             if selected {
                 if app.use_nerd_icons {
                     ListItem::new(Line::from(vec![
-                        pill_endcap_left(pill_bg),
+                        pill_endcap_left(pill_bg, true),
                         Span::styled(format!(" {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
                         Span::styled(format!("{} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
-                        pill_endcap_right(pill_bg),
+                        pill_endcap_right(pill_bg, true),
                     ]))
                 } else {
                     ListItem::new(Line::from(vec![
-                        pill_endcap_left(pill_bg),
+                        pill_endcap_left(pill_bg, false),
                         Span::styled(format!(" {} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
-                        pill_endcap_right(pill_bg),
+                        pill_endcap_right(pill_bg, false),
                     ]))
                 }
             } else if app.use_nerd_icons {
@@ -428,11 +436,11 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let items: Vec<ListItem> = entries.iter().enumerate().map(|(i, (icon, label, sub))| {
         if i == app.main_selected {
             ListItem::new(Line::from(vec![
-                pill_endcap_left(pill_bg),
+                pill_endcap_left(pill_bg, app.use_nerd_icons),
                 Span::styled(format!(" {}  ", icon), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
                 Span::styled(label.to_string(), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
                 Span::styled(format!("  — {} ", sub), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
-                pill_endcap_right(pill_bg),
+                pill_endcap_right(pill_bg, app.use_nerd_icons),
             ]))
         } else {
             ListItem::new(Line::from(vec![
@@ -678,13 +686,16 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let vol_icon_str: &str = if app.use_nerd_icons { "\u{F028} " } else { "" };
     // Pad volume to 3 digits so vol_str width is constant (" 🔊  75%" / "  75%").
     let vol_str_w = 1 + vol_icon_str.chars().count() + 4; // 1 space + icon + 3 digits + '%'
-    let row_w = chunks[0].width as usize; // same for all rows (vertical split)
+    // Reserve 1 col on each side for the pill endcap characters.
+    let row_w = (chunks[0].width as usize).saturating_sub(1); // same for all rows (vertical split)
     // Fixed: pwr btn + sync btn + vol string + 1 gap + 3 label padding (" " + "  ")
     let player_fixed_w = pwr_w + PLAYERS_SYNC_BTN_W as usize + vol_str_w + 1 + 3;
     let player_total_flex = row_w.saturating_sub(player_fixed_w);
     let player_bar_w = player_total_flex / 2;
     // Name column width; also used to align the global label so bars share the same column.
     let player_name_col_w = player_total_flex.saturating_sub(player_bar_w);
+
+    let (pill_bg, _pill_fg) = pill_colors(focused);
 
     // --- Global volume row ---
     let global_avg: u8 = if app.players.is_empty() {
@@ -723,14 +734,28 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     } else {
         mid
     };
-    let global_line = Line::from(vec![
-        Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
-        Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
-        Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
-        Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
-        Span::styled(bar, Style::default().fg(if glob_focused { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) }).bg(glob_bg)),
-        Span::styled(&vol_str, Style::default().fg(if glob_focused { Color::White } else { mid }).bg(glob_bg)),
-    ]);
+    let global_line = if glob_focused {
+        Line::from(vec![
+            pill_endcap_left(pill_bg, app.use_nerd_icons),
+            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
+            Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
+            Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
+            Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
+            Span::styled(bar, Style::default().fg(Color::Rgb(100, 180, 255)).bg(glob_bg)),
+            Span::styled(&vol_str, Style::default().fg(Color::White).bg(glob_bg)),
+            pill_endcap_right(pill_bg, app.use_nerd_icons),
+        ])
+    } else {
+        Line::from(vec![
+            Span::raw(" "),
+            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
+            Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
+            Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
+            Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
+            Span::styled(bar, Style::default().fg(Color::Rgb(60, 80, 110)).bg(glob_bg)),
+            Span::styled(&vol_str, Style::default().fg(mid).bg(glob_bg)),
+        ])
+    };
     f.render_widget(Paragraph::new(global_line), chunks[0]);
 
     // --- Player list ---
@@ -809,13 +834,26 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             btn_dim_color(app.effective_accent())
         };
 
-        let line = Line::from(vec![
-            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
-            Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
-            Span::styled(" ⇄ ",   Style::default().fg(sync_fg).bg(row_bg)),
-            Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
-            Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
-        ]);
+        let line = if is_sel {
+            Line::from(vec![
+                pill_endcap_left(pill_bg, app.use_nerd_icons),
+                Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
+                Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
+                Span::styled(" ⇄ ",   Style::default().fg(sync_fg).bg(row_bg)),
+                Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
+                Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
+                pill_endcap_right(pill_bg, app.use_nerd_icons),
+            ])
+        } else {
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
+                Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
+                Span::styled(" ⇄ ",   Style::default().fg(sync_fg).bg(row_bg)),
+                Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
+                Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
+            ])
+        };
         f.render_widget(Paragraph::new(line), Rect::new(list_area.x, y, list_area.width, 1));
     }
 
@@ -1980,9 +2018,9 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = options.iter().enumerate().map(|(i, o)| {
         if i == menu.selected {
             ListItem::new(Line::from(vec![
-                pill_endcap_left(pill_bg),
+                pill_endcap_left(pill_bg, app.use_nerd_icons),
                 Span::styled(format!(" {} ", o), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
-                pill_endcap_right(pill_bg),
+                pill_endcap_right(pill_bg, app.use_nerd_icons),
             ]))
         } else if i == last {
             ListItem::new(Line::from(Span::styled(format!("  {}", o), Style::default().fg(Color::DarkGray))))
