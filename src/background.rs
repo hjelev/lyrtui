@@ -130,9 +130,29 @@ pub fn load_app_items(
     client: Arc<LmsClient>,
     tx: mpsc::Sender<AppMsg>,
 ) {
-    spawn_if_ok(client, tx, |c| async move {
-        c.browse_radio(&player_id, &cmd, item_id.as_deref()).await
-    }, AppMsg::AppItemsLoaded);
+    tokio::spawn(async move {
+        let Ok(mut items) = client.browse_radio(&player_id, &cmd, item_id.as_deref()).await else { return; };
+        if cmd == "radioparadise" {
+            let mut set = tokio::task::JoinSet::new();
+            for (i, item) in items.iter().enumerate() {
+                if item.artwork_url.is_none()
+                    && let Some(chan) = rp_channel_num(item.item_id.as_deref())
+                {
+                    let c = Arc::clone(&client);
+                    set.spawn(async move { (i, c.fetch_radio_paradise_art_url(chan).await) });
+                }
+            }
+            while let Some(Ok((i, Ok(url)))) = set.join_next().await {
+                items[i].artwork_url = Some(url);
+            }
+        }
+        let _ = tx.send(AppMsg::AppItemsLoaded(items)).await;
+    });
+}
+
+/// Extract the Radio Paradise API channel number from an item_id like "b44f4573.N" or "b44f4573.N.M".
+fn rp_channel_num(item_id: Option<&str>) -> Option<u8> {
+    item_id?.split('.').nth(1)?.parse().ok()
 }
 
 pub fn load_folder_items(folder_id: Option<u32>, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {

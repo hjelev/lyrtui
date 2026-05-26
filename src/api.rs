@@ -733,6 +733,18 @@ impl LmsClient {
         }
         Ok(())
     }
+
+    /// Fetch the currently-playing cover art URL for a Radio Paradise channel.
+    /// `chan`: 0=Main Mix, 1=Mellow Mix, 2=Rock Mix, 3=World Mix.
+    pub async fn fetch_radio_paradise_art_url(&self, chan: u8) -> Result<String> {
+        let url = format!("https://api.radioparadise.com/api/now_playing?chan={}", chan);
+        let resp: Value = self.client.get(&url).send().await?.json().await?;
+        resp["cover"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .ok_or_else(|| anyhow::anyhow!("no cover in RP response"))
+    }
 }
 
 /// Build a `RadioItem` from a browse/search result JSON object.

@@ -314,6 +314,19 @@ pub async fn handle_mouse_event(
                 return;
             }
 
+            let np_title_rect = ui::compute_statusbar_np_title_rect(terminal_area, app.status_height, app.art_col_w);
+            if point_in(col, row, np_title_rect) && app.now_playing.is_some() {
+                let idx = now_playing_queue_index(app);
+                if matches!(app.main_view, MainView::Queue) {
+                    app.main_selected = idx;
+                } else {
+                    app.main_view = MainView::Queue;
+                    app.focus_sidebar = false;
+                    app.main_selected = idx;
+                }
+                return;
+            }
+
             if !app.full_art_mode && point_in(col, row, sidebar_area) {
                 app.focus_sidebar = true;
                 let inner_top = sidebar_area.y + 1;

@@ -1996,6 +1996,25 @@ pub fn compute_statusbar_art_rect(area: Rect, status_height: u16, art_col_w: u16
     Rect::new(status_inner.x, status_inner.y, art_col_w.min(status_inner.width), status_inner.height)
 }
 
+/// Returns the rect for the song title row in the Now Playing status bar info column.
+pub fn compute_statusbar_np_title_rect(area: Rect, status_height: u16, art_col_w: u16) -> Rect {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .split(area);
+    let status_inner = Rect::new(
+        outer[1].x + 1,
+        outer[1].y + 1,
+        outer[1].width.saturating_sub(2),
+        outer[1].height.saturating_sub(2),
+    );
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(art_col_w), Constraint::Length(1), Constraint::Min(1)])
+        .split(status_inner);
+    Rect::new(cols[2].x, cols[2].y, cols[2].width, 1)
+}
+
 pub fn compute_context_menu_rect(area: Rect, option_count: usize) -> Rect {
     centered_rect_abs(44, (option_count + 2) as u16, area)
 }
