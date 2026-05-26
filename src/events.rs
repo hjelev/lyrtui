@@ -5,14 +5,20 @@ use anyhow::Result;
 pub enum InputEvent {
     Key(KeyEvent),
     Mouse(MouseEvent),
+    Resize,
     Tick,
 }
 
 pub fn poll_event(tick_rate: Duration) -> Result<InputEvent> {
     if event::poll(tick_rate)? {
         match event::read()? {
-            Event::Key(key) => return Ok(InputEvent::Key(key)),
+            // Filter Release events: on Windows, crossterm emits both Press and Release for each
+            // keystroke. Processing Release would cause each key to fire twice (e.g., 'c' opens
+            // the config modal on Press, then immediately closes it on Release).
+            Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release
+                => return Ok(InputEvent::Key(key)),
             Event::Mouse(m) => return Ok(InputEvent::Mouse(m)),
+            Event::Resize(_, _) => return Ok(InputEvent::Resize),
             _ => {}
         }
     }

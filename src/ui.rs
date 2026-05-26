@@ -929,7 +929,7 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
     let breadcrumb = breadcrumb_str(app.fav_nav_stack.iter().map(|n| n.title.as_str()), &app.fav_title);
-    let title = format!(" ★ {} ", breadcrumb);
+    let title = format!(" {} ", breadcrumb);
     let items = app.fav_items.iter().map(|item| {
         let icon = match (app.use_nerd_icons, item.is_playable()) {
             (true,  true)  => "\u{F130} ",  // nf-fa-microphone

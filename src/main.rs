@@ -96,6 +96,18 @@ async fn run(
         app.font_size = (fs.width, fs.height);
         base_status_height = art_rows;
     }
+    // Set initial dynamic status height from actual terminal size (avoids a per-frame poll).
+    // After this, dimensions are updated only on resize events so the image area stays stable.
+    {
+        if let Ok(sz) = terminal.size() {
+            let fw = app.font_size.0.max(1) as u32;
+            let fh = app.font_size.1.max(1) as u32;
+            let dyn_sh = (sz.height / 3).max(base_status_height);
+            app.status_height = dyn_sh;
+            let inner_h = dyn_sh.saturating_sub(2);
+            app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
+        }
+    }
     let mut album_art: Option<StatefulProtocol> = None;
     let mut last_artwork_image: Option<image::DynamicImage> = None;
     let mut last_artwork_url: Option<String> = None;
@@ -192,17 +204,6 @@ async fn run(
     }
 
     loop {
-        // Resize the Now Playing bar to fill ~1/3 of the terminal height
-        if let Ok(sz) = terminal.size() {
-            let dyn_sh = (sz.height / 3).max(base_status_height);
-            if dyn_sh != app.status_height {
-                app.status_height = dyn_sh;
-                let inner_h = dyn_sh.saturating_sub(2);
-                let fw = app.font_size.0.max(1) as u32;
-                let fh = app.font_size.1.max(1) as u32;
-                app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
-            }
-        }
         terminal.draw(|f| {
             ui::draw(
                 f,
@@ -370,6 +371,18 @@ async fn run(
                     &mut cfg,
                 )
                 .await;
+            }
+            InputEvent::Resize => {
+                if let Ok(sz) = terminal.size() {
+                    let fw = app.font_size.0.max(1) as u32;
+                    let fh = app.font_size.1.max(1) as u32;
+                    let dyn_sh = (sz.height / 3).max(base_status_height);
+                    if dyn_sh != app.status_height {
+                        app.status_height = dyn_sh;
+                        let inner_h = dyn_sh.saturating_sub(2);
+                        app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
+                    }
+                }
             }
             InputEvent::Tick => {}
         }
