@@ -30,6 +30,7 @@ pub struct NowPlaying {
     pub repeat: u8,
     pub artwork_url: Option<String>,
     pub playlist_cur_index: Option<usize>,
+    pub playlist_tracks: Option<usize>,
     pub playlist_timestamp: f64,
 }
 
@@ -223,6 +224,10 @@ impl LmsClient {
             playlist_cur_index: result["playlist_cur_index"]
                 .as_u64()
                 .or_else(|| result["playlist_cur_index"].as_str().and_then(|s| s.parse().ok()))
+                .map(|i| i as usize),
+            playlist_tracks: result["playlist_tracks"]
+                .as_u64()
+                .or_else(|| result["playlist_tracks"].as_str().and_then(|s| s.parse().ok()))
                 .map(|i| i as usize),
             playlist_timestamp: result["playlist_timestamp"].as_f64().unwrap_or(0.0),
         })

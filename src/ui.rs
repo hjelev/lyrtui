@@ -1364,10 +1364,15 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         }
     };
 
+    let queue_pos = match (np.playlist_cur_index, np.playlist_tracks) {
+        (Some(idx), Some(total)) => format!("  ({}/{})", idx + 1, total),
+        _ => String::new(),
+    };
     let title_line = Line::from(vec![
         Span::raw(indent),
         Span::styled(format!("{} ", play_icon), Style::default().fg(Color::Green)),
         Span::styled(np.title.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(queue_pos, Style::default().fg(Color::DarkGray)),
         Span::styled(format!("{}{}", shuffle_icon, repeat_icon), Style::default().fg(Color::DarkGray)),
     ]);
     f.render_widget(Paragraph::new(title_line), rows[0]);
