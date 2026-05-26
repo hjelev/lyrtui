@@ -1255,7 +1255,8 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         Line::from(vec![
             Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
             Span::styled(player_name, Style::default().fg(Color::White)),
-            Span::styled(format!("  {} ", vol_icon), Style::default().fg(mid)),
+            Span::styled(" ─ ", Style::default().fg(mid)),
+            Span::styled(format!("{} ", vol_icon), Style::default().fg(mid)),
             Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
             Span::styled(format!("{} ", globe), Style::default().fg(accent)),
         ])
