@@ -109,7 +109,7 @@ fn icon_vol(nerd: bool) -> &'static str {
 }
 
 fn icon_power(nerd: bool) -> &'static str {
-    if nerd { "\u{F011}" } else { "⏻" }  // nf-fa-power-off
+    if nerd { "\u{F011}" } else { "o" }  // nf-fa-power-off
 }
 
 fn icon_player_dot(nerd: bool) -> &'static str {
@@ -1424,13 +1424,13 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         let play_pause_icon = if app.use_nerd_icons {
             if np.is_playing { "\u{F04C}" } else { "\u{F04B}" }  // nf-fa-pause / nf-fa-play
         } else if np.is_playing {
-            "⏸"
+            "‖"
         } else {
             "▶"
         };
-        let prev_icon = if app.use_nerd_icons { "\u{F048}" } else { "⏮" };  // nf-fa-step-backward
-        let stop_icon = if app.use_nerd_icons { "\u{F04D}" } else { "⏹" };  // nf-fa-stop
-        let next_icon = if app.use_nerd_icons { "\u{F051}" } else { "⏭" };  // nf-fa-step-forward
+        let prev_icon = if app.use_nerd_icons { "\u{F048}" } else { "«" };  // nf-fa-step-backward
+        let stop_icon = if app.use_nerd_icons { "\u{F04D}" } else { "■" };  // nf-fa-stop
+        let next_icon = if app.use_nerd_icons { "\u{F051}" } else { "»" };  // nf-fa-step-forward
         let btn_w: u16 = 3;
         let gap: u16 = 1;
         let sep: u16 = 2;
@@ -1444,7 +1444,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 Rect::new(x, ctrl.y, btn_w, 1),
             );
         }
-        let shuf_icon = if app.use_nerd_icons { "\u{F074}" } else { "⇌" };  // nf-fa-random
+        let shuf_icon = if app.use_nerd_icons { "\u{F074}" } else { "⇄" };  // nf-fa-random
         let shuffle_x = ctrl_x + 4 * (btn_w + gap) + sep;
         if shuffle_x + btn_w <= ctrl_max_x {
             let (sfg, sbg) = if np.shuffle > 0 {
