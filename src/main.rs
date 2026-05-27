@@ -122,6 +122,7 @@ async fn run(
     let mut main_state = ListState::default();
     let mut last_main_click: Option<(Instant, usize)> = None;
     let mut thumbnails: HashMap<String, StatefulProtocol> = HashMap::new();
+    let mut thumbnail_images: HashMap<String, image::DynamicImage> = HashMap::new();
     let mut pending_thumbs: HashSet<String> = HashSet::new();
     let mut failed_thumbs: HashSet<String> = HashSet::new();
 
@@ -249,6 +250,7 @@ async fn run(
                 }
                 AppMsg::ThumbnailLoaded(url, img) => {
                     pending_thumbs.remove(&url);
+                    thumbnail_images.insert(url.clone(), img.clone());
                     thumbnails.insert(url, picker.new_resize_protocol(img));
                 }
                 AppMsg::ThumbnailFailed(url) => {
@@ -394,18 +396,31 @@ async fn run(
             InputEvent::Tick => {}
         }
 
-        // When any overlay closes, the terminal graphic protocol has already transmitted the image
-        // data and won't retransmit on the next render. Some terminals discard stored image data
-        // when cells are overwritten by Clear, so we recreate the protocol to force retransmission.
+        // When an overlay closes, its Clear widget may overwrite image cells causing terminals
+        // to discard stored graphic-protocol data. Recreate affected protocols on overlay close
+        // so images are retransmitted on the next draw.
         let has_overlay = app.confirm_delete_queue_item.is_some()
             || app.confirm_clear_queue
             || app.config_modal.is_some()
             || app.context_menu.is_some()
             || app.sync_modal.is_some();
-        if had_overlay && !has_overlay
-            && let Some(img) = &last_artwork_image
-        {
-            album_art = Some(picker.new_resize_protocol(img.clone()));
+        if had_overlay && !has_overlay {
+            let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
+            let inner_h = term_h.saturating_sub(13);
+            let visible = ((inner_h / 2) as usize).max(1);
+            let offset = main_state.offset();
+            let end = (offset + visible + 5).min(utils::main_list_len(&app));
+            let base = client.server_base_url();
+            for idx in offset..end {
+                if let Some(url) = utils::thumbnail_url_for(&app, idx, &base) {
+                    if let Some(img) = thumbnail_images.get(&url) {
+                        thumbnails.insert(url, picker.new_resize_protocol(img.clone()));
+                    }
+                }
+            }
+            if let Some(img) = &last_artwork_image {
+                album_art = Some(picker.new_resize_protocol(img.clone()));
+            }
         }
     }
 

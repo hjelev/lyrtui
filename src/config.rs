@@ -45,9 +45,6 @@ fn default_broadcast_mask() -> String {
 }
 
 fn default_image_protocol() -> String {
-    #[cfg(target_os = "windows")]
-    return "halfblocks".to_string();
-    #[cfg(not(target_os = "windows"))]
     "auto".to_string()
 }
 
