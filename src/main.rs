@@ -211,7 +211,9 @@ async fn run(
         });
     }
 
+    let mut needs_redraw = true;
     loop {
+        if needs_redraw {
         terminal.draw(|f| {
             ui::draw(
                 f,
@@ -224,9 +226,13 @@ async fn run(
                 cfg.port,
             )
         })?;
+        } // end if needs_redraw
+        needs_redraw = false;
 
         // Drain all pending messages without blocking
+        let mut had_msgs = false;
         while let Ok(msg) = rx.try_recv() {
+            had_msgs = true;
             match msg {
                 AppMsg::ArtworkLoaded(bytes) => {
                     if let Ok(img) = image::load_from_memory(&bytes) {
@@ -364,6 +370,7 @@ async fn run(
                         }
                     }
                 }
+                needs_redraw = true;
             }
             InputEvent::Mouse(mouse) => {
                 let area = terminal.size()?.into();
@@ -380,6 +387,7 @@ async fn run(
                     &mut cfg,
                 )
                 .await;
+                needs_redraw = true;
             }
             InputEvent::Resize => {
                 if let Ok(sz) = terminal.size() {
@@ -392,13 +400,17 @@ async fn run(
                         app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
                     }
                 }
+                needs_redraw = true;
             }
-            InputEvent::Tick => {}
+            InputEvent::Tick => {
+                // Only redraw on tick if new data arrived; prevents Sixel retransmission
+                // flicker and Kitty blank-frame blinks when nothing has actually changed.
+                if had_msgs { needs_redraw = true; }
+            }
         }
 
-        // When an overlay closes, its Clear widget may overwrite image cells causing terminals
-        // to discard stored graphic-protocol data. Recreate affected protocols on overlay close
-        // so images are retransmitted on the next draw.
+        // When an overlay closes its Clear widget may overwrite image cells, causing terminals
+        // to discard stored graphic-protocol data. Recreate affected protocols on overlay close.
         let has_overlay = app.confirm_delete_queue_item.is_some()
             || app.confirm_clear_queue
             || app.config_modal.is_some()
@@ -412,15 +424,15 @@ async fn run(
             let end = (offset + visible + 5).min(utils::main_list_len(&app));
             let base = client.server_base_url();
             for idx in offset..end {
-                if let Some(url) = utils::thumbnail_url_for(&app, idx, &base) {
-                    if let Some(img) = thumbnail_images.get(&url) {
-                        thumbnails.insert(url, picker.new_resize_protocol(img.clone()));
-                    }
+                if let Some(url) = utils::thumbnail_url_for(&app, idx, &base)
+                    && let Some(img) = thumbnail_images.get(&url) {
+                    thumbnails.insert(url, picker.new_resize_protocol(img.clone()));
                 }
             }
             if let Some(img) = &last_artwork_image {
                 album_art = Some(picker.new_resize_protocol(img.clone()));
             }
+            needs_redraw = true;
         }
     }
 

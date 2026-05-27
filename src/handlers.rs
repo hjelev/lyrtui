@@ -1576,27 +1576,62 @@ pub fn handle_config_key(
             KeyCode::Esc | KeyCode::Enter | KeyCode::Tab => {
                 if let Some(m) = app.config_modal.as_mut() { m.editing = false; }
             }
+            KeyCode::Left => {
+                if let Some(modal) = app.config_modal.as_mut()
+                    && modal.cursor_pos > 0 { modal.cursor_pos -= 1; }
+            }
+            KeyCode::Right => {
+                if let Some(modal) = app.config_modal.as_mut() {
+                    let len = modal.current_field_char_count();
+                    if modal.cursor_pos < len { modal.cursor_pos += 1; }
+                }
+            }
+            KeyCode::Home => {
+                if let Some(modal) = app.config_modal.as_mut() { modal.cursor_pos = 0; }
+            }
+            KeyCode::End => {
+                if let Some(modal) = app.config_modal.as_mut() {
+                    modal.cursor_pos = modal.current_field_char_count();
+                }
+            }
             KeyCode::Char(c) => {
                 if let Some(modal) = app.config_modal.as_mut() {
-                    match modal.selected_field {
-                        0 => modal.host.push(c),
-                        1 => { if c.is_ascii_digit() { modal.port.push(c); } }
-                        2 => modal.username.push(c),
-                        3 => modal.password.push(c),
-                        6 => modal.broadcast_mask.push(c),
-                        _ => {}
+                    if modal.selected_field == 1 && !c.is_ascii_digit() {
+                        // port field: digits only
+                    } else {
+                        let cp = modal.cursor_pos;
+                        if let Some(field) = modal.current_field_str_mut() {
+                            let mut chars: Vec<char> = field.chars().collect();
+                            chars.insert(cp, c);
+                            *field = chars.into_iter().collect();
+                        }
+                        modal.cursor_pos += 1;
                     }
                 }
             }
             KeyCode::Backspace => {
                 if let Some(modal) = app.config_modal.as_mut() {
-                    match modal.selected_field {
-                        0 => { modal.host.pop(); }
-                        1 => { modal.port.pop(); }
-                        2 => { modal.username.pop(); }
-                        3 => { modal.password.pop(); }
-                        6 => { modal.broadcast_mask.pop(); }
-                        _ => {}
+                    let cp = modal.cursor_pos;
+                    if cp > 0 {
+                        if let Some(field) = modal.current_field_str_mut() {
+                            let mut chars: Vec<char> = field.chars().collect();
+                            chars.remove(cp - 1);
+                            *field = chars.into_iter().collect();
+                        }
+                        modal.cursor_pos -= 1;
+                    }
+                }
+            }
+            KeyCode::Delete => {
+                if let Some(modal) = app.config_modal.as_mut() {
+                    let cp = modal.cursor_pos;
+                    if let Some(field) = modal.current_field_str_mut() {
+                        let len = field.chars().count();
+                        if cp < len {
+                            let mut chars: Vec<char> = field.chars().collect();
+                            chars.remove(cp);
+                            *field = chars.into_iter().collect();
+                        }
                     }
                 }
             }
@@ -1628,6 +1663,7 @@ pub fn handle_config_key(
                         if let Some(modal) = app.config_modal.as_mut() {
                             modal.editing = true;
                             modal.error = None;
+                            modal.cursor_pos = modal.current_field_char_count();
                         }
                     }
                 }

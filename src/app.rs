@@ -66,6 +66,7 @@ pub struct ConfigModal {
     // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask, 7=disable_auto_colors, 8=OK, 9=Cancel
     pub selected_field: usize,
     pub editing: bool,
+    pub cursor_pos: usize,
     pub error: Option<String>,
 }
 
@@ -92,7 +93,30 @@ impl ConfigModal {
             disable_auto_colors,
             selected_field: 0,
             editing: false,
+            cursor_pos: 0,
             error: None,
+        }
+    }
+
+    pub fn current_field_char_count(&self) -> usize {
+        match self.selected_field {
+            0 => self.host.chars().count(),
+            1 => self.port.chars().count(),
+            2 => self.username.chars().count(),
+            3 => self.password.chars().count(),
+            6 => self.broadcast_mask.chars().count(),
+            _ => 0,
+        }
+    }
+
+    pub fn current_field_str_mut(&mut self) -> Option<&mut String> {
+        match self.selected_field {
+            0 => Some(&mut self.host),
+            1 => Some(&mut self.port),
+            2 => Some(&mut self.username),
+            3 => Some(&mut self.password),
+            6 => Some(&mut self.broadcast_mask),
+            _ => None,
         }
     }
 }

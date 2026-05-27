@@ -2413,9 +2413,6 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         let is_selected = modal.selected_field == *idx;
         let is_editing = is_selected && modal.editing;
 
-        let cursor = if is_editing { "█" } else { "" };
-        let display = format!("{}{}", value, cursor);
-
         let val_style = if is_editing {
             Style::default().fg(Color::Black).bg(accent_bright)
         } else if is_selected {
@@ -2429,9 +2426,10 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         } else {
             Style::default().fg(accent_mid)
         };
+
         let line = Line::from(vec![
             Span::styled(format!("  {:>8}: ", label), label_style),
-            Span::styled(display, val_style),
+            Span::styled(value.to_string(), val_style),
         ]);
         f.render_widget(Paragraph::new(line), rows[i + 1]);
     }
@@ -2472,8 +2470,6 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     {
         let is_selected = modal.selected_field == 6;
         let is_editing = is_selected && modal.editing;
-        let cursor = if is_editing { "█" } else { "" };
-        let display = format!("{}{}", modal.broadcast_mask, cursor);
         let val_style = if is_editing {
             Style::default().fg(Color::Black).bg(accent_bright)
         } else if is_selected {
@@ -2488,7 +2484,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         };
         let line = Line::from(vec![
             Span::styled("  Bcast mask: ", lbl_style),
-            Span::styled(display, val_style),
+            Span::styled(modal.broadcast_mask.clone(), val_style),
         ]);
         f.render_widget(Paragraph::new(line), rows[8]);
     }
@@ -2526,6 +2522,19 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
         btn_cols[1],
     );
+
+    // Place the terminal's native blinking cursor at the edit position.
+    // "  {:>8}: " = 12 chars; "  Bcast mask: " = 14 chars.
+    if modal.editing {
+        let (label_width, row_y) = match modal.selected_field {
+            f @ 0..=3 => (12u16, rows[f + 1].y),
+            6          => (14u16, rows[8].y),
+            _          => (0, 0),
+        };
+        if label_width > 0 {
+            f.set_cursor_position((inner.x + label_width + modal.cursor_pos as u16, row_y));
+        }
+    }
 }
 
 /// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
