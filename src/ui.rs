@@ -150,6 +150,7 @@ struct RowItem {
     thumb_url: Option<String>,
     line1: Line<'static>,
     line2: Line<'static>,
+    duration: Option<String>,
 }
 
 /// Returns (sidebar_area, main_area) for a given terminal area.
@@ -477,6 +478,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     Line::from(Span::raw(a.artist.clone()))
                 },
                 line2: Line::from(Span::styled("artist", Style::default().fg(mid))),
+                duration: None,
             }).collect();
             draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
         }
@@ -492,6 +494,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     Line::from(Span::raw(a.artist.clone()))
                 },
                 line2: Line::from(Span::styled("album artist", Style::default().fg(mid))),
+                duration: None,
             }).collect();
             draw_two_row_list(f, area, " Album Artists ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
         }
@@ -509,6 +512,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                         Line::from(Span::raw(a.album.clone()))
                     },
                     line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
+                    duration: None,
                 }
             }).collect();
             draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
@@ -552,6 +556,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                         Span::styled(t.title.clone(), title_style),
                     ]),
                     line2: Line::from(Span::styled(subtitle, l2_style)),
+                    duration: t.duration.map(format_duration),
                 }
             }).collect();
             draw_two_row_list(f, area, title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
@@ -569,11 +574,6 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 } else {
                     ("▸ ", Color::White)
                 };
-                let sub = if is_track {
-                    item.duration.as_deref().unwrap_or("").to_string()
-                } else {
-                    "folder".to_string()
-                };
                 RowItem {
                     thumb_url: if is_track {
                         Some(format!("{}/music/{}/cover.jpg", base, item.id))
@@ -585,9 +585,10 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                         Style::default().fg(fg),
                     )),
                     line2: Line::from(Span::styled(
-                        sub.clone(),
+                        if is_track { String::new() } else { "folder".to_string() },
                         Style::default().fg(mid),
                     )),
+                    duration: if is_track { item.duration.map(format_duration) } else { None },
                 }
             }).collect();
             draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
@@ -604,6 +605,7 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                     Line::from(Span::raw(p.name.clone()))
                 },
                 line2: Line::from(Span::styled("playlist", Style::default().fg(mid))),
+                duration: None,
             }).collect();
             draw_two_row_list(f, area, " Playlists ", items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
         }
@@ -650,6 +652,7 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
                 Span::styled(t.title.clone(), title_style),
             ]),
             line2: Line::from(Span::styled(subtitle, l2_style)),
+            duration: t.duration.map(format_duration),
         }
     }).collect();
 
@@ -896,6 +899,7 @@ fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
                 if item.is_playable() { "stream" } else { "folder" },
                 Style::default().fg(mid),
             )),
+            duration: None,
         }
     }).collect();
     draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
@@ -920,6 +924,7 @@ fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
                 if item.is_playable() { "stream" } else { "folder" },
                 Style::default().fg(mid),
             )),
+            duration: None,
         }
     }).collect();
     draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
@@ -944,6 +949,7 @@ fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
                 if item.is_playable() { "stream" } else { "folder" },
                 Style::default().fg(mid),
             )),
+            duration: None,
         }
     }).collect();
     draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
@@ -1048,7 +1054,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             }
         }
 
-        let (line1, line2) = match &app.search_results[vis_i] {
+        let (line1, line2, duration) = match &app.search_results[vis_i] {
             SearchResultItem::Artist(a) => (
                 Line::from(vec![
                     Span::styled(
@@ -1058,6 +1064,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                     Span::styled(a.artist.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled("artist", Style::default().fg(mid))),
+                None,
             ),
             SearchResultItem::Album(alb) => (
                 Line::from(vec![
@@ -1071,6 +1078,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                     format!("album  {}", alb.artist.as_deref().unwrap_or("")),
                     Style::default().fg(mid),
                 )),
+                None,
             ),
             SearchResultItem::Track(t) => (
                 Line::from(vec![
@@ -1081,6 +1089,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                     t.artist.as_deref().unwrap_or("").to_string(),
                     Style::default().fg(mid),
                 )),
+                t.duration.map(format_duration),
             ),
             SearchResultItem::Playlist(pl) => (
                 Line::from(vec![
@@ -1088,6 +1097,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                     Span::styled(pl.name.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled("playlist", Style::default().fg(mid))),
+                None,
             ),
             SearchResultItem::AppItem(item) => (
                 Line::from(vec![
@@ -1095,13 +1105,34 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                     Span::styled(item.name.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled("app", Style::default().fg(mid))),
+                None,
             ),
         };
 
-        f.render_widget(
-            Paragraph::new(line1).style(s1),
-            Rect::new(text_x, y, text_w, 1),
-        );
+        if let Some(dur) = duration.as_deref().filter(|d| !d.is_empty()) {
+            let dur_w = dur.len() as u16;
+            if dur_w < text_w {
+                let title_w = text_w - dur_w;
+                f.render_widget(
+                    Paragraph::new(line1).style(s1),
+                    Rect::new(text_x, y, title_w, 1),
+                );
+                f.render_widget(
+                    Paragraph::new(dur).style(s2),
+                    Rect::new(text_x + title_w, y, dur_w, 1),
+                );
+            } else {
+                f.render_widget(
+                    Paragraph::new(line1).style(s1),
+                    Rect::new(text_x, y, text_w, 1),
+                );
+            }
+        } else {
+            f.render_widget(
+                Paragraph::new(line1).style(s1),
+                Rect::new(text_x, y, text_w, 1),
+            );
+        }
         f.render_widget(
             Paragraph::new(line2).style(s2),
             Rect::new(text_x, y + 1, text_w, 1),
@@ -1781,10 +1812,30 @@ fn draw_two_row_list(
             }
         }
 
-        f.render_widget(
-            Paragraph::new(item.line1.clone()).style(s1),
-            Rect::new(text_x, y, text_w, 1),
-        );
+        if let Some(dur) = item.duration.as_deref().filter(|d| !d.is_empty()) {
+            let dur_w = dur.len() as u16;
+            if dur_w < text_w {
+                let title_w = text_w - dur_w;
+                f.render_widget(
+                    Paragraph::new(item.line1.clone()).style(s1),
+                    Rect::new(text_x, y, title_w, 1),
+                );
+                f.render_widget(
+                    Paragraph::new(dur).style(s2),
+                    Rect::new(text_x + title_w, y, dur_w, 1),
+                );
+            } else {
+                f.render_widget(
+                    Paragraph::new(item.line1.clone()).style(s1),
+                    Rect::new(text_x, y, text_w, 1),
+                );
+            }
+        } else {
+            f.render_widget(
+                Paragraph::new(item.line1.clone()).style(s1),
+                Rect::new(text_x, y, text_w, 1),
+            );
+        }
         f.render_widget(
             Paragraph::new(item.line2.clone()).style(s2),
             Rect::new(text_x, y + 1, text_w, 1),

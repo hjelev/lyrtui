@@ -62,7 +62,7 @@ pub struct FolderItem {
     pub id: u32,
     pub filename: String,
     pub item_type: FolderItemType,
-    pub duration: Option<String>,
+    pub duration: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -601,10 +601,7 @@ impl LmsClient {
                     Some("track") => FolderItemType::Track,
                     _ => FolderItemType::Folder,
                 };
-                let duration = v["duration"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .map(String::from);
+                let duration = v["duration"].as_f64().filter(|&d| d > 0.0);
                 Some(FolderItem { id, filename, item_type, duration })
             })
             .collect())
