@@ -24,6 +24,8 @@ pub struct Config {
     pub full_art_mode: bool,
     #[serde(default)]
     pub disable_auto_colors: bool,
+    #[serde(default = "default_image_protocol")]
+    pub image_protocol: String,
 }
 
 fn default_host() -> String {
@@ -42,6 +44,13 @@ fn default_broadcast_mask() -> String {
     "255.255.255.255".to_string()
 }
 
+fn default_image_protocol() -> String {
+    #[cfg(target_os = "windows")]
+    return "halfblocks".to_string();
+    #[cfg(not(target_os = "windows"))]
+    "auto".to_string()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -56,6 +65,7 @@ impl Default for Config {
             global_volume_control: false,
             full_art_mode: false,
             disable_auto_colors: false,
+            image_protocol: default_image_protocol(),
         }
     }
 }

@@ -18,7 +18,7 @@ use crossterm::{
 };
 use events::{key_to_action, poll_event, Action, InputEvent};
 use ratatui::{backend::CrosstermBackend, widgets::ListState, Terminal};
-use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
+use ratatui_image::{picker::{Picker, ProtocolType}, protocol::StatefulProtocol};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -53,7 +53,14 @@ async fn main() -> Result<()> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     // Picker must be created after EnterAlternateScreen, before reading events.
-    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+    let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+    match cfg.image_protocol.as_str() {
+        "halfblocks" => picker.set_protocol_type(ProtocolType::Halfblocks),
+        "sixel"      => picker.set_protocol_type(ProtocolType::Sixel),
+        "kitty"      => picker.set_protocol_type(ProtocolType::Kitty),
+        "iterm2"     => picker.set_protocol_type(ProtocolType::Iterm2),
+        _            => {} // "auto" or unknown: keep auto-detected protocol
+    }
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
