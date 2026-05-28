@@ -522,8 +522,15 @@ async fn handle_msg(
             }
             app.players = players;
         }
-        AppMsg::NowPlayingUpdated(pid, np) => {
+        AppMsg::NowPlayingUpdated(pid, mut np) => {
             if app.active_player.as_deref() == Some(pid.as_str()) {
+                // Preserve locally-pending volume so the 500ms poll doesn't overwrite
+                // an optimistic mute/unmute before the server has processed the command.
+                if app.volume_pending.contains_key(&pid) {
+                    if let Some(cur) = app.now_playing.as_ref() {
+                        np.volume = cur.volume;
+                    }
+                }
                 app.now_playing = Some(np);
             }
         }
@@ -577,7 +584,14 @@ async fn handle_msg(
             app.is_loading = false;
         }
         AppMsg::PlayerVolumesLoaded(volumes) => {
-            app.player_volumes = volumes;
+            let now = std::time::Instant::now();
+            // Drop stale pending entries, then skip pids still within the guard window
+            app.volume_pending.retain(|_, t| now.duration_since(*t).as_secs() < 3);
+            for (pid, vol) in volumes {
+                if !app.volume_pending.contains_key(&pid) {
+                    app.player_volumes.insert(pid, vol);
+                }
+            }
         }
         AppMsg::PlayerSyncGroupsLoaded(groups) => {
             app.player_sync_groups = groups;

@@ -250,6 +250,8 @@ pub struct App {
     pub player_volumes: HashMap<String, u8>,
     // Volumes saved before muting, for unmute restore
     pub muted_volumes: HashMap<String, u8>,
+    // Tracks pids with locally-pending volume changes so polls don't overwrite them
+    pub volume_pending: HashMap<String, std::time::Instant>,
     // Per-player sync group members (updated by background polling)
     pub player_sync_groups: HashMap<String, Vec<String>>,
 
@@ -337,6 +339,7 @@ impl App {
             folder_title: "Folders".to_string(),
             player_volumes: HashMap::new(),
             muted_volumes: HashMap::new(),
+            volume_pending: HashMap::new(),
             player_sync_groups: HashMap::new(),
             sidebar_selected: 0,
             main_selected: 0,

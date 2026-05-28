@@ -1131,6 +1131,7 @@ fn toggle_mute_player(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, p
         app.muted_volumes.remove(pid).unwrap_or(50)
     };
     app.player_volumes.insert(pid.to_string(), new_vol);
+    app.volume_pending.insert(pid.to_string(), std::time::Instant::now());
     let _ = vol_sync_tx.try_send((pid.to_string(), new_vol));
     if app.active_player.as_deref() == Some(pid)
         && let Some(np) = app.now_playing.as_mut()
@@ -1142,11 +1143,13 @@ fn toggle_mute_player(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, p
 fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta: i16) {
     let new_vol = |v: u8| -> u8 { ((v as i16) + delta).clamp(0, 100) as u8 };
 
+    let now = std::time::Instant::now();
     if app.global_volume_control {
         let pids: Vec<String> = app.players.iter().map(|p| p.playerid.clone()).collect();
         for pid in &pids {
             let nv = new_vol(app.player_volumes.get(pid).copied().unwrap_or(50));
             app.player_volumes.insert(pid.clone(), nv);
+            app.volume_pending.insert(pid.clone(), now);
             let _ = vol_sync_tx.try_send((pid.clone(), nv));
         }
         if let Some(active_pid) = app.active_player.clone()
@@ -1161,12 +1164,14 @@ fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta:
             for pid in pids {
                 let nv = new_vol(app.player_volumes.get(&pid).copied().unwrap_or(50));
                 app.player_volumes.insert(pid.clone(), nv);
+                app.volume_pending.insert(pid.clone(), now);
                 let _ = vol_sync_tx.try_send((pid, nv));
             }
         } else if let Some(player) = app.players.get(app.main_selected) {
             let pid = player.playerid.clone();
             let nv = new_vol(app.player_volumes.get(&pid).copied().unwrap_or(50));
             app.player_volumes.insert(pid.clone(), nv);
+            app.volume_pending.insert(pid.clone(), now);
             if app.active_player.as_deref() == Some(&pid)
                 && let Some(np) = app.now_playing.as_mut()
             {
@@ -1180,6 +1185,7 @@ fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta:
             np.volume = nv;
         }
         app.player_volumes.insert(pid.clone(), nv);
+        app.volume_pending.insert(pid.clone(), now);
         let _ = vol_sync_tx.try_send((pid, nv));
     }
 }
@@ -1482,6 +1488,27 @@ pub async fn handle_action(
         Action::VolumeUp => adjust_volume(app, vol_sync_tx, 5),
 
         Action::VolumeDown => adjust_volume(app, vol_sync_tx, -5),
+
+        Action::ToggleMute => {
+            if app.global_volume_control {
+                let pids: Vec<String> = app.players.iter().map(|p| p.playerid.clone()).collect();
+                for pid in &pids {
+                    toggle_mute_player(app, vol_sync_tx, pid);
+                }
+            } else if let MainView::Players = &app.main_view {
+                if app.players_focus_global {
+                    let pids: Vec<String> = app.players.iter().map(|p| p.playerid.clone()).collect();
+                    for pid in &pids {
+                        toggle_mute_player(app, vol_sync_tx, pid);
+                    }
+                } else if let Some(player) = app.players.get(app.main_selected) {
+                    let pid = player.playerid.clone();
+                    toggle_mute_player(app, vol_sync_tx, &pid);
+                }
+            } else if let Some(pid) = app.active_player.clone() {
+                toggle_mute_player(app, vol_sync_tx, &pid);
+            }
+        }
 
         Action::TogglePower => {
             if let MainView::Players = &app.main_view {
