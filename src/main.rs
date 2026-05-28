@@ -403,6 +403,11 @@ async fn run(
                         if app.full_art_mode != prev_art {
                             cfg.full_art_mode = app.full_art_mode;
                             let _ = cfg.save();
+                            // Render area size changes between modes; recreate protocol so the
+                            // image is retransmitted at the correct dimensions.
+                            if let Some(img) = &last_artwork_image {
+                                album_art = Some(picker.new_resize_protocol(img.clone()));
+                            }
                         }
                     }
                 }

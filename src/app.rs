@@ -258,6 +258,7 @@ pub struct App {
     // UI state
     pub sidebar_selected: usize,
     pub main_selected: usize,
+    pub saved_main_selected: Option<usize>,
     pub sidebar_items: Vec<SidebarItem>,
     pub main_view: MainView,
     pub previous_view: Option<MainView>,
@@ -343,6 +344,7 @@ impl App {
             player_sync_groups: HashMap::new(),
             sidebar_selected: 0,
             main_selected: 0,
+            saved_main_selected: None,
             sidebar_items: vec![
                 SidebarItem::MyMusic,
                 SidebarItem::Search,

@@ -1570,11 +1570,14 @@ pub async fn handle_action(
         }
 
         Action::ToggleFullArtMode => {
-            app.full_art_mode = !app.full_art_mode;
-            if app.full_art_mode {
+            if !app.full_art_mode {
+                app.saved_main_selected = Some(app.main_selected);
                 app.focus_sidebar = false;
                 app.main_selected = now_playing_queue_index(app);
+            } else if let Some(saved) = app.saved_main_selected.take() {
+                app.main_selected = saved;
             }
+            app.full_art_mode = !app.full_art_mode;
         }
 
         Action::DeleteQueueItem => {
