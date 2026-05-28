@@ -108,6 +108,14 @@ fn icon_vol(nerd: bool) -> &'static str {
     if nerd { "\u{F028}" } else { "♪" }
 }
 
+fn icon_mute(nerd: bool) -> &'static str {
+    if nerd { "\u{F026}" } else { "×" }  // nf-fa-volume-off
+}
+
+fn icon_vol_or_mute(nerd: bool, vol: u8) -> &'static str {
+    if vol == 0 { icon_mute(nerd) } else { icon_vol(nerd) }
+}
+
 fn icon_power(nerd: bool) -> &'static str {
     if nerd { "\u{F011}" } else { "o" }  // nf-fa-power-off
 }
@@ -717,7 +725,9 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let pwr_icon = icon_power(app.use_nerd_icons);
 
     // Shared layout: compute bar width once so global row and per-player rows are aligned.
+    // vol_icon_str width is constant (mute/vol icons have same width) so layout math is stable.
     let vol_icon_str: &str = if app.use_nerd_icons { "\u{F028} " } else { "" };
+    let mute_icon_str: &str = if app.use_nerd_icons { "\u{F026} " } else { "" };
     // Pad volume to 3 digits so vol_str width is constant (" 🔊  75%" / "  75%").
     let vol_str_w = 1 + vol_icon_str.chars().count() + 4; // 1 space + icon + 3 digits + '%'
     // Reserve 1 col on each side for the pill endcap characters.
@@ -746,7 +756,8 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let glob_fg = if glob_focused { Color::Rgb(220, 235, 255) } else { mid };
 
     let checkbox = if app.global_volume_control { "[x]" } else { "[ ]" };
-    let vol_str = format!(" {}{:3}%", vol_icon_str, global_avg);
+    let glob_icon = if global_avg == 0 { mute_icon_str } else { vol_icon_str };
+    let vol_str = format!(" {}{:3}%", glob_icon, global_avg);
     let filled = if player_bar_w > 0 { (global_avg as usize * player_bar_w) / 100 } else { 0 };
     let bar = format!("{}{}", "█".repeat(filled), "░".repeat(player_bar_w.saturating_sub(filled)));
 
@@ -824,7 +835,8 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
 
         // Use shared bar/name widths so all rows (global + per-player) are aligned.
-        let vol_str = format!(" {}{:3}%", vol_icon_str, vol);
+        let player_vol_icon = if vol == 0 { mute_icon_str } else { vol_icon_str };
+        let vol_str = format!(" {}{:3}%", player_vol_icon, vol);
         let bar_w = player_bar_w;
         let name_col_w = player_name_col_w;
         let filled = if bar_w > 0 { (vol as usize * bar_w) / 100 } else { 0 };
@@ -1417,6 +1429,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         shortcut("End",          "Jump to bottom",                     mid),
         shortcut("Enter / l / →", "Select / enter / focus main",       mid),
         shortcut("Esc / h / ←",  "Back / focus sidebar",               mid),
+        shortcut("1–8",          "Jump to sidebar item directly",      mid),
         Line::from(""),
         header("Playback"),
         shortcut("Space",  "Play / pause",                              mid),
@@ -1506,7 +1519,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     let accent = focus_border_color(app.effective_accent());
     let player_icon = icon_player_dot(app.use_nerd_icons);
     let title_line = if let Some(np) = &app.now_playing {
-        let vol_icon = icon_vol(app.use_nerd_icons);
+        let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
         let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
         Line::from(vec![
             Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
@@ -1660,7 +1673,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
             .map(|p| p.name.as_str())
             .unwrap_or("—");
-        let vol_icon = icon_vol(app.use_nerd_icons);
+        let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
         let globe_icon = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
         let player_vol_line = Line::from(vec![
             Span::styled(if app.use_nerd_icons { " \u{f075a} " } else { " ▶ " }, Style::default().fg(mid)),
@@ -1917,7 +1930,7 @@ fn draw_full_art_mode(
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "—".to_string());
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
-    let vol_icon = icon_vol(app.use_nerd_icons);
+    let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
     let player_icon = icon_player_dot(app.use_nerd_icons);
     let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
     let vol_str = format!("{}%", vol);
@@ -2237,6 +2250,48 @@ pub fn compute_full_art_footer_player_rect(area: Rect, app: &App) -> Rect {
         .constraints([Constraint::Min(1), Constraint::Length(right_w)])
         .split(footer_area);
     footer_cols[1]
+}
+
+/// Returns the rect of the volume icon in the full art mode footer right column.
+/// Returns None when there is no now-playing track.
+pub fn compute_full_art_footer_vol_icon_rect(area: Rect, app: &App) -> Option<Rect> {
+    app.now_playing.as_ref()?;
+    let player_rect = compute_full_art_footer_player_rect(area, app);
+    let player_icon = icon_player_dot(app.use_nerd_icons);
+    let player_name = app.active_player.as_ref()
+        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "—".to_string());
+    // Layout: " {player_icon} {player_name}  {vol_icon} {vol_str}{globe} "
+    // vol_icon offset from player_rect.x: 1 + icon_len + 1 + name_len + 2
+    let offset = 1 + player_icon.chars().count() + 1 + player_name.chars().count() + 2;
+    let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
+    let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
+    let w = (vol_icon.chars().count() + 1) as u16; // icon + trailing space
+    let x = player_rect.x + offset as u16;
+    if x + w > player_rect.x + player_rect.width { return None; }
+    Some(Rect::new(x, player_rect.y, w, 1))
+}
+
+/// Returns the rect of the volume icon in the Now Playing statusbar block title.
+/// Returns None when there is no now-playing track.
+pub fn compute_statusbar_vol_icon_rect(area: Rect, status_height: u16, app: &App) -> Option<Rect> {
+    app.now_playing.as_ref()?;
+    let title_rect = compute_statusbar_title_area(area, status_height);
+    let player_icon = icon_player_dot(app.use_nerd_icons);
+    let player_name = app.active_player.as_ref()
+        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "Now Playing".to_string());
+    // Title starts at title_rect.x + 1 (after corner char).
+    // Layout: " {player_icon} {player_name} ─ {vol_icon} {vol}%..."
+    let offset = 1 + player_icon.chars().count() + 1 + player_name.chars().count() + 3;
+    let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
+    let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
+    let w = (vol_icon.chars().count() + 1) as u16; // icon + trailing space
+    let x = title_rect.x + 1 + offset as u16;
+    if x + w > title_rect.x + title_rect.width { return None; }
+    Some(Rect::new(x, title_rect.y, w, 1))
 }
 
 /// Returns the left-column image area in full art mode.

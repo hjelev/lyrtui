@@ -243,6 +243,14 @@ pub async fn handle_mouse_event(
                         }
                     }
                 }
+                if let Some(vol_rect) = ui::compute_full_art_footer_vol_icon_rect(terminal_area, app)
+                    && point_in(col, row, vol_rect)
+                {
+                    if let Some(pid) = app.active_player.clone() {
+                        toggle_mute_player(app, vol_sync_tx, &pid);
+                    }
+                    return;
+                }
                 let player_rect = ui::compute_full_art_footer_player_rect(terminal_area, app);
                 if point_in(col, row, player_rect) {
                     app.full_art_mode = false;
@@ -308,6 +316,15 @@ pub async fn handle_mouse_event(
                 }
             }
 
+            if let Some(vol_rect) = ui::compute_statusbar_vol_icon_rect(terminal_area, app.status_height, app)
+                && point_in(col, row, vol_rect)
+            {
+                if let Some(pid) = app.active_player.clone() {
+                    toggle_mute_player(app, vol_sync_tx, &pid);
+                }
+                return;
+            }
+
             let title_rect = ui::compute_statusbar_title_area(terminal_area, app.status_height);
             if point_in(col, row, title_rect) {
                 app.main_view = MainView::Players;
@@ -367,6 +384,10 @@ pub async fn handle_mouse_event(
                     let player_name_col_w = player_total_flex.saturating_sub(player_bar_w);
                     // label = " {name}  " → 1 + name_col_w + 2 = name_col_w + 3
                     let label_w = player_name_col_w + 3;
+                    let sync_btn_x = pwr_end_x + label_w as u16;
+                    let sync_btn_end = sync_btn_x + ui::PLAYERS_SYNC_BTN_W;
+                    // Vol str starts at same column for global and per-player rows (bars are aligned)
+                    let vol_str_start_x = sync_btn_end + player_bar_w as u16;
 
                     if row == inner_top {
                         // Global row
@@ -387,14 +408,18 @@ pub async fn handle_mouse_event(
                             // Checkbox "[x]"/"[ ]": toggle global volume control
                             app.players_focus_global = true;
                             app.global_volume_control = !app.global_volume_control;
+                        } else if col >= vol_str_start_x && col < vol_str_start_x + vol_str_w as u16 {
+                            // Vol icon in global row: mute/unmute all players
+                            let pids: Vec<String> = app.players.iter().map(|p| p.playerid.clone()).collect();
+                            for pid in &pids {
+                                toggle_mute_player(app, vol_sync_tx, pid);
+                            }
                         } else {
                             app.players_focus_global = true;
                         }
                     } else if row > inner_top && row < inner_bot {
                         let vis_i = (row - inner_top - 1) as usize;
                         let player_i = main_state.offset() + vis_i;
-                        let sync_btn_x = pwr_end_x + label_w as u16;
-                        let sync_btn_end = sync_btn_x + ui::PLAYERS_SYNC_BTN_W;
                         if col >= pwr_start_x && col < pwr_end_x {
                             // Individual player power button
                             if let Some(p) = app.players.get(player_i) {
@@ -407,6 +432,12 @@ pub async fn handle_mouse_event(
                             }
                         } else if col >= sync_btn_x && col < sync_btn_end {
                             open_sync_modal(app, player_i);
+                        } else if col >= vol_str_start_x && col < vol_str_start_x + vol_str_w as u16 {
+                            // Vol icon: mute/unmute this specific player
+                            if let Some(p) = app.players.get(player_i) {
+                                let pid = p.playerid.clone();
+                                toggle_mute_player(app, vol_sync_tx, &pid);
+                            }
                         } else if player_i < app.players.len() {
                             app.players_focus_global = false;
                             app.main_selected = player_i;
@@ -1091,6 +1122,23 @@ async fn handle_add_to_favorites(
     }
 }
 
+fn toggle_mute_player(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, pid: &str) {
+    let current = app.player_volumes.get(pid).copied().unwrap_or(0);
+    let new_vol = if current > 0 {
+        app.muted_volumes.insert(pid.to_string(), current);
+        0u8
+    } else {
+        app.muted_volumes.remove(pid).unwrap_or(50)
+    };
+    app.player_volumes.insert(pid.to_string(), new_vol);
+    let _ = vol_sync_tx.try_send((pid.to_string(), new_vol));
+    if app.active_player.as_deref() == Some(pid)
+        && let Some(np) = app.now_playing.as_mut()
+    {
+        np.volume = new_vol;
+    }
+}
+
 fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta: i16) {
     let new_vol = |v: u8| -> u8 { ((v as i16) + delta).clamp(0, 100) as u8 };
 
@@ -1284,68 +1332,7 @@ pub async fn handle_action(
                     });
                 }
             } else if app.focus_sidebar {
-                app.main_selected = 0;
-                app.players_focus_global = false;
-                match app.sidebar_items.get(app.sidebar_selected).cloned() {
-                    Some(SidebarItem::MyMusic) => {
-                        app.main_view = MainView::MyMusic;
-                        app.main_selected = 0;
-                        app.focus_sidebar = false;
-                    }
-                    Some(SidebarItem::Radio) => {
-                        app.radio_items = vec![];
-                        app.radio_nav_stack = vec![];
-                        app.radio_title = "Radio".to_string();
-                        app.main_view = MainView::Radio;
-                        app.focus_sidebar = false;
-                        app.is_loading = true;
-                        background::load_radio_services(client.clone(), tx.clone());
-                    }
-                    Some(SidebarItem::Apps) => {
-                        app.app_items = vec![];
-                        app.app_nav_stack = vec![];
-                        app.app_title = "Apps".to_string();
-                        app.main_view = MainView::Apps;
-                        app.focus_sidebar = false;
-                        app.is_loading = true;
-                        background::load_app_services(client.clone(), tx.clone());
-                    }
-                    Some(SidebarItem::Favourites) => {
-                        app.fav_items = vec![];
-                        app.fav_nav_stack = vec![];
-                        app.fav_title = "Favourites".to_string();
-                        app.main_view = MainView::Favourites;
-                        app.focus_sidebar = false;
-                        app.is_loading = true;
-                        background::load_fav_items(
-                            app.active_player.clone().unwrap_or_default(),
-                            None,
-                            client.clone(),
-                            tx.clone(),
-                        );
-                    }
-                    Some(SidebarItem::Queue) => {
-                        app.main_view = MainView::Queue;
-                        app.focus_sidebar = false;
-                        app.main_selected = now_playing_queue_index(app);
-                    }
-                    Some(SidebarItem::Players) => {
-                        app.main_view = MainView::Players;
-                        app.focus_sidebar = false;
-                    }
-                    Some(SidebarItem::Search) => {
-                        app.main_view = MainView::Search;
-                        app.search_input_active = true;
-                        app.focus_sidebar = false;
-                        app.main_selected = 0;
-                    }
-                    Some(SidebarItem::Help) => {
-                        app.main_view = MainView::Help;
-                        app.focus_sidebar = false;
-                        app.help_scroll = 0;
-                    }
-                    None => {}
-                }
+                activate_sidebar_item(app, client, tx).await;
             } else if utils::is_main_item_playable(app) {
                 let (add, replace) = utils::compute_parent_labels(app);
                 app.context_menu = Some(ContextMenu::new(add, replace));
@@ -1618,9 +1605,85 @@ pub async fn handle_action(
             }
         }
 
+        Action::NavToSidebar(idx) => {
+            if idx < app.sidebar_items.len() {
+                app.sidebar_selected = idx;
+                activate_sidebar_item(app, client, tx).await;
+            }
+        }
+
         Action::OpenConfig | Action::None => {}
     }
     false
+}
+
+async fn activate_sidebar_item(
+    app: &mut App,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    app.main_selected = 0;
+    app.players_focus_global = false;
+    match app.sidebar_items.get(app.sidebar_selected).cloned() {
+        Some(SidebarItem::MyMusic) => {
+            app.main_view = MainView::MyMusic;
+            app.main_selected = 0;
+            app.focus_sidebar = false;
+        }
+        Some(SidebarItem::Radio) => {
+            app.radio_items = vec![];
+            app.radio_nav_stack = vec![];
+            app.radio_title = "Radio".to_string();
+            app.main_view = MainView::Radio;
+            app.focus_sidebar = false;
+            app.is_loading = true;
+            background::load_radio_services(client.clone(), tx.clone());
+        }
+        Some(SidebarItem::Apps) => {
+            app.app_items = vec![];
+            app.app_nav_stack = vec![];
+            app.app_title = "Apps".to_string();
+            app.main_view = MainView::Apps;
+            app.focus_sidebar = false;
+            app.is_loading = true;
+            background::load_app_services(client.clone(), tx.clone());
+        }
+        Some(SidebarItem::Favourites) => {
+            app.fav_items = vec![];
+            app.fav_nav_stack = vec![];
+            app.fav_title = "Favourites".to_string();
+            app.main_view = MainView::Favourites;
+            app.focus_sidebar = false;
+            app.is_loading = true;
+            background::load_fav_items(
+                app.active_player.clone().unwrap_or_default(),
+                None,
+                client.clone(),
+                tx.clone(),
+            );
+        }
+        Some(SidebarItem::Queue) => {
+            app.main_view = MainView::Queue;
+            app.focus_sidebar = false;
+            app.main_selected = now_playing_queue_index(app);
+        }
+        Some(SidebarItem::Players) => {
+            app.main_view = MainView::Players;
+            app.focus_sidebar = false;
+        }
+        Some(SidebarItem::Search) => {
+            app.main_view = MainView::Search;
+            app.search_input_active = true;
+            app.focus_sidebar = false;
+            app.main_selected = 0;
+        }
+        Some(SidebarItem::Help) => {
+            app.main_view = MainView::Help;
+            app.focus_sidebar = false;
+            app.help_scroll = 0;
+        }
+        None => {}
+    }
 }
 
 /// Returns the queue index of the currently playing track.

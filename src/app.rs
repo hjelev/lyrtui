@@ -248,6 +248,8 @@ pub struct App {
 
     // Per-player volumes (updated by background polling)
     pub player_volumes: HashMap<String, u8>,
+    // Volumes saved before muting, for unmute restore
+    pub muted_volumes: HashMap<String, u8>,
     // Per-player sync group members (updated by background polling)
     pub player_sync_groups: HashMap<String, Vec<String>>,
 
@@ -334,6 +336,7 @@ impl App {
             folder_nav_stack: vec![],
             folder_title: "Folders".to_string(),
             player_volumes: HashMap::new(),
+            muted_volumes: HashMap::new(),
             player_sync_groups: HashMap::new(),
             sidebar_selected: 0,
             main_selected: 0,
