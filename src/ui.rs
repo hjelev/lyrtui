@@ -1430,16 +1430,20 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
 
     let right: Vec<Line> = vec![
         header("Library & Queue"),
-        shortcut("a",  "Add selected item to queue",                    mid),
-        shortcut("d / Del", "Remove selected item from queue",          mid),
-        shortcut("x",  "Clear queue",                                   mid),
+        shortcut("a",        "Add selected item to queue",              mid),
+        shortcut("d / Del",  "Remove selected item from queue",         mid),
+        shortcut("x",        "Clear queue",                             mid),
+        Line::from(""),
+        header("Search"),
+        shortcut("[ / ]",    "Cycle search scope (prev / next)",        mid),
         Line::from(""),
         header("Players"),
-        shortcut("t",  "Toggle player power",                           mid),
+        shortcut("t",        "Toggle player power",                     mid),
         shortcut("Enter (on Global vol)", "Toggle global volume control", mid),
         Line::from(""),
         header("App"),
-        shortcut("c",         "Open server configuration",              mid),
+        shortcut("`",        "Toggle Big Art Mode",                     mid),
+        shortcut("c",        "Open server configuration",               mid),
         shortcut("q / Ctrl-c", "Quit",                                  mid),
     ];
 
@@ -1766,7 +1770,9 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let prog = rows[progress_row];
     let prog_x = prog.x + if bigscreen { 1 } else { 0 };
     let prog_w = prog.width.saturating_sub(if bigscreen { 2 } else { 1 });
-    let bar_w = prog_w as usize;
+    // Reserve columns for pill endcaps (nerd: left+right = 2 cols; plain: left space = 1 col)
+    let endcap_cols: u16 = if app.use_nerd_icons { 2 } else { 1 };
+    let bar_w = prog_w.saturating_sub(endcap_cols) as usize;
     let filled = pct * bar_w / 100;
 
     let time = format!(
@@ -1781,7 +1787,6 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let pure_filled = text_start.min(filled);
     let pure_unfilled = text_start.saturating_sub(filled);
     let over_filled = filled.saturating_sub(text_start).min(tw);
-    let _over_unfilled = tw.saturating_sub(over_filled);
 
     let text_bytes: Vec<char> = time.chars().collect();
     let over_filled_text: String = text_bytes[..over_filled].iter().collect();
@@ -1798,8 +1803,11 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         ),
         None => (Color::Yellow, Color::Rgb(55, 55, 70)),
     };
+    let left_cap_color = if pct > 0 { accent } else { track_color };
+    let right_cap_color = if filled >= bar_w { accent } else { track_color };
     let bar = Line::from(vec![
-        Span::styled("█".repeat(pure_filled), Style::default().fg(accent)),
+        pill_endcap_left(left_cap_color, app.use_nerd_icons),
+        Span::styled(" ".repeat(pure_filled), Style::default().bg(accent)),
         Span::styled(" ".repeat(pure_unfilled), Style::default().bg(track_color)),
         Span::styled(
             over_filled_text,
@@ -1809,6 +1817,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             over_unfilled_text,
             Style::default().bg(track_color).fg(Color::Rgb(210, 215, 225)),
         ),
+        pill_endcap_right(right_cap_color, app.use_nerd_icons),
     ]);
     let progress_rect = Rect::new(prog_x, prog.y, prog_w, prog.height);
     f.render_widget(Paragraph::new(bar), progress_rect);

@@ -111,11 +111,14 @@ The action menu can be navigated with `↑`/`↓` (or `j`/`k`), confirmed with `
 | `s` | Toggle shuffle |
 | `r` | Cycle repeat mode (off → one → all → repeat-all) |
 | `a` | Add selected item to queue |
+| `d` / `Del` | Remove selected item from queue |
+| `x` | Clear queue |
+| `[` / `]` | Cycle search scope prev / next (in Search view) |
 | `t` | Toggle player power (in Players view) |
 | `Space` | Toggle sync checkbox (in sync modal) |
 | `Tab` | Switch focus between player list and buttons (in sync modal) |
 | `c` | Open server configuration |
-| ``` | Enable/disable Big Art Mode |
+| `` ` `` | Toggle Big Art Mode |
 | `q` / `Ctrl-c` | Quit |
 
 ### Configuration

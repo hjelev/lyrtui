@@ -59,7 +59,12 @@ async fn main() -> Result<()> {
         "sixel"      => picker.set_protocol_type(ProtocolType::Sixel),
         "kitty"      => picker.set_protocol_type(ProtocolType::Kitty),
         "iterm2"     => picker.set_protocol_type(ProtocolType::Iterm2),
-        _            => {} // "auto" or unknown: keep auto-detected protocol
+        _ => {
+            // "auto" or unknown: on Windows, terminal graphics protocols aren't supported
+            if cfg!(target_os = "windows") {
+                picker.set_protocol_type(ProtocolType::Halfblocks);
+            }
+        }
     }
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -341,7 +346,11 @@ async fn run(
                             "sixel"      => picker.set_protocol_type(ProtocolType::Sixel),
                             "kitty"      => picker.set_protocol_type(ProtocolType::Kitty),
                             "iterm2"     => picker.set_protocol_type(ProtocolType::Iterm2),
-                            _            => {} // "auto": no runtime change, takes effect on restart
+                            _ => {
+                                if cfg!(target_os = "windows") {
+                                    picker.set_protocol_type(ProtocolType::Halfblocks);
+                                }
+                            }
                         }
                         if let Some(img) = &last_artwork_image {
                             album_art = Some(picker.new_resize_protocol(img.clone()));
