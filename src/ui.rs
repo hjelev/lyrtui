@@ -14,7 +14,7 @@ use ratatui::{
 use ratatui_image::{Resize, StatefulImage, protocol::StatefulProtocol};
 use std::collections::HashMap;
 
-const THUMB_W: u16 = 4; // image column width in cells
+pub const THUMB_W: u16 = 4; // image column width in cells
 const THUMB_SEP: u16 = 1; // gap between image and text
 pub const PLAYERS_PWR_BTN_W: u16 = 3; // width of the power button column in the Players screen
 pub const PLAYERS_SYNC_BTN_W: u16 = 3; // width of the sync button column " ⇄ "

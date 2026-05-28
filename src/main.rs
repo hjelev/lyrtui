@@ -256,8 +256,15 @@ async fn run(
                 }
                 AppMsg::ThumbnailLoaded(url, img) => {
                     pending_thumbs.remove(&url);
-                    thumbnail_images.insert(url.clone(), img.clone());
-                    thumbnails.insert(url, picker.new_resize_protocol(img));
+                    // Pre-resize to thumbnail pixel dims to cap protocol data size.
+                    // Prevents Kitty cache eviction and Sixel buffer overflow on Windows Terminal
+                    // when many HD thumbnails are visible simultaneously (3-4 would blink).
+                    let (fw, fh) = app.font_size;
+                    let target_w = (crate::ui::THUMB_W as u32 * fw as u32).max(1);
+                    let target_h = (2u32 * fh as u32).max(1);
+                    let small = img.resize(target_w, target_h, image::imageops::FilterType::Triangle);
+                    thumbnail_images.insert(url.clone(), small.clone());
+                    thumbnails.insert(url, picker.new_resize_protocol(small));
                 }
                 AppMsg::ThumbnailFailed(url) => {
                     pending_thumbs.remove(&url);
