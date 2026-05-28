@@ -40,6 +40,31 @@ pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sen
     .abort_handle()
 }
 
+/// Browse an app's menu tree to find the item_id of its "New Search" node.
+/// Checks the top level first, then one level deeper into any "Search"-named folder.
+async fn find_app_search_item_id(client: &Arc<LmsClient>, player_id: &str, cmd: &str) -> Option<String> {
+    let Ok(items) = client.browse_radio(player_id, cmd, None).await else { return None; };
+    for item in &items {
+        if item.item_type == "search" {
+            return item.item_id.clone();
+        }
+    }
+    // Check one level into any "Search"-named folder
+    for item in &items {
+        if item.name.to_lowercase().contains("search")
+            && let Some(sub_id) = &item.item_id
+            && let Ok(sub_items) = client.browse_radio(player_id, cmd, Some(sub_id)).await
+        {
+            for sub_item in &sub_items {
+                if sub_item.item_type == "search" {
+                    return sub_item.item_id.clone();
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn trigger_search(
     query: String,
     scope: SearchScope,
@@ -87,7 +112,8 @@ pub fn trigger_search(
                     let q = query.clone();
                     let pid = player_id.clone();
                     app_handles.push(tokio::spawn(async move {
-                        c.search_app(&pid, &cmd, &q).await
+                        let item_id = find_app_search_item_id(&c, &pid, &cmd).await;
+                        c.search_app_via_item(&pid, &cmd, item_id.as_deref(), &q).await
                     }));
                 }
             }
@@ -115,9 +141,7 @@ pub fn trigger_search(
         for handle in app_handles {
             if let Ok(Ok(items)) = handle.await {
                 for item in items {
-                    if item.name.to_lowercase().contains(&q_lower) {
-                        results.push(SearchResultItem::AppItem(item));
-                    }
+                    results.push(SearchResultItem::AppItem(item));
                 }
             }
         }
