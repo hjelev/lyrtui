@@ -1496,15 +1496,19 @@ fn shortcut(key: &'static str, desc: &'static str, mid: Color) -> Line<'static> 
     ])
 }
 
-/// Builds a styled hint line: keys are White, separators and descriptions use accent mid-tone.
+/// Builds a styled hint line: keys are rendered as dark-background chips, descriptions beside them.
 fn hint_line(pairs: &[(&str, &str)], accent: Option<[u8; 3]>) -> Line<'static> {
     let dim = mid_accent_color(accent);
+    let chip_bg = btn_bg_color(accent);
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (i, (key, action)) in pairs.iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled("  ", Style::default().fg(dim)));
         }
-        spans.push(Span::styled(key.to_string(), Style::default().fg(Color::White)));
+        spans.push(Span::styled(
+            format!(" {key} "),
+            Style::default().fg(Color::White).bg(chip_bg),
+        ));
         spans.push(Span::styled(format!(" {action}"), Style::default().fg(dim)));
     }
     Line::from(spans)

@@ -31,6 +31,53 @@ const TICK_RATE: Duration = Duration::from_millis(250);
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().any(|a| a == "-v" || a == "--version") {
+        println!("lyrtui v{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
+    if std::env::args().any(|a| a == "-h" || a == "--help") {
+        print!(
+            "\
+lyrtui v{version} — TUI for Lyrion Music Server
+
+USAGE:
+  lyrtui [OPTIONS]
+
+OPTIONS:
+  -h, --help       Print this help message and exit
+
+NAVIGATION:
+  ↑/↓ / j/k       Move up/down in lists
+  Tab              Switch between panels
+  Enter            Select / confirm
+  Esc              Go back / close overlay
+  1-9              Jump to menu item
+  q                Quit
+
+PLAYBACK:
+  Space            Play / Pause
+  n                Next track
+  p                Previous track
+  m                Mute / unmute active player
+  +/-              Volume up / down
+  < / >            Seek backward / forward
+
+LIBRARY:
+  /                Search
+  r                Refresh
+
+CONFIG:
+  c                Open config modal
+
+The app connects to a Lyrion Music Server (default: localhost:9000).
+Config file: ~/.config/lyrtui/config.toml
+",
+            version = env!("CARGO_PKG_VERSION")
+        );
+        return Ok(());
+    }
+
     let mut cfg = config::Config::load()?;
 
     // Run discovery if this is a first run (no config file) or auto_discover is on.
