@@ -453,9 +453,14 @@ async fn handle_msg(
     use app::ConnectionState;
     match msg {
         AppMsg::Connected => {
+            let was_connected = app.connection == ConnectionState::Connected;
             app.connection = ConnectionState::Connected;
             if app.status_message.as_deref() == Some("Reconnecting...") {
                 app.status_message = None;
+            }
+            if !was_connected {
+                background::load_app_services(client.clone(), tx.clone());
+                background::load_radio_services(client.clone(), tx.clone());
             }
         }
         AppMsg::Disconnected => app.connection = ConnectionState::Disconnected,
@@ -506,8 +511,13 @@ async fn handle_msg(
             app.is_loading = false;
         }
         AppMsg::RadioItemsLoaded(items) => {
+            if app.radio_nav_stack.is_empty() {
+                app.radio_services = items.clone();
+            }
             app.radio_items = items;
-            app.main_selected = 0;
+            if matches!(app.main_view, MainView::Radio) {
+                app.main_selected = 0;
+            }
             app.is_loading = false;
         }
         AppMsg::AppItemsLoaded(items) => {
@@ -515,7 +525,9 @@ async fn handle_msg(
                 app.app_services = items.clone();
             }
             app.app_items = items;
-            app.main_selected = 0;
+            if matches!(app.main_view, MainView::Apps) {
+                app.main_selected = 0;
+            }
             app.is_loading = false;
         }
         AppMsg::FavItemsLoaded(items) => {

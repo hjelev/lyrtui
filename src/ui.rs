@@ -1,5 +1,5 @@
 use crate::api::{FolderItemType, NowPlaying};
-use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView, SearchResultItem, SidebarItem, SyncModal};
+use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView, SearchResultItem, SearchScope, SidebarItem, SyncModal};
 use serde_json::Value;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -166,6 +166,36 @@ pub fn compute_areas(area: Rect, status_height: u16) -> (Rect, Rect) {
     (panes[0], panes[1])
 }
 
+/// Returns (input_rect, tab_bar_rect) for the search panel within main_area.
+pub fn compute_search_panel_rects(main_area: Rect) -> (Rect, Rect) {
+    let inner_x = main_area.x + 1;
+    let inner_y = main_area.y + 1;
+    let inner_w = main_area.width.saturating_sub(2);
+    let input_rect = Rect::new(inner_x, inner_y, inner_w, 3);
+    let tab_rect = Rect::new(inner_x, inner_y + 3, inner_w, 1);
+    (input_rect, tab_rect)
+}
+
+/// Returns the SearchScope whose tab was clicked at `col` in the tab bar.
+/// Separator clicks select the preceding tab; clicks past the last tab select All.
+pub fn search_scope_at_col(col: u16, tab_bar: Rect, use_nerd_icons: bool) -> Option<SearchScope> {
+    if col < tab_bar.x { return None; }
+    let rel = (col - tab_bar.x) as usize;
+    let labels = ["My Music", "Radios", "Apps", "All"];
+    let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
+    let extra = if use_nerd_icons { 2usize } else { 0 };
+    let sep = 3usize; // " │ "
+    let mut start = 0usize;
+    for (label, scope) in labels.iter().zip(scopes.iter()) {
+        let tab_w = extra + label.len();
+        if rel < start + tab_w + sep {
+            return Some(scope.clone());
+        }
+        start += tab_w + sep;
+    }
+    Some(SearchScope::All)
+}
+
 /// Returns the six clickable button rects in the Now Playing controls row: [Prev, PlayPause, Stop, Next, Shuffle, Repeat].
 pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w: u16) -> [Rect; 8] {
     let outer = Layout::default()
@@ -260,7 +290,7 @@ pub fn draw(
                 ], app.effective_accent())
             } else if matches!(app.main_view, MainView::Search) {
                 if app.search_input_active {
-                    hint_line(&[("Type", "query"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")], app.effective_accent())
+                    hint_line(&[("Type", "query"), ("Tab", "scope"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")], app.effective_accent())
                 } else {
                     hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("i//", "edit query"), ("Esc", "back"), ("q", "quit")], app.effective_accent())
                 }
@@ -975,7 +1005,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .constraints([Constraint::Length(3), Constraint::Length(1), Constraint::Min(0)])
         .split(inner);
 
     // Search input box
@@ -992,7 +1022,47 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
         .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(input_border_style));
     f.render_widget(input, chunks[0]);
 
-    let results_area = chunks[1];
+    // Scope tab bar
+    {
+        let accent = focus_border_color(app.effective_accent());
+        let dim = unfocus_border_color(app.effective_accent());
+        let tabs: [(&str, &str, SearchScope); 4] = if app.use_nerd_icons {
+            [
+                ("\u{F001}", "My Music", SearchScope::MyMusic),  // nf-fa-music
+                ("\u{F130}", "Radios",   SearchScope::Radios),   // nf-fa-microphone
+                ("\u{F109}", "Apps",     SearchScope::Apps),     // nf-fa-laptop
+                ("\u{F002}", "All",      SearchScope::All),      // nf-fa-search
+            ]
+        } else {
+            [
+                ("♪", "My Music", SearchScope::MyMusic),
+                ("○", "Radios",   SearchScope::Radios),
+                ("□", "Apps",     SearchScope::Apps),
+                ("*", "All",      SearchScope::All),
+            ]
+        };
+        let mut spans: Vec<Span> = Vec::new();
+        for (i, (icon, label, scope)) in tabs.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(" │ ", Style::default().fg(dim)));
+            }
+            let is_sel = &app.search_scope == scope;
+            let style = if is_sel {
+                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(dim)
+            };
+            let text = if app.use_nerd_icons {
+                format!("{} {}", icon, label)
+            } else {
+                label.to_string()
+            };
+            spans.push(Span::styled(text, style));
+        }
+        f.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
+    }
+
+    let results_area = chunks[2];
 
     if app.search_results.is_empty() {
         let msg = if app.search_query.is_empty() {
@@ -1031,7 +1101,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             SearchResultItem::Artist(a) => Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
             SearchResultItem::Album(alb) => Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&alb.id))),
             SearchResultItem::Track(t) => t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, value_id_str(id))),
-            SearchResultItem::AppItem(item) => item.artwork_url.clone(),
+            SearchResultItem::AppItem(item) | SearchResultItem::RadioItem(item) => item.artwork_url.clone(),
             SearchResultItem::Playlist(_) => None,
         };
         let thumb_rect = Rect::new(results_area.x, y, THUMB_W, 2);
@@ -1105,6 +1175,14 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
                     Span::styled(item.name.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled("app", Style::default().fg(mid))),
+                None,
+            ),
+            SearchResultItem::RadioItem(item) => (
+                Line::from(vec![
+                    Span::styled("▸ ", Style::default().fg(Color::Rgb(100, 180, 220))),
+                    Span::styled(item.name.clone(), Style::default().fg(Color::White)),
+                ]),
+                Line::from(Span::styled("radio", Style::default().fg(mid))),
                 None,
             ),
         };

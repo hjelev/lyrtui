@@ -54,6 +54,8 @@ pub enum Action {
     Home,
     End,
     ToggleFocus,
+    ScopePrev,
+    ScopeNext,
     None,
 }
 
@@ -84,6 +86,8 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyCode::Home, _) => Action::Home,
         (KeyCode::End, _) => Action::End,
         (KeyCode::Tab, _) | (KeyCode::BackTab, _) => Action::ToggleFocus,
+        (KeyCode::Char('['), _) => Action::ScopePrev,
+        (KeyCode::Char(']'), _) => Action::ScopeNext,
         _ => Action::None,
     }
 }

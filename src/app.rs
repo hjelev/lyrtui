@@ -51,6 +51,15 @@ pub enum SearchResultItem {
     Track(Track),
     Playlist(Playlist),
     AppItem(RadioItem),
+    RadioItem(RadioItem),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SearchScope {
+    MyMusic,
+    Radios,
+    Apps,
+    All,
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +243,7 @@ pub struct App {
     pub main_selected: usize,
     pub sidebar_items: Vec<SidebarItem>,
     pub main_view: MainView,
+    pub previous_view: Option<MainView>,
     pub focus_sidebar: bool,
     pub players_focus_global: bool,
     pub global_volume_control: bool,
@@ -256,6 +266,8 @@ pub struct App {
     pub search_query: String,
     pub search_results: Vec<SearchResultItem>,
     pub search_input_active: bool,
+    pub search_scope: SearchScope,
+    pub radio_services: Vec<RadioItem>,
 
     pub use_nerd_icons: bool,
     pub full_art_mode: bool,
@@ -318,6 +330,7 @@ impl App {
                 SidebarItem::Help,
             ],
             main_view: MainView::MyMusic,
+            previous_view: None,
             focus_sidebar: true,
             players_focus_global: false,
             global_volume_control: false,
@@ -335,6 +348,8 @@ impl App {
             search_query: String::new(),
             search_results: vec![],
             search_input_active: false,
+            search_scope: SearchScope::MyMusic,
+            radio_services: vec![],
             is_loading: false,
             use_nerd_icons: false,
             full_art_mode: false,

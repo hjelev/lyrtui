@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::api::{LmsClient, RadioItem};
-use crate::app::{AppMsg, SearchResultItem};
+use crate::app::{AppMsg, SearchResultItem, SearchScope};
 
 fn spawn_if_ok<F, Fut, T>(client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>, op: F, wrap: fn(T) -> AppMsg)
 where
@@ -42,7 +42,9 @@ pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sen
 
 pub fn trigger_search(
     query: String,
+    scope: SearchScope,
     app_services: Vec<RadioItem>,
+    radio_services: Vec<RadioItem>,
     player_id: String,
     client: Arc<LmsClient>,
     tx: mpsc::Sender<AppMsg>,
@@ -50,36 +52,72 @@ pub fn trigger_search(
     tokio::spawn(async move {
         let mut results = Vec::new();
 
-        // Spawn library search and all app searches concurrently
-        let lib_handle = {
-            let client = client.clone();
-            let query = query.clone();
-            tokio::spawn(async move { client.search_library(&query).await })
+        let do_library = matches!(scope, SearchScope::MyMusic | SearchScope::All);
+        let do_radios  = matches!(scope, SearchScope::Radios  | SearchScope::All);
+        let do_apps    = matches!(scope, SearchScope::Apps    | SearchScope::All);
+
+        let lib_handle = if do_library {
+            let c = client.clone();
+            let q = query.clone();
+            Some(tokio::spawn(async move { c.search_library(&q).await }))
+        } else {
+            None
         };
 
-        let mut app_handles = Vec::new();
-        for svc in &app_services {
-            if let Some(cmd) = svc.cmd.clone() {
-                let client = client.clone();
-                let query = query.clone();
-                let player_id = player_id.clone();
-                app_handles.push(tokio::spawn(async move {
-                    client.search_app(&player_id, &cmd, &query).await
-                }));
+        let mut radio_handles: Vec<tokio::task::JoinHandle<anyhow::Result<Vec<RadioItem>>>> = Vec::new();
+        let mut app_handles: Vec<tokio::task::JoinHandle<anyhow::Result<Vec<RadioItem>>>> = Vec::new();
+
+        if do_radios {
+            for svc in &radio_services {
+                if let Some(cmd) = svc.cmd.clone() {
+                    let c = client.clone();
+                    let q = query.clone();
+                    let pid = player_id.clone();
+                    radio_handles.push(tokio::spawn(async move {
+                        c.search_app(&pid, &cmd, &q).await
+                    }));
+                }
             }
         }
 
-        if let Ok(Ok((artists, albums, tracks, playlists))) = lib_handle.await {
+        if do_apps {
+            for svc in &app_services {
+                if let Some(cmd) = svc.cmd.clone() {
+                    let c = client.clone();
+                    let q = query.clone();
+                    let pid = player_id.clone();
+                    app_handles.push(tokio::spawn(async move {
+                        c.search_app(&pid, &cmd, &q).await
+                    }));
+                }
+            }
+        }
+
+        if let Some(h) = lib_handle
+            && let Ok(Ok((artists, albums, tracks, playlists))) = h.await
+        {
             for a in artists   { results.push(SearchResultItem::Artist(a)); }
             for a in albums    { results.push(SearchResultItem::Album(a)); }
             for t in tracks    { results.push(SearchResultItem::Track(t)); }
             for p in playlists { results.push(SearchResultItem::Playlist(p)); }
         }
 
+        let q_lower = query.to_lowercase();
+        for handle in radio_handles {
+            if let Ok(Ok(items)) = handle.await {
+                for item in items {
+                    if item.name.to_lowercase().contains(&q_lower) {
+                        results.push(SearchResultItem::RadioItem(item));
+                    }
+                }
+            }
+        }
         for handle in app_handles {
             if let Ok(Ok(items)) = handle.await {
                 for item in items {
-                    results.push(SearchResultItem::AppItem(item));
+                    if item.name.to_lowercase().contains(&q_lower) {
+                        results.push(SearchResultItem::AppItem(item));
+                    }
                 }
             }
         }

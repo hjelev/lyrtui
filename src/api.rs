@@ -630,6 +630,7 @@ impl LmsClient {
     }
 
     /// Search within a single LMS app/plugin using the XMLBrowser items API with a search filter.
+    /// Only playable audio items are returned; container/navigation items are discarded.
     pub async fn search_app(&self, player_id: &str, cmd: &str, query: &str) -> Result<Vec<RadioItem>> {
         let result = self.rpc(player_id, &[
             json!(cmd),
@@ -653,50 +654,88 @@ impl LmsClient {
     }
 
     pub async fn search_library(&self, query: &str) -> Result<(Vec<Artist>, Vec<Album>, Vec<Track>, Vec<Playlist>)> {
-        let result = self.rpc("", &[
-            json!("search"),
-            json!(0), json!(100),
-            json!(format!("term:{}", query)),
-        ]).await?;
+        // Try FTS (full-text search) command first — fast when the index exists.
+        if let Ok(result) = self.rpc("", &[
+            json!("search"), json!(0), json!(200), json!(format!("term:{}", query))
+        ]).await
+            && !result.is_null()
+        {
+                let raw_artists = result["contributors_loop"].as_array().cloned().unwrap_or_default();
+                let artists: Vec<Artist> = raw_artists.into_iter().filter_map(|v| {
+                    let name = v["contributor"].as_str()?.to_string();
+                    let id = v["contributor_id"].clone();
+                    if id.is_null() { return None; }
+                    Some(Artist { id, artist: name })
+                }).collect();
 
-        // LMS search returns contributors_loop (not artists_loop) with contributor/contributor_id fields
-        let raw_artists = result["contributors_loop"].as_array().cloned().unwrap_or_default();
-        let artists: Vec<Artist> = raw_artists.into_iter().filter_map(|v| {
-            let name = v["contributor"].as_str()?.to_string();
-            let id = json!(v["contributor_id"].as_u64()?);
-            Some(Artist { id, artist: name })
-        }).collect();
+                let raw_albums = result["albums_loop"].as_array().cloned().unwrap_or_default();
+                let albums: Vec<Album> = raw_albums.into_iter().filter_map(|v| {
+                    let name = v["album"].as_str()?.to_string();
+                    let id = v["album_id"].clone();
+                    if id.is_null() { return None; }
+                    Some(Album { id, album: name, artist: v["artist"].as_str().map(String::from) })
+                }).collect();
 
-        // albums_loop uses album_id instead of id
-        let raw_albums = result["albums_loop"].as_array().cloned().unwrap_or_default();
-        let albums: Vec<Album> = raw_albums.into_iter().filter_map(|v| {
-            let name = v["album"].as_str()?.to_string();
-            let id = json!(v["album_id"].as_u64()?);
-            Some(Album { id, album: name, artist: v["artist"].as_str().map(String::from) })
-        }).collect();
+                let raw_tracks = result["tracks_loop"].as_array().cloned().unwrap_or_default();
+                let tracks: Vec<Track> = raw_tracks.into_iter().filter_map(|v| {
+                    let title = v["track"].as_str()?.to_string();
+                    let id = v["track_id"].clone();
+                    if id.is_null() { return None; }
+                    Some(Track {
+                        id: Some(id),
+                        title,
+                        artist: v["artist"].as_str().map(String::from),
+                        album: v["album"].as_str().map(String::from),
+                        duration: v["duration"].as_f64(),
+                        artwork_url: None,
+                    })
+                }).collect();
 
-        // tracks_loop uses track_id and track (not id and title)
-        let raw_tracks = result["tracks_loop"].as_array().cloned().unwrap_or_default();
-        let tracks: Vec<Track> = raw_tracks.into_iter().filter_map(|v| {
-            let title = v["track"].as_str()?.to_string();
-            let id = json!(v["track_id"].as_u64()?);
-            Some(Track {
-                id: Some(id),
-                title,
-                artist: v["artist"].as_str().map(String::from),
-                album: v["album"].as_str().map(String::from),
-                duration: v["duration"].as_f64(),
-                artwork_url: None,
-            })
-        }).collect();
+                let raw_playlists = result["playlists_loop"].as_array().cloned().unwrap_or_default();
+                let playlists: Vec<Playlist> = raw_playlists.into_iter().filter_map(|v| {
+                    let name = v["playlist"].as_str()?.to_string();
+                    let id = v["playlist_id"].clone();
+                    if id.is_null() { return None; }
+                    Some(Playlist { id, name })
+                }).collect();
 
-        // playlists_loop uses playlist_id and playlist
-        let raw_playlists = result["playlists_loop"].as_array().cloned().unwrap_or_default();
-        let playlists: Vec<Playlist> = raw_playlists.into_iter().filter_map(|v| {
-            let name = v["playlist"].as_str()?.to_string();
-            let id = json!(v["playlist_id"].as_u64()?);
-            Some(Playlist { id, name })
-        }).collect();
+                return Ok((artists, albums, tracks, playlists));
+        }
+
+        // FTS unavailable or returned null — fall back to fetching all items and
+        // filtering by name client-side.  All four fetches run concurrently.
+        let lower = query.to_lowercase();
+        let (art_res, alb_res, trk_res, pls_res) = tokio::join!(
+            self.get_artists(),
+            self.get_albums(None),
+            self.get_all_tracks(),
+            self.get_playlists(),
+        );
+
+        const LIMIT: usize = 200;
+
+        let artists: Vec<Artist> = art_res.unwrap_or_default().into_iter()
+            .filter(|a| a.artist.to_lowercase().contains(&lower))
+            .take(LIMIT)
+            .collect();
+
+        let albums: Vec<Album> = alb_res.unwrap_or_default().into_iter()
+            .filter(|a| a.album.to_lowercase().contains(&lower)
+                || a.artist.as_deref().is_some_and(|ar| ar.to_lowercase().contains(&lower)))
+            .take(LIMIT)
+            .collect();
+
+        let tracks: Vec<Track> = trk_res.unwrap_or_default().into_iter()
+            .filter(|t| t.title.to_lowercase().contains(&lower)
+                || t.artist.as_deref().is_some_and(|ar| ar.to_lowercase().contains(&lower))
+                || t.album.as_deref().is_some_and(|al| al.to_lowercase().contains(&lower)))
+            .take(LIMIT)
+            .collect();
+
+        let playlists: Vec<Playlist> = pls_res.unwrap_or_default().into_iter()
+            .filter(|p| p.name.to_lowercase().contains(&lower))
+            .take(LIMIT)
+            .collect();
 
         Ok((artists, albums, tracks, playlists))
     }
@@ -752,7 +791,7 @@ fn parse_browse_item(v: &Value, base: &str, default_cmd: &str) -> RadioItem {
         item_type: v["type"].as_str().unwrap_or("link").to_string(),
         url: v["url"].as_str().map(String::from),
         cmd: v["cmd"].as_str().map(String::from).or_else(|| Some(default_cmd.to_string())),
-        item_id: v["id"].as_str().map(String::from),
+        item_id: extract_id_str(&v["id"]),
         artwork_url: resolve_image_url(v, base),
         has_items: v["hasitems"].as_u64().unwrap_or(0) > 0,
         is_audio: v["isaudio"].as_u64().unwrap_or(0) > 0,

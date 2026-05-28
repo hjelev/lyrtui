@@ -9,7 +9,7 @@ use ratatui::widgets::ListState;
 use crate::api::{FolderItemType, LmsClient};
 use crate::app::{
     App, AppMsg, ConnectionState, ContextMenu, FolderNav, LibraryView, MainView,
-    RadioNav, SearchResultItem, SidebarItem, SyncModal,
+    RadioNav, SearchResultItem, SearchScope, SidebarItem, SyncModal,
 };
 use crate::events::Action;
 use crate::{background, config, ui, utils};
@@ -408,6 +408,42 @@ pub async fn handle_mouse_event(
                             app.players_focus_global = false;
                             app.main_selected = player_i;
                             handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
+                        }
+                    }
+                    return;
+                }
+
+                // Search view: input box, tab bar, and results have non-standard layout
+                if matches!(app.main_view, MainView::Search) {
+                    let (input_rect, tab_rect) = ui::compute_search_panel_rects(main_area);
+                    if point_in(col, row, input_rect) {
+                        app.search_input_active = true;
+                        return;
+                    }
+                    if point_in(col, row, tab_rect) {
+                        if let Some(scope) = ui::search_scope_at_col(col, tab_rect, app.use_nerd_icons) {
+                            app.search_scope = scope;
+                        }
+                        return;
+                    }
+                    // Results start after border(1) + input(3) + tab(1) = 5 rows from main_area.y
+                    let results_top = main_area.y + 5;
+                    if row >= results_top && row < inner_bot {
+                        let rel = (row - results_top) as usize;
+                        let idx = main_state.offset() + rel / 2;
+                        if idx < app.search_results.len() {
+                            let is_double = last_main_click
+                                .as_ref()
+                                .map(|(t, i)| *i == idx && t.elapsed().as_millis() < 500)
+                                .unwrap_or(false);
+                            *last_main_click = Some((Instant::now(), idx));
+                            app.main_selected = idx;
+                            if is_double || !utils::is_main_item_playable(app) {
+                                handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
+                            } else {
+                                let (add, replace) = utils::compute_parent_labels(app);
+                                app.context_menu = Some(ContextMenu::new(add, replace));
+                            }
                         }
                     }
                     return;
@@ -1288,13 +1324,21 @@ pub async fn handle_action(
             if !app.focus_sidebar {
                 match &app.main_view.clone() {
                     MainView::Library(LibraryView::Tracks { album_id: Some(_) }) => {
-                        app.main_view =
-                            MainView::Library(LibraryView::Albums { artist_id: None });
-                        app.main_selected = 0;
+                        if let Some(prev) = app.previous_view.take() {
+                            app.main_view = prev;
+                        } else {
+                            app.main_view =
+                                MainView::Library(LibraryView::Albums { artist_id: None });
+                            app.main_selected = 0;
+                        }
                     }
                     MainView::Library(LibraryView::Albums { artist_id: Some(_) }) => {
-                        app.main_view = MainView::Library(LibraryView::Artists);
-                        app.main_selected = 0;
+                        if let Some(prev) = app.previous_view.take() {
+                            app.main_view = prev;
+                        } else {
+                            app.main_view = MainView::Library(LibraryView::Artists);
+                            app.main_selected = 0;
+                        }
                     }
                     MainView::Library(LibraryView::Folder { .. }) => {
                         if let Some(prev) = app.folder_nav_stack.pop() {
@@ -1314,8 +1358,12 @@ pub async fn handle_action(
                     | MainView::Library(LibraryView::Albums { artist_id: None })
                     | MainView::Library(LibraryView::Tracks { album_id: None })
                     | MainView::Library(LibraryView::Playlists) => {
-                        app.main_view = MainView::MyMusic;
-                        app.main_selected = 0;
+                        if let Some(prev) = app.previous_view.take() {
+                            app.main_view = prev;
+                        } else {
+                            app.main_view = MainView::MyMusic;
+                            app.main_selected = 0;
+                        }
                     }
                     MainView::MyMusic => {
                         app.focus_sidebar = true;
@@ -1326,6 +1374,8 @@ pub async fn handle_action(
                             app.radio_items = prev.items;
                             app.main_selected = prev.selected;
                             app.radio_title = prev.title;
+                        } else if let Some(prev) = app.previous_view.take() {
+                            app.main_view = prev;
                         } else {
                             app.focus_sidebar = true;
                         }
@@ -1335,6 +1385,8 @@ pub async fn handle_action(
                             app.app_items = prev.items;
                             app.main_selected = prev.selected;
                             app.app_title = prev.title;
+                        } else if let Some(prev) = app.previous_view.take() {
+                            app.main_view = prev;
                         } else {
                             app.focus_sidebar = true;
                         }
@@ -1475,6 +1527,50 @@ pub async fn handle_action(
                 if app.active_player.is_some() && idx < app.queue.len() {
                     app.confirm_delete_queue_item = Some(idx);
                     app.delete_queue_selected_button = 0;
+                }
+            }
+        }
+
+        Action::ScopePrev => {
+            if matches!(app.main_view, MainView::Search) && !app.focus_sidebar {
+                let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
+                let idx = scopes.iter().position(|s| s == &app.search_scope).unwrap_or(0);
+                app.search_scope = scopes[(idx + 3) % 4].clone();
+                if !app.search_query.is_empty() {
+                    app.search_results = vec![];
+                    app.main_selected = 0;
+                    let player_id = app.active_player.clone().unwrap_or_default();
+                    background::trigger_search(
+                        app.search_query.clone(),
+                        app.search_scope.clone(),
+                        app.app_services.clone(),
+                        app.radio_services.clone(),
+                        player_id,
+                        client.clone(),
+                        tx.clone(),
+                    );
+                }
+            }
+        }
+
+        Action::ScopeNext => {
+            if matches!(app.main_view, MainView::Search) && !app.focus_sidebar {
+                let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
+                let idx = scopes.iter().position(|s| s == &app.search_scope).unwrap_or(0);
+                app.search_scope = scopes[(idx + 1) % 4].clone();
+                if !app.search_query.is_empty() {
+                    app.search_results = vec![];
+                    app.main_selected = 0;
+                    let player_id = app.active_player.clone().unwrap_or_default();
+                    background::trigger_search(
+                        app.search_query.clone(),
+                        app.search_scope.clone(),
+                        app.app_services.clone(),
+                        app.radio_services.clone(),
+                        player_id,
+                        client.clone(),
+                        tx.clone(),
+                    );
                 }
             }
         }
@@ -1952,6 +2048,7 @@ pub async fn handle_main_select(
                 SearchResultItem::Artist(a) => {
                     let id = utils::json_id_to_string(&a.id);
                     background::load_albums(Some(id.clone()), client.clone(), tx.clone());
+                    app.previous_view = Some(MainView::Search);
                     app.main_view = MainView::Library(LibraryView::Albums {
                         artist_id: Some(id),
                     });
@@ -1960,6 +2057,7 @@ pub async fn handle_main_select(
                 SearchResultItem::Album(alb) => {
                     let id = utils::json_id_to_string(&alb.id);
                     background::load_tracks(id.clone(), client.clone(), tx.clone());
+                    app.previous_view = Some(MainView::Search);
                     app.main_view = MainView::Library(LibraryView::Tracks {
                         album_id: Some(id),
                     });
@@ -1992,9 +2090,34 @@ pub async fn handle_main_select(
                         app.app_items = vec![];
                         app.app_nav_stack = vec![];
                         app.app_title = item.name.clone();
+                        app.previous_view = Some(MainView::Search);
                         app.main_view = MainView::Apps;
                         app.main_selected = 0;
                         background::load_app_items(pid, cmd, item_id, client.clone(), tx.clone());
+                    }
+                }
+                SearchResultItem::RadioItem(item) => {
+                    if item.is_navigable()
+                        && let Some(cmd) = item.cmd
+                    {
+                        let item_id = item.item_id.clone();
+                        let pid = app.active_player.clone().unwrap_or_default();
+                        app.radio_items = vec![];
+                        app.radio_nav_stack = vec![];
+                        app.radio_title = item.name.clone();
+                        app.previous_view = Some(MainView::Search);
+                        app.main_view = MainView::Radio;
+                        app.main_selected = 0;
+                        app.is_loading = true;
+                        background::load_radio_items(pid, cmd, item_id, client.clone(), tx.clone());
+                    } else if item.is_playable()
+                        && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
+                    {
+                        let name = item.name.clone();
+                        let c = client.clone();
+                        tokio::spawn(async move {
+                            let _ = c.play_url_with_title(&pid, &url, &name).await;
+                        });
                     }
                 }
             }
@@ -2709,16 +2832,55 @@ pub async fn handle_search_input_key(
             if !app.search_query.is_empty() {
                 app.search_results = vec![];
                 app.main_selected = 0;
-                let app_services = app.app_services.clone();
                 let player_id = app.active_player.clone().unwrap_or_default();
                 background::trigger_search(
                     app.search_query.clone(),
-                    app_services,
+                    app.search_scope.clone(),
+                    app.app_services.clone(),
+                    app.radio_services.clone(),
                     player_id,
                     client.clone(),
                     tx.clone(),
                 );
                 app.search_input_active = false;
+            }
+        }
+        KeyCode::Tab => {
+            let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
+            let idx = scopes.iter().position(|s| s == &app.search_scope).unwrap_or(0);
+            app.search_scope = scopes[(idx + 1) % 4].clone();
+            if !app.search_query.is_empty() {
+                app.search_results = vec![];
+                app.main_selected = 0;
+                let player_id = app.active_player.clone().unwrap_or_default();
+                background::trigger_search(
+                    app.search_query.clone(),
+                    app.search_scope.clone(),
+                    app.app_services.clone(),
+                    app.radio_services.clone(),
+                    player_id,
+                    client.clone(),
+                    tx.clone(),
+                );
+            }
+        }
+        KeyCode::BackTab => {
+            let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
+            let idx = scopes.iter().position(|s| s == &app.search_scope).unwrap_or(0);
+            app.search_scope = scopes[(idx + 3) % 4].clone();
+            if !app.search_query.is_empty() {
+                app.search_results = vec![];
+                app.main_selected = 0;
+                let player_id = app.active_player.clone().unwrap_or_default();
+                background::trigger_search(
+                    app.search_query.clone(),
+                    app.search_scope.clone(),
+                    app.app_services.clone(),
+                    app.radio_services.clone(),
+                    player_id,
+                    client.clone(),
+                    tx.clone(),
+                );
             }
         }
         KeyCode::Esc | KeyCode::Down => {
