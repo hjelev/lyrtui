@@ -1550,11 +1550,8 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         return;
     };
 
-    // Compute art column width from the actual rendered inner height so the image fills all
-    // available vertical space in the Now Playing bar regardless of terminal resize.
-    let fw = app.font_size.0.max(1) as u32;
-    let fh = app.font_size.1.max(1) as u32;
-    let art_col_w = ((inner.height as u32 * fh) / fw).max(4) as u16;
+    // Compute art column width from actual image dimensions so the image fills the full height.
+    let art_col_w = art_rendered_cols(app, Rect::new(inner.x, inner.y, inner.width, inner.height));
 
     // Split: art column | 1-col gap | info column
     let cols = Layout::default()
@@ -1563,7 +1560,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         .split(inner);
 
     if let Some(proto) = album_art {
-        let img = StatefulImage::<StatefulProtocol>::default().resize(Resize::Fit(None));
+        let img = StatefulImage::<StatefulProtocol>::default().resize(Resize::Scale(None));
         f.render_stateful_widget(img, cols[0], proto);
     }
 
