@@ -1,5 +1,5 @@
 use crate::api::{FolderItemType, NowPlaying};
-use crate::app::{App, ConfigModal, ConnectionState, LibraryView, MainView, SearchResultItem, SearchScope, SidebarItem, SyncModal};
+use crate::app::{App, ConfigModal, ConnectionState, IMAGE_PROTOCOLS, LibraryView, MainView, SearchResultItem, SearchScope, SidebarItem, SyncModal};
 use serde_json::Value;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -292,7 +292,7 @@ pub fn draw(
                 if app.search_input_active {
                     hint_line(&[("Type", "query"), ("Tab", "scope"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")], app.effective_accent())
                 } else {
-                    hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("i//", "edit query"), ("Esc", "back"), ("q", "quit")], app.effective_accent())
+                    hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"), ("q", "quit")], app.effective_accent())
                 }
             } else {
                 hint_line(&[
@@ -1488,7 +1488,7 @@ fn hint_line(pairs: &[(&str, &str)], accent: Option<[u8; 3]>) -> Line<'static> {
             spans.push(Span::styled("  ", Style::default().fg(dim)));
         }
         spans.push(Span::styled(key.to_string(), Style::default().fg(Color::White)));
-        spans.push(Span::styled(format!(":{action}"), Style::default().fg(dim)));
+        spans.push(Span::styled(format!(" {action}"), Style::default().fg(dim)));
     }
     Line::from(spans)
 }
@@ -2343,12 +2343,12 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
 }
 
 /// Returns (popup_rect, [host, port, username, password, nerd_icons, auto_discover, broadcast_mask, disable_auto_colors]).
-pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 8]) {
-    let popup = centered_rect_abs(54, 18, area);
+pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 9]) {
+    let popup = centered_rect_abs(54, 19, area);
     let inner_x = popup.x + 1;
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
-    // row layout: [pad, host, port, username, password, divider, nerd, auto_discover, broadcast_mask, disable_auto_colors, error, spacer, help]
+    // row layout: [pad, host, port, username, password, divider, nerd, auto_discover, broadcast_mask, disable_auto_colors, image_protocol, error, spacer, help]
     let host_rect          = Rect::new(inner_x, inner_y + 1, inner_w, 1);
     let port_rect          = Rect::new(inner_x, inner_y + 2, inner_w, 1);
     let user_rect          = Rect::new(inner_x, inner_y + 3, inner_w, 1);
@@ -2357,7 +2357,8 @@ pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 8]) {
     let auto_rect          = Rect::new(inner_x, inner_y + 7, inner_w, 1);
     let mask_rect          = Rect::new(inner_x, inner_y + 8, inner_w, 1);
     let no_colors_rect     = Rect::new(inner_x, inner_y + 9, inner_w, 1);
-    (popup, [host_rect, port_rect, user_rect, pass_rect, nerd_rect, auto_rect, mask_rect, no_colors_rect])
+    let img_proto_rect     = Rect::new(inner_x, inner_y + 10, inner_w, 1);
+    (popup, [host_rect, port_rect, user_rect, pass_rect, nerd_rect, auto_rect, mask_rect, no_colors_rect, img_proto_rect])
 }
 
 fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize, selected_button: u8, accent: Option<[u8; 3]>) {
@@ -2635,7 +2636,7 @@ pub fn compute_delete_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
 
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>) {
     let area = f.area();
-    let popup = centered_rect_abs(54, 18, area);
+    let popup = centered_rect_abs(54, 19, area);
 
     f.render_widget(Clear, popup);
 
@@ -2653,7 +2654,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    // rows: pad | host | port | username | password | divider | nerd-icons | auto-discover | broadcast-mask | disable-auto-colors | error | spacer | help
+    // rows: pad | host | port | username | password | divider | nerd-icons | auto-discover | broadcast-mask | disable-auto-colors | image-protocol | error | spacer | help
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -2667,9 +2668,10 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
             Constraint::Length(1), // [7] auto-discover
             Constraint::Length(1), // [8] broadcast-mask
             Constraint::Length(1), // [9] disable-auto-colors
-            Constraint::Length(1), // [10] error
-            Constraint::Min(0),    // [11] spacer
-            Constraint::Length(1), // [12] help
+            Constraint::Length(1), // [10] image-protocol
+            Constraint::Length(1), // [11] error
+            Constraint::Min(0),    // [12] spacer
+            Constraint::Length(1), // [13] help
         ])
         .split(inner);
 
@@ -2763,24 +2765,47 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
 
     render_toggle(f, rows[9], "Disable auto colors", modal.disable_auto_colors, modal.selected_field == 7);
 
+    // Image protocol selector (field 8): < protocol >
+    {
+        let is_selected = modal.selected_field == 8;
+        let proto_name = IMAGE_PROTOCOLS[modal.image_protocol_idx];
+        let val_style = if is_selected {
+            Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let lbl_style = if is_selected {
+            Style::default().fg(accent_bright)
+        } else {
+            Style::default().fg(accent_mid)
+        };
+        let line = Line::from(vec![
+            Span::styled("  Image protocol: ", lbl_style),
+            Span::styled(if is_selected { "< " } else { "  " }, lbl_style),
+            Span::styled(proto_name, val_style),
+            Span::styled(if is_selected { " >" } else { "  " }, lbl_style),
+        ]);
+        f.render_widget(Paragraph::new(line), rows[10]);
+    }
+
     if let Some(err) = &modal.error {
         let p = Paragraph::new(err.as_str())
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Red));
-        f.render_widget(p, rows[10]);
+        f.render_widget(p, rows[11]);
     }
 
     let btn_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[12]);
+        .split(rows[13]);
 
-    let ok_style = if modal.selected_field == 8 {
+    let ok_style = if modal.selected_field == 9 {
         Style::default().fg(Color::Black).bg(accent_bright).bold()
     } else {
         Style::default().fg(Color::White)
     };
-    let cancel_style = if modal.selected_field == 9 {
+    let cancel_style = if modal.selected_field == 10 {
         Style::default().fg(Color::Black).bg(accent_bright).bold()
     } else {
         Style::default().fg(Color::White)
@@ -2811,12 +2836,12 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
 
 /// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
 pub fn compute_config_modal_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
-    let popup = centered_rect_abs(54, 18, area);
+    let popup = centered_rect_abs(54, 19, area);
     let inner_x = popup.x + 1;
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
-    // Layout rows: 11 fixed (0-10) + spacer(min→4) + buttons(1) → buttons at offset 15
-    let btn_y = inner_y + 15;
+    // Layout rows: 12 fixed (0-11) + spacer(min→3) + buttons(1) → buttons at offset 16
+    let btn_y = inner_y + 16;
     let half_w = inner_w / 2;
     let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
     let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);

@@ -66,6 +66,8 @@ pub enum SearchScope {
     All,
 }
 
+pub const IMAGE_PROTOCOLS: &[&str] = &["auto", "halfblocks", "sixel", "kitty", "iterm2"];
+
 #[derive(Debug, Clone)]
 pub struct ConfigModal {
     pub host: String,
@@ -76,7 +78,8 @@ pub struct ConfigModal {
     pub auto_discover: bool,
     pub broadcast_mask: String,
     pub disable_auto_colors: bool,
-    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask, 7=disable_auto_colors, 8=OK, 9=Cancel
+    pub image_protocol_idx: usize, // index into IMAGE_PROTOCOLS
+    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask, 7=disable_auto_colors, 8=image_protocol, 9=OK, 10=Cancel
     pub selected_field: usize,
     pub editing: bool,
     pub cursor_pos: usize,
@@ -94,7 +97,12 @@ impl ConfigModal {
         auto_discover: bool,
         broadcast_mask: &str,
         disable_auto_colors: bool,
+        image_protocol: &str,
     ) -> Self {
+        let image_protocol_idx = IMAGE_PROTOCOLS
+            .iter()
+            .position(|&p| p == image_protocol)
+            .unwrap_or(0);
         Self {
             host: host.to_string(),
             port: port.to_string(),
@@ -104,6 +112,7 @@ impl ConfigModal {
             auto_discover,
             broadcast_mask: broadcast_mask.to_string(),
             disable_auto_colors,
+            image_protocol_idx,
             selected_field: 0,
             editing: false,
             cursor_pos: 0,

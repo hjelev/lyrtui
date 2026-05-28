@@ -77,7 +77,7 @@ async fn run(
     terminal: &mut ratatui::Terminal<CrosstermBackend<io::Stdout>>,
     client: Arc<LmsClient>,
     cfg: config::Config,
-    picker: Picker,
+    mut picker: Picker,
 ) -> Result<()> {
     let mut cfg = cfg;
     let (tx, mut rx) = mpsc::channel::<AppMsg>(64);
@@ -333,7 +333,24 @@ async fn run(
         match poll_event(TICK_RATE)? {
             InputEvent::Key(key) => {
                 if app.config_modal.is_some() {
+                    let prev_protocol = cfg.image_protocol.clone();
                     handlers::handle_config_key(&mut app, key, &mut cfg, &client);
+                    if cfg.image_protocol != prev_protocol {
+                        match cfg.image_protocol.as_str() {
+                            "halfblocks" => picker.set_protocol_type(ProtocolType::Halfblocks),
+                            "sixel"      => picker.set_protocol_type(ProtocolType::Sixel),
+                            "kitty"      => picker.set_protocol_type(ProtocolType::Kitty),
+                            "iterm2"     => picker.set_protocol_type(ProtocolType::Iterm2),
+                            _            => {} // "auto": no runtime change, takes effect on restart
+                        }
+                        if let Some(img) = &last_artwork_image {
+                            album_art = Some(picker.new_resize_protocol(img.clone()));
+                        }
+                        thumbnails = thumbnail_images
+                            .iter()
+                            .map(|(url, img)| (url.clone(), picker.new_resize_protocol(img.clone())))
+                            .collect();
+                    }
                 } else if app.sync_modal.is_some() {
                     handlers::handle_sync_modal_key(&mut app, key, &client).await;
                 } else if app.confirm_clear_queue {
@@ -362,6 +379,7 @@ async fn run(
                             cfg.auto_discover,
                             &cfg.broadcast_mask,
                             cfg.disable_auto_colors,
+                            &cfg.image_protocol,
                         ));
                     } else {
                         let prev_gvc = app.global_volume_control;

@@ -9,7 +9,7 @@ use ratatui::widgets::ListState;
 use crate::api::{FolderItemType, LmsClient};
 use crate::app::{
     App, AppMsg, ConnectionState, ContextMenu, FolderNav, LibraryView, MainView,
-    RadioNav, SearchResultItem, SearchScope, SidebarItem, SyncModal,
+    RadioNav, SearchResultItem, SearchScope, SidebarItem, SyncModal, IMAGE_PROTOCOLS,
 };
 use crate::events::Action;
 use crate::{background, config, ui, utils};
@@ -159,6 +159,9 @@ pub async fn handle_mouse_event(
                     } else if point_in(col, row, field_rects[7]) {
                         modal.selected_field = 7;
                         modal.disable_auto_colors = !modal.disable_auto_colors;
+                    } else if point_in(col, row, field_rects[8]) {
+                        modal.selected_field = 8;
+                        modal.image_protocol_idx = (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
                     }
                 }
             } else {
@@ -1654,6 +1657,7 @@ fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsCl
     let auto_discover = modal.auto_discover;
     let broadcast_mask = modal.broadcast_mask.trim().to_string();
     let disable_auto_colors = modal.disable_auto_colors;
+    let image_protocol = IMAGE_PROTOCOLS[modal.image_protocol_idx].to_string();
     // immutable borrow of modal ends here; mutable borrows below are now allowed
 
     if host.is_empty() {
@@ -1672,6 +1676,7 @@ fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsCl
             cfg.auto_discover = auto_discover;
             cfg.broadcast_mask = broadcast_mask;
             cfg.disable_auto_colors = disable_auto_colors;
+            cfg.image_protocol = image_protocol;
             cfg.username = if username.is_empty() { None } else { Some(username.clone()) };
             cfg.password = if password.is_empty() { None } else { Some(password.clone()) };
             match cfg.save() {
@@ -1793,8 +1798,13 @@ pub fn handle_config_key(
                     4 => { if let Some(m) = app.config_modal.as_mut() { m.use_nerd_icons ^= true; } }
                     5 => { if let Some(m) = app.config_modal.as_mut() { m.auto_discover ^= true; } }
                     7 => { if let Some(m) = app.config_modal.as_mut() { m.disable_auto_colors ^= true; } }
-                    8 => { apply_config_save(app, cfg, client); }
-                    9 => { app.config_modal = None; }
+                    8 => {
+                        if let Some(m) = app.config_modal.as_mut() {
+                            m.image_protocol_idx = (m.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
+                        }
+                    }
+                    9 => { apply_config_save(app, cfg, client); }
+                    10 => { app.config_modal = None; }
                     _ => {
                         if let Some(modal) = app.config_modal.as_mut() {
                             modal.editing = true;
@@ -1804,12 +1814,29 @@ pub fn handle_config_key(
                     }
                 }
             }
+            KeyCode::Left => {
+                if let Some(modal) = app.config_modal.as_mut()
+                    && modal.selected_field == 8 {
+                    modal.image_protocol_idx = if modal.image_protocol_idx == 0 {
+                        IMAGE_PROTOCOLS.len() - 1
+                    } else {
+                        modal.image_protocol_idx - 1
+                    };
+                }
+            }
+            KeyCode::Right => {
+                if let Some(modal) = app.config_modal.as_mut()
+                    && modal.selected_field == 8 {
+                    modal.image_protocol_idx = (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
+                }
+            }
             KeyCode::Char(' ') => {
                 if let Some(modal) = app.config_modal.as_mut() {
                     match modal.selected_field {
                         4 => modal.use_nerd_icons = !modal.use_nerd_icons,
                         5 => modal.auto_discover = !modal.auto_discover,
                         7 => modal.disable_auto_colors = !modal.disable_auto_colors,
+                        8 => modal.image_protocol_idx = (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len(),
                         _ => {}
                     }
                 }
@@ -1825,7 +1852,7 @@ pub fn handle_config_key(
     }
 }
 
-const CONFIG_FIELD_COUNT: usize = 10; // fields 0-7 + OK(8) + Cancel(9)
+const CONFIG_FIELD_COUNT: usize = 11; // fields 0-8 + OK(9) + Cancel(10)
 
 pub async fn handle_main_select(
     app: &mut App,
