@@ -42,6 +42,10 @@ pub enum MainView {
     Favourites,
     Help,
     Search,
+    /// In-app search within a specific plugin (e.g. Spotty).
+    /// `item_id` is the opaque ID of the "New Search" entry — used to
+    /// build the correct LMS XMLBrowser request (item_id:X search:query).
+    AppSearch { cmd: String, item_id: Option<String> },
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +273,11 @@ pub struct App {
     pub search_scope: SearchScope,
     pub radio_services: Vec<RadioItem>,
 
+    // In-app search state (e.g. Spotty search)
+    pub app_search_query: String,
+    pub app_search_results: Vec<RadioItem>,
+    pub app_search_input_active: bool,
+
     pub use_nerd_icons: bool,
     pub full_art_mode: bool,
     pub accent_color: Option<[u8; 3]>,
@@ -350,6 +359,9 @@ impl App {
             search_input_active: false,
             search_scope: SearchScope::MyMusic,
             radio_services: vec![],
+            app_search_query: String::new(),
+            app_search_results: vec![],
+            app_search_input_active: false,
             is_loading: false,
             use_nerd_icons: false,
             full_art_mode: false,
@@ -409,6 +421,7 @@ pub enum AppMsg {
     StatusMsg(String),
     ClearStatusMsg(u64),
     SearchResultsLoaded(Vec<SearchResultItem>),
+    AppSearchResultsLoaded(Vec<RadioItem>),
     #[allow(dead_code)]
     Error(String),
 }

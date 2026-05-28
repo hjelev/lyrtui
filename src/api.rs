@@ -630,7 +630,6 @@ impl LmsClient {
     }
 
     /// Search within a single LMS app/plugin using the XMLBrowser items API with a search filter.
-    /// Only playable audio items are returned; container/navigation items are discarded.
     pub async fn search_app(&self, player_id: &str, cmd: &str, query: &str) -> Result<Vec<RadioItem>> {
         let result = self.rpc(player_id, &[
             json!(cmd),
@@ -640,6 +639,41 @@ impl LmsClient {
             json!(format!("search:{}", query)),
             json!("want_url:1"),
         ]).await?;
+        let items = result["loop_loop"]
+            .as_array()
+            .or_else(|| result["item_loop"].as_array())
+            .cloned()
+            .unwrap_or_default();
+        let base = self.server_base_url();
+        Ok(items
+            .into_iter()
+            .map(|v| parse_browse_item(&v, &base, cmd))
+            .filter(|item| !item.name.is_empty())
+            .collect())
+    }
+
+    /// Search via a plugin's dedicated "New Search" item.
+    /// Plugins like Spotty require `item_id:{search_item_id} search:{query}` rather
+    /// than a bare `search:query` at the top level.
+    pub async fn search_app_via_item(
+        &self,
+        player_id: &str,
+        cmd: &str,
+        item_id: Option<&str>,
+        query: &str,
+    ) -> Result<Vec<RadioItem>> {
+        let mut params = vec![
+            json!(cmd),
+            json!("items"),
+            json!(0),
+            json!(200),
+            json!(format!("search:{}", query)),
+            json!("want_url:1"),
+        ];
+        if let Some(id) = item_id {
+            params.push(json!(format!("item_id:{}", id)));
+        }
+        let result = self.rpc(player_id, &params).await?;
         let items = result["loop_loop"]
             .as_array()
             .or_else(|| result["item_loop"].as_array())

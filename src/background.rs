@@ -126,6 +126,21 @@ pub fn trigger_search(
     });
 }
 
+pub fn trigger_app_specific_search(
+    query: String,
+    cmd: String,
+    item_id: Option<String>,
+    player_id: String,
+    client: Arc<LmsClient>,
+    tx: mpsc::Sender<AppMsg>,
+) {
+    tokio::spawn(async move {
+        if let Ok(items) = client.search_app_via_item(&player_id, &cmd, item_id.as_deref(), &query).await {
+            let _ = tx.send(AppMsg::AppSearchResultsLoaded(items)).await;
+        }
+    });
+}
+
 pub fn load_albums(artist_id: Option<String>, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
     spawn_if_ok(client, tx, |c| async move { c.get_albums(artist_id.as_deref()).await }, AppMsg::AlbumsLoaded);
 }

@@ -891,6 +891,22 @@ async fn handle_insert_next(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
                 });
             }
         }
+        MainView::AppSearch { .. } => {
+            if let Some(item) = app.app_search_results.get(app.main_selected).cloned()
+                && let Some(url) = item.url
+            {
+                let name = item.name.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.insert_url_next_with_title(&pid, &url, &name).await.is_ok() {
+                        let _ = t
+                            .send(AppMsg::StatusMsg(format!("\"{}\" will play next", name)))
+                            .await;
+                    }
+                });
+            }
+        }
         MainView::Favourites => {
             if let Some(item) = app.fav_items.get(app.main_selected).cloned()
                 && let Some(url) = item.url
@@ -1007,8 +1023,13 @@ async fn handle_add_to_favorites(
                 });
             }
         }
-        MainView::Apps => {
-            if let Some(item) = app.app_items.get(app.main_selected).cloned()
+        MainView::Apps | MainView::AppSearch { .. } => {
+            let item = if matches!(app.main_view, MainView::Apps) {
+                app.app_items.get(app.main_selected).cloned()
+            } else {
+                app.app_search_results.get(app.main_selected).cloned()
+            };
+            if let Some(item) = item
                 && let Some(url) = item.url
             {
                 let name = item.name.clone();
@@ -1131,6 +1152,7 @@ pub async fn handle_action(
                     app.focus_sidebar = true;
                     app.players_focus_global = false;
                     app.search_input_active = false;
+                    app.app_search_input_active = false;
                 }
             }
         }
@@ -1142,6 +1164,9 @@ pub async fn handle_action(
                 if matches!(app.main_view, MainView::Search) {
                     app.search_input_active = true;
                 }
+                if matches!(app.main_view, MainView::AppSearch { .. }) {
+                    app.app_search_input_active = true;
+                }
             }
         }
         Action::ToggleFocus => {
@@ -1149,6 +1174,7 @@ pub async fn handle_action(
                 app.focus_sidebar = !app.focus_sidebar;
                 app.players_focus_global = false;
                 app.search_input_active = !app.focus_sidebar && matches!(app.main_view, MainView::Search);
+                app.app_search_input_active = !app.focus_sidebar && matches!(app.main_view, MainView::AppSearch { .. });
             }
         }
 
@@ -1168,6 +1194,11 @@ pub async fn handle_action(
                 && app.main_selected == 0
             {
                 app.search_input_active = true;
+            } else if matches!(app.main_view, MainView::AppSearch { .. })
+                && !app.app_search_input_active
+                && app.main_selected == 0
+            {
+                app.app_search_input_active = true;
             } else {
                 app.main_selected = app.main_selected.saturating_sub(1);
             }
@@ -1403,6 +1434,15 @@ pub async fn handle_action(
                     MainView::Search => {
                         app.focus_sidebar = true;
                         app.search_input_active = false;
+                    }
+                    MainView::AppSearch { .. } => {
+                        if app.app_search_input_active {
+                            app.app_search_input_active = false;
+                        } else {
+                            app.main_view = MainView::Apps;
+                            app.app_search_query = String::new();
+                            app.app_search_results = vec![];
+                        }
                     }
                     _ => {
                         app.focus_sidebar = true;
@@ -1986,7 +2026,17 @@ pub async fn handle_main_select(
         }
         MainView::Apps => {
             if let Some(item) = app.app_items.get(app.main_selected).cloned() {
-                if item.is_navigable()
+                if item.item_type == "search"
+                    && let Some(cmd) = item.cmd.clone()
+                {
+                    let item_id = item.item_id.clone();
+                    app.main_view = MainView::AppSearch { cmd, item_id };
+                    app.app_search_query = String::new();
+                    app.app_search_results = vec![];
+                    app.app_search_input_active = true;
+                    app.main_selected = 0;
+                    app.focus_sidebar = false;
+                } else if item.is_navigable()
                     && let Some(cmd) = item.cmd
                 {
                     let item_id = item.item_id;
@@ -2010,6 +2060,38 @@ pub async fn handle_main_select(
                         let _ = c.play_url_with_title(&pid, &url, &name).await;
                     });
                 }
+            }
+        }
+        MainView::AppSearch { .. } => {
+            if let Some(item) = app.app_search_results.get(app.main_selected).cloned() {
+                if item.is_navigable()
+                    && let Some(item_cmd) = item.cmd.clone()
+                    && item.item_id.is_some()
+                {
+                    let pid = app.active_player.clone().unwrap_or_default();
+                    let nav = RadioNav {
+                        title: app.app_title.clone(),
+                        items: std::mem::take(&mut app.app_items),
+                        selected: 0,
+                    };
+                    app.app_nav_stack.push(nav);
+                    app.app_title = item.name.clone();
+                    app.main_selected = 0;
+                    app.is_loading = true;
+                    app.main_view = MainView::Apps;
+                    background::load_app_items(pid, item_cmd, item.item_id, client.clone(), tx.clone());
+                } else if item.is_playable()
+                    && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
+                {
+                    let name = item.name.clone();
+                    let c = client.clone();
+                    tokio::spawn(async move {
+                        let _ = c.play_url_with_title(&pid, &url, &name).await;
+                    });
+                }
+            } else {
+                // No item selected, activate input box
+                app.app_search_input_active = true;
             }
         }
         MainView::Favourites => {
@@ -2414,6 +2496,23 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 });
             }
         }
+        MainView::AppSearch { .. } => {
+            if let Some(item) = app.app_search_results.get(app.main_selected).cloned()
+                && let Some(url) = item.url
+            {
+                let name = item.name.clone();
+                let c = client.clone();
+                let t = tx.clone();
+                tokio::spawn(async move {
+                    if c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok() {
+                        if queue_was_empty { let _ = c.play(&pid).await; }
+                        let _ = t
+                            .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
+                            .await;
+                    }
+                });
+            }
+        }
         MainView::Favourites => {
             if let Some(item) = app.fav_items.get(app.main_selected).cloned()
                 && let Some(url) = item.url
@@ -2614,8 +2713,13 @@ async fn handle_replace_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc:
                 });
             }
         }
-        MainView::Apps => {
-            if let Some(item) = app.app_items.get(app.main_selected).cloned()
+        MainView::Apps | MainView::AppSearch { .. } => {
+            let item = if matches!(app.main_view, MainView::Apps) {
+                app.app_items.get(app.main_selected).cloned()
+            } else {
+                app.app_search_results.get(app.main_selected).cloned()
+            };
+            if let Some(item) = item
                 && let Some(url) = item.url
             {
                 let name = item.name.clone();
@@ -2885,6 +2989,46 @@ pub async fn handle_search_input_key(
         }
         KeyCode::Esc | KeyCode::Down => {
             app.search_input_active = false;
+        }
+        _ => {}
+    }
+}
+
+pub async fn handle_app_search_input_key(
+    app: &mut App,
+    key: KeyEvent,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    let MainView::AppSearch { cmd, item_id } = &app.main_view else { return; };
+    let cmd = cmd.clone();
+    let item_id = item_id.clone();
+    match key.code {
+        KeyCode::Char(c) => {
+            app.app_search_query.push(c);
+        }
+        KeyCode::Backspace => {
+            app.app_search_query.pop();
+        }
+        KeyCode::Enter => {
+            if !app.app_search_query.is_empty() {
+                app.app_search_results = vec![];
+                app.main_selected = 0;
+                app.is_loading = true;
+                let player_id = app.active_player.clone().unwrap_or_default();
+                background::trigger_app_specific_search(
+                    app.app_search_query.clone(),
+                    cmd,
+                    item_id,
+                    player_id,
+                    client.clone(),
+                    tx.clone(),
+                );
+                app.app_search_input_active = false;
+            }
+        }
+        KeyCode::Esc | KeyCode::Down => {
+            app.app_search_input_active = false;
         }
         _ => {}
     }

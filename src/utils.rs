@@ -45,6 +45,7 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
         MainView::Queue => app.queue.get(idx).and_then(|t| t.artwork_url.clone()),
         MainView::Radio => app.radio_items.get(idx).and_then(|i| i.artwork_url.clone()),
         MainView::Apps => app.app_items.get(idx).and_then(|i| i.artwork_url.clone()),
+        MainView::AppSearch { .. } => app.app_search_results.get(idx).and_then(|i| i.artwork_url.clone()),
         MainView::Favourites => app.fav_items.get(idx).and_then(|i| i.artwork_url.clone()),
         MainView::Search => match app.search_results.get(idx) {
             Some(SearchResultItem::Artist(a)) => Some(format!(
@@ -70,7 +71,7 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
 
 pub fn compute_parent_labels(app: &App) -> (Option<String>, Option<String>) {
     match &app.main_view {
-        MainView::Search => (None, None),
+        MainView::Search | MainView::AppSearch { .. } => (None, None),
         MainView::Library(LibraryView::Tracks { album_id: Some(id) }) => {
             let name = app
                 .albums
@@ -104,7 +105,7 @@ pub fn compute_parent_labels(app: &App) -> (Option<String>, Option<String>) {
 }
 
 pub fn uses_two_row_layout(view: &MainView) -> bool {
-    !matches!(view, MainView::Players | MainView::Help | MainView::MyMusic)
+    !matches!(view, MainView::Players | MainView::Help | MainView::MyMusic | MainView::AppSearch { .. })
 }
 
 pub fn is_main_item_playable(app: &App) -> bool {
@@ -135,6 +136,11 @@ pub fn is_main_item_playable(app: &App) -> bool {
             .get(app.main_selected)
             .map(|r| matches!(r, SearchResultItem::Track(_) | SearchResultItem::Playlist(_)))
             .unwrap_or(false),
+        MainView::AppSearch { .. } => app
+            .app_search_results
+            .get(app.main_selected)
+            .map(|i| i.is_playable())
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -158,5 +164,6 @@ pub fn main_list_len(app: &App) -> usize {
         MainView::Favourites => app.fav_items.len(),
         MainView::Help => 0,
         MainView::Search => app.search_results.len(),
+        MainView::AppSearch { .. } => app.app_search_results.len(),
     }
 }

@@ -337,6 +337,8 @@ async fn run(
                     handlers::handle_context_menu_key(&mut app, key, &client, &tx).await;
                 } else if matches!(app.main_view, MainView::Search) && app.search_input_active {
                     handlers::handle_search_input_key(&mut app, key, &client, &tx).await;
+                } else if matches!(app.main_view, MainView::AppSearch { .. }) && app.app_search_input_active {
+                    handlers::handle_app_search_input_key(&mut app, key, &client, &tx).await;
                 } else if matches!(app.main_view, MainView::Players)
                     && !app.focus_sidebar
                     && matches!(key.code, crossterm::event::KeyCode::Char('s'))
@@ -564,6 +566,11 @@ async fn handle_msg(
         AppMsg::SearchResultsLoaded(results) => {
             app.search_results = results;
             app.main_selected = 0;
+        }
+        AppMsg::AppSearchResultsLoaded(items) => {
+            app.app_search_results = items;
+            app.main_selected = 0;
+            app.is_loading = false;
         }
         AppMsg::Error(e) => {
             app.status_message_gen += 1;

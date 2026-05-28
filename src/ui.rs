@@ -423,6 +423,7 @@ fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
         MainView::Favourites => draw_favourites(f, app, area, state, thumbnails),
         MainView::Help => draw_help(f, app, area),
         MainView::Search => draw_search(f, app, area, state, thumbnails, base),
+        MainView::AppSearch { .. } => draw_app_search(f, app, area, state, thumbnails),
     }
 }
 
@@ -1215,6 +1216,148 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             Paragraph::new(line2).style(s2),
             Rect::new(text_x, y + 1, text_w, 1),
         );
+    }
+
+    if total > visible {
+        let scroll_area = Rect::new(
+            area.x + area.width.saturating_sub(1),
+            results_area.y,
+            1,
+            results_area.height,
+        );
+        let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
+        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), results_focused);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_symbol("║")
+            .track_symbol(Some("│"))
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(track_style)
+            .thumb_style(thumb_style);
+        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+    }
+}
+
+fn draw_app_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+    let focused = !app.focus_sidebar;
+    let mid = mid_accent_color(app.effective_accent());
+    let accent = focus_border_color(app.effective_accent());
+
+    let border_style = if focused {
+        Style::default().fg(accent)
+    } else {
+        Style::default().fg(unfocus_border_color(app.effective_accent()))
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title_style(Style::default().fg(accent))
+        .title(" Spotify Search ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(inner);
+
+    // Search input box
+    let input_border_style = if app.app_search_input_active {
+        Style::default().fg(accent)
+    } else {
+        Style::default().fg(unfocus_border_color(app.effective_accent()))
+    };
+    let cursor = if app.app_search_input_active { "█" } else { "" };
+    let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" };
+    let input_text = format!(" {} {}{}", search_icon, app.app_search_query, cursor);
+    let input = Paragraph::new(input_text)
+        .style(Style::default().fg(Color::White))
+        .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(input_border_style));
+    f.render_widget(input, chunks[0]);
+
+    let results_area = chunks[1];
+
+    if app.app_search_results.is_empty() {
+        let msg = if app.is_loading {
+            "Searching..."
+        } else if app.app_search_query.is_empty() {
+            "Type a query above and press Enter to search"
+        } else {
+            "No results found"
+        };
+        f.render_widget(
+            Paragraph::new(msg)
+                .style(Style::default().fg(mid))
+                .alignment(Alignment::Center),
+            Rect::new(results_area.x, results_area.y + results_area.height / 2, results_area.width, 1),
+        );
+        return;
+    }
+
+    let results_focused = focused && !app.app_search_input_active;
+    let selected = app.main_selected;
+    let visible = ((results_area.height / 2) as usize).max(1);
+    let total = app.app_search_results.len();
+
+    let offset = sync_scroll_offset(state, selected, visible);
+
+    let text_x = results_area.x + THUMB_W + THUMB_SEP;
+    let text_w = results_area.width.saturating_sub(THUMB_W + THUMB_SEP);
+
+    for (vis_i, item_i) in (offset..).zip(0usize..) {
+        if vis_i >= total { break; }
+        let y = results_area.y + (item_i as u16) * 2;
+        if y + 1 >= results_area.y + results_area.height { break; }
+
+        let item = &app.app_search_results[vis_i];
+        let is_sel = vis_i == selected;
+        let (s1, s2) = if is_sel { cursor_styles(results_focused) } else { (Style::default(), Style::default()) };
+
+        let thumb_url = item.artwork_url.clone();
+        let thumb_rect = Rect::new(results_area.x, y, THUMB_W, 2);
+        let thumb_bg = if is_sel {
+            if results_focused { Color::Rgb(45, 100, 170) } else { Color::Rgb(50, 50, 68) }
+        } else {
+            Color::Rgb(25, 25, 35)
+        };
+        match thumb_url.as_ref().and_then(|u| thumbnails.get_mut(u)) {
+            Some(proto) => {
+                let img = StatefulImage::default().resize(Resize::Fit(None));
+                f.render_stateful_widget(img, thumb_rect, proto);
+            }
+            None => {
+                f.render_widget(
+                    Paragraph::new(if thumb_rect.height >= 2 { "\n ♪" } else { " ♪" })
+                        .style(Style::default().fg(Color::Rgb(80, 80, 110)).bg(thumb_bg)),
+                    thumb_rect,
+                );
+            }
+        }
+
+        // Determine type label and icon from item metadata
+        let (icon, type_label, icon_color) = if item.is_audio || item.item_type == "audio" {
+            let icon = if app.use_nerd_icons { "  " } else { "▶ " };
+            (icon, "song", accent)
+        } else if item.item_type == "playlist" {
+            let icon = if app.use_nerd_icons { "  " } else { "▸ " };
+            (icon, "playlist", Color::Rgb(220, 180, 80))
+        } else if item.has_items {
+            let icon = if app.use_nerd_icons { "  " } else { "▸ " };
+            (icon, "folder", Color::Rgb(100, 200, 180))
+        } else {
+            let icon = if app.use_nerd_icons { "  " } else { "▸ " };
+            (icon, item.item_type.as_str(), mid)
+        };
+
+        let line1 = Line::from(vec![
+            Span::styled(icon, Style::default().fg(icon_color)),
+            Span::styled(item.name.clone(), Style::default().fg(Color::White)),
+        ]);
+        let line2 = Line::from(Span::styled(type_label, Style::default().fg(mid)));
+
+        f.render_widget(Paragraph::new(line1).style(s1), Rect::new(text_x, y, text_w, 1));
+        f.render_widget(Paragraph::new(line2).style(s2), Rect::new(text_x, y + 1, text_w, 1));
     }
 
     if total > visible {
