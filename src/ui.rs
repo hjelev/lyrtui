@@ -254,6 +254,7 @@ pub fn draw(
     f: &mut Frame,
     app: &App,
     album_art: Option<&mut StatefulProtocol>,
+    album_art_full: Option<&mut StatefulProtocol>,
     sidebar_state: &mut ListState,
     main_state: &mut ListState,
     thumbnails: &mut HashMap<String, StatefulProtocol>,
@@ -263,7 +264,7 @@ pub fn draw(
     let area = f.area();
 
     if app.full_art_mode {
-        draw_full_art_mode(f, app, area, album_art, main_state, thumbnails);
+        draw_full_art_mode(f, app, area, album_art_full, main_state, thumbnails);
     } else {
         // Outer layout: main content | status bar | notification line
         let outer = Layout::default()

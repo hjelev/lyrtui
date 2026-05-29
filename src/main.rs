@@ -168,6 +168,7 @@ async fn run(
         }
     }
     let mut album_art: Option<StatefulProtocol> = None;
+    let mut album_art_full: Option<StatefulProtocol> = None;
     let mut last_artwork_image: Option<image::DynamicImage> = None;
     let mut last_artwork_url: Option<String> = None;
     let mut sidebar_state = ListState::default();
@@ -271,6 +272,7 @@ async fn run(
                 f,
                 &app,
                 album_art.as_mut(),
+                album_art_full.as_mut(),
                 &mut sidebar_state,
                 &mut main_state,
                 &mut thumbnails,
@@ -302,7 +304,8 @@ async fn run(
                             }
                         }
                         app.art_image_size = Some((img.width(), img.height()));
-                        album_art = Some(picker.new_resize_protocol(img.clone()));
+                        album_art = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 6)));
+                        album_art_full = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 2)));
                         last_artwork_image = Some(img);
                     }
                 }
@@ -400,7 +403,8 @@ async fn run(
                             }
                         }
                         if let Some(img) = &last_artwork_image {
-                            album_art = Some(picker.new_resize_protocol(img.clone()));
+                            album_art = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 6)));
+                            album_art_full = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 2)));
                         }
                         thumbnails = thumbnail_images
                             .iter()
@@ -453,7 +457,8 @@ async fn run(
                             // Render area size changes between modes; recreate protocol so the
                             // image is retransmitted at the correct dimensions.
                             if let Some(img) = &last_artwork_image {
-                                album_art = Some(picker.new_resize_protocol(img.clone()));
+                                album_art = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 6)));
+                                album_art_full = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 2)));
                             }
                         }
                     }
@@ -518,7 +523,8 @@ async fn run(
                 }
             }
             if let Some(img) = &last_artwork_image {
-                album_art = Some(picker.new_resize_protocol(img.clone()));
+                album_art = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 6)));
+                album_art_full = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 2)));
             }
             needs_redraw = true;
         }
@@ -686,4 +692,32 @@ async fn handle_msg(
             // handled inline in the event loop
         }
     }
+}
+
+/// Round the corners of an image by making corner pixels transparent.
+/// `radius_pct` is the radius as a percentage of the shorter dimension (clamped to ≥4 px).
+fn with_rounded_corners(img: image::DynamicImage, radius_pct: u32) -> image::DynamicImage {
+    let mut rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let r = ((w.min(h) * radius_pct / 100) as f64).max(4.0);
+    for y in 0..h {
+        for x in 0..w {
+            let corner = match (x < r as u32, x >= w.saturating_sub(r as u32),
+                                y < r as u32, y >= h.saturating_sub(r as u32)) {
+                (true, _, true, _)  => Some((r as u32, r as u32)),
+                (_, true, true, _)  => Some((w - r as u32, r as u32)),
+                (true, _, _, true)  => Some((r as u32, h - r as u32)),
+                (_, true, _, true)  => Some((w - r as u32, h - r as u32)),
+                _ => None,
+            };
+            if let Some((cx, cy)) = corner {
+                let dx = x as f64 - cx as f64;
+                let dy = y as f64 - cy as f64;
+                if dx * dx + dy * dy > r * r {
+                    rgba.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
+                }
+            }
+        }
+    }
+    image::DynamicImage::ImageRgba8(rgba)
 }
