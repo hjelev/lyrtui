@@ -48,6 +48,12 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 
 ## Installation
 
+### Install via cargo
+
+```sh
+cargo install lyrtui
+```
+
 ### Install prebuilt binaries via Homebrew
 
 ```sh
