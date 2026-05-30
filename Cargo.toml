@@ -1,10 +1,13 @@
 [package]
 name = "lyrtui"
 version = "0.2.5"
+authors = ["Hristo Jelev <jeleff@gmail.com>"]
 edition = "2024"
 repository = "https://github.com/hjelev/lyrtui"
 homepage = "https://github.com/hjelev/lyrtui"
 description = "TUI for Lyrion Music Server"
+readme = "README.md"
+license = "MIT"
 
 [dependencies]
 ratatui = "0.30"
