@@ -318,7 +318,11 @@ async fn run(
             last_artwork_url = current_url.clone();
             album_art = None;
             last_artwork_image = None;
-            app.art_image_size = None;
+            // Only clear the image size when the new track has no artwork — if artwork is
+            // coming, keep the old dimensions so the layout doesn't jump during the fetch.
+            if current_url.is_none() {
+                app.art_image_size = None;
+            }
             // Keep the previous accent_color until the new image resolves.
             if let Some(url) = current_url {
                 let c = client.clone();
