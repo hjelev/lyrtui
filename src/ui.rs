@@ -19,6 +19,14 @@ const THUMB_SEP: u16 = 1; // gap between image and text
 pub const PLAYERS_PWR_BTN_W: u16 = 3; // width of the power button column in the Players screen
 pub const PLAYERS_SYNC_BTN_W: u16 = 3; // width of the sync button column " ⇄ "
 
+const PILL_BG_FOCUSED:   Color = Color::Rgb(45, 100, 170);
+const PILL_FG_FOCUSED:   Color = Color::Rgb(220, 235, 255);
+const PILL_BG_UNFOCUSED: Color = Color::Rgb(50, 50, 68);
+const THUMB_BG_DEFAULT:  Color = Color::Rgb(25, 25, 35);
+const THUMB_PLACEHOLDER: Color = Color::Rgb(80, 80, 110);
+const BAR_FOCUSED:       Color = Color::Rgb(100, 180, 255);
+const BAR_UNFOCUSED:     Color = Color::Rgb(60, 80, 110);
+
 fn sidebar_nerd_icon(item: &SidebarItem) -> &'static str {
     match item {
         SidebarItem::MyMusic    => "\u{F001}",  // nf-fa-music
@@ -52,6 +60,44 @@ fn accent_tint(accent: Option<[u8; 3]>, pct: u16, r_off: u16, g_off: u16, b_off:
 
 fn unfocus_border_color(accent: Option<[u8; 3]>) -> Color {
     accent_tint(accent, 25, 20, 20, 30, Color::DarkGray)
+}
+
+fn border_style_for_focus(focused: bool, accent: Option<[u8; 3]>) -> Style {
+    if focused {
+        Style::default().fg(focus_border_color(accent))
+    } else {
+        Style::default().fg(unfocus_border_color(accent))
+    }
+}
+
+fn thumbnail_bg_color(is_selected: bool, focused: bool) -> Color {
+    if is_selected {
+        if focused { PILL_BG_FOCUSED } else { PILL_BG_UNFOCUSED }
+    } else {
+        THUMB_BG_DEFAULT
+    }
+}
+
+fn render_thumbnail(
+    f: &mut Frame,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+    thumb_url: Option<&str>,
+    thumb_rect: Rect,
+    bg: Color,
+) {
+    match thumb_url.and_then(|u| thumbnails.get_mut(u)) {
+        Some(proto) => {
+            let img = StatefulImage::default().resize(Resize::Fit(None));
+            f.render_stateful_widget(img, thumb_rect, proto);
+        }
+        None => {
+            f.render_widget(
+                Paragraph::new(if thumb_rect.height >= 2 { "\n ♪" } else { " ♪" })
+                    .style(Style::default().fg(THUMB_PLACEHOLDER).bg(bg)),
+                thumb_rect,
+            );
+        }
+    }
 }
 
 /// Very dark accent tint used as the background for media control buttons.
@@ -131,9 +177,9 @@ fn icon_globe(nerd: bool) -> &'static str {
 /// Returns (pill_bg, pill_fg) for the yazi-style pill selector.
 fn pill_colors(focused: bool) -> (Color, Color) {
     if focused {
-        (Color::Rgb(45, 100, 170), Color::Rgb(220, 235, 255))
+        (PILL_BG_FOCUSED, PILL_FG_FOCUSED)
     } else {
-        (Color::Rgb(50, 50, 68), Color::Rgb(190, 190, 210))
+        (PILL_BG_UNFOCUSED, Color::Rgb(190, 190, 210))
     }
 }
 
@@ -340,11 +386,7 @@ pub fn draw(
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
-    let border_style = if app.focus_sidebar {
-        Style::default().fg(focus_border_color(app.effective_accent()))
-    } else {
-        Style::default().fg(unfocus_border_color(app.effective_accent()))
-    };
+    let border_style = border_style_for_focus(app.focus_sidebar, app.effective_accent());
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -439,11 +481,7 @@ fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbn
 fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
-    let border_style = if focused {
-        Style::default().fg(focus_border_color(app.effective_accent()))
-    } else {
-        Style::default().fg(unfocus_border_color(app.effective_accent()))
-    };
+    let border_style = border_style_for_focus(focused, app.effective_accent());
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -702,11 +740,7 @@ fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumb
 fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
-    let border_style = if focused {
-        Style::default().fg(focus_border_color(app.effective_accent()))
-    } else {
-        Style::default().fg(unfocus_border_color(app.effective_accent()))
-    };
+    let border_style = border_style_for_focus(focused, app.effective_accent());
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -787,7 +821,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
             Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
             Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(bar, Style::default().fg(Color::Rgb(100, 180, 255)).bg(glob_bg)),
+            Span::styled(bar, Style::default().fg(BAR_FOCUSED).bg(glob_bg)),
             Span::styled(&vol_str, Style::default().fg(Color::White).bg(glob_bg)),
             pill_endcap_right(pill_bg, app.use_nerd_icons),
         ])
@@ -798,7 +832,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
             Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
             Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(bar, Style::default().fg(Color::Rgb(60, 80, 110)).bg(glob_bg)),
+            Span::styled(bar, Style::default().fg(BAR_UNFOCUSED).bg(glob_bg)),
             Span::styled(&vol_str, Style::default().fg(mid).bg(glob_bg)),
         ])
     };
@@ -860,7 +894,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
                       else if active { Color::Green }
                       else if powered { Color::White }
                       else { mid };
-        let bar_color = if is_sel { Color::Rgb(100, 180, 255) } else { Color::Rgb(60, 80, 110) };
+        let bar_color = if is_sel { BAR_FOCUSED } else { BAR_UNFOCUSED };
         let vol_fg = if is_sel { Color::White } else { mid };
 
         // Power button: accent when on, dim when off (always uses btn_bg_color background).
@@ -1003,11 +1037,7 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
 
-    let border_style = if focused {
-        Style::default().fg(focus_border_color(app.effective_accent()))
-    } else {
-        Style::default().fg(unfocus_border_color(app.effective_accent()))
-    };
+    let border_style = border_style_for_focus(focused, app.effective_accent());
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -1119,24 +1149,8 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             SearchResultItem::Playlist(_) => None,
         };
         let thumb_rect = Rect::new(results_area.x, y, THUMB_W, 2);
-        let thumb_bg = if is_sel {
-            if results_focused { Color::Rgb(45, 100, 170) } else { Color::Rgb(50, 50, 68) }
-        } else {
-            Color::Rgb(25, 25, 35)
-        };
-        match thumb_url.as_ref().and_then(|u| thumbnails.get_mut(u)) {
-            Some(proto) => {
-                let img = StatefulImage::default().resize(Resize::Fit(None));
-                f.render_stateful_widget(img, thumb_rect, proto);
-            }
-            None => {
-                f.render_widget(
-                    Paragraph::new(if thumb_rect.height >= 2 { "\n ♪" } else { " ♪" })
-                        .style(Style::default().fg(Color::Rgb(80, 80, 110)).bg(thumb_bg)),
-                    thumb_rect,
-                );
-            }
-        }
+        let thumb_bg = thumbnail_bg_color(is_sel, results_focused);
+        render_thumbnail(f, thumbnails, thumb_url.as_deref(), thumb_rect, thumb_bg);
 
         let (line1, line2, duration) = match &app.search_results[vis_i] {
             SearchResultItem::Artist(a) => (
@@ -1329,24 +1343,8 @@ fn draw_app_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
 
         let thumb_url = item.artwork_url.clone();
         let thumb_rect = Rect::new(results_area.x, y, THUMB_W, 2);
-        let thumb_bg = if is_sel {
-            if results_focused { Color::Rgb(45, 100, 170) } else { Color::Rgb(50, 50, 68) }
-        } else {
-            Color::Rgb(25, 25, 35)
-        };
-        match thumb_url.as_ref().and_then(|u| thumbnails.get_mut(u)) {
-            Some(proto) => {
-                let img = StatefulImage::default().resize(Resize::Fit(None));
-                f.render_stateful_widget(img, thumb_rect, proto);
-            }
-            None => {
-                f.render_widget(
-                    Paragraph::new(if thumb_rect.height >= 2 { "\n ♪" } else { " ♪" })
-                        .style(Style::default().fg(Color::Rgb(80, 80, 110)).bg(thumb_bg)),
-                    thumb_rect,
-                );
-            }
-        }
+        let thumb_bg = thumbnail_bg_color(is_sel, results_focused);
+        render_thumbnail(f, thumbnails, thumb_url.as_deref(), thumb_rect, thumb_bg);
 
         // Determine type label and icon from item metadata
         let (icon, type_label, icon_color) = if item.is_audio || item.item_type == "audio" {
@@ -2038,24 +2036,8 @@ fn draw_two_row_list(
         let (s1, s2) = if is_sel { cursor_styles(focused) } else { (Style::default(), Style::default()) };
 
         let thumb_rect = Rect::new(inner.x, y, THUMB_W, 2);
-        let thumb_bg = if is_sel {
-            if focused { Color::Rgb(45, 100, 170) } else { Color::Rgb(50, 50, 68) }
-        } else {
-            Color::Rgb(25, 25, 35)
-        };
-        match item.thumb_url.as_ref().and_then(|u| thumbnails.get_mut(u)) {
-            Some(proto) => {
-                let img = StatefulImage::default().resize(Resize::Fit(None));
-                f.render_stateful_widget(img, thumb_rect, proto);
-            }
-            None => {
-                f.render_widget(
-                    Paragraph::new(if thumb_rect.height >= 2 { "\n ♪" } else { " ♪" })
-                        .style(Style::default().fg(Color::Rgb(80, 80, 110)).bg(thumb_bg)),
-                    thumb_rect,
-                );
-            }
-        }
+        let thumb_bg = thumbnail_bg_color(is_sel, focused);
+        render_thumbnail(f, thumbnails, item.thumb_url.as_deref(), thumb_rect, thumb_bg);
 
         if let Some(dur) = item.duration.as_deref().filter(|d| !d.is_empty()) {
             let dur_w = dur.len() as u16;

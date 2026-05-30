@@ -1,6 +1,11 @@
 use crate::api::FolderItemType;
 use crate::app::{App, LibraryView, MainView, SearchResultItem};
 
+/// Extracts a string id from an `Option<&Value>`, falling back to an empty string for `None`/`Null`.
+pub fn extract_id(id: Option<&serde_json::Value>) -> String {
+    json_id_to_string(id.unwrap_or(&serde_json::Value::Null))
+}
+
 pub fn json_id_to_string(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::String(s) => s.clone(),

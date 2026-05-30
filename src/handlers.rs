@@ -20,6 +20,53 @@ fn point_in(col: u16, row: u16, area: Rect) -> bool {
 
 const HELP_CONTENT_LINES: u16 = 18; // tallest column in draw_help (left); keep in sync
 
+const SEARCH_SCOPES: [SearchScope; 4] = [
+    SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All,
+];
+
+fn map_control_button_to_action(btn_idx: usize) -> Action {
+    match btn_idx {
+        0 => Action::Prev,
+        1 => Action::PlayPause,
+        2 => Action::Stop,
+        3 => Action::Next,
+        4 => Action::ToggleShuffle,
+        5 => Action::ToggleRepeat,
+        6 => Action::VolumeDown,
+        _ => Action::VolumeUp,
+    }
+}
+
+fn is_double_click(last: &Option<(Instant, usize)>, idx: usize) -> bool {
+    last.as_ref()
+        .map(|(t, i)| *i == idx && t.elapsed().as_millis() < 500)
+        .unwrap_or(false)
+}
+
+fn cycle_search_scope(
+    forward: bool,
+    app: &mut App,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    let idx = SEARCH_SCOPES.iter().position(|s| s == &app.search_scope).unwrap_or(0);
+    app.search_scope = SEARCH_SCOPES[if forward { (idx + 1) % 4 } else { (idx + 3) % 4 }].clone();
+    if !app.search_query.is_empty() {
+        app.search_results = vec![];
+        app.main_selected = 0;
+        let player_id = app.active_player.clone().unwrap_or_default();
+        background::trigger_search(
+            app.search_query.clone(),
+            app.search_scope.clone(),
+            app.app_services.clone(),
+            app.radio_services.clone(),
+            player_id,
+            client.clone(),
+            tx.clone(),
+        );
+    }
+}
+
 fn help_max_scroll(app: &App) -> u16 {
     HELP_CONTENT_LINES.saturating_sub(app.help_visible_lines.get())
 }
@@ -129,39 +176,16 @@ pub async fn handle_mouse_event(
             } else if point_in(col, row, btn_rects[1]) {
                 app.config_modal = None;
             } else if point_in(col, row, modal_area) {
-                if let Some(modal) = app.config_modal.as_mut() {
-                    if point_in(col, row, field_rects[0]) {
-                        modal.selected_field = 0;
-                        modal.editing = true;
-                        modal.error = None;
-                    } else if point_in(col, row, field_rects[1]) {
-                        modal.selected_field = 1;
-                        modal.editing = true;
-                        modal.error = None;
-                    } else if point_in(col, row, field_rects[2]) {
-                        modal.selected_field = 2;
-                        modal.editing = true;
-                        modal.error = None;
-                    } else if point_in(col, row, field_rects[3]) {
-                        modal.selected_field = 3;
-                        modal.editing = true;
-                        modal.error = None;
-                    } else if point_in(col, row, field_rects[4]) {
-                        modal.selected_field = 4;
-                        modal.use_nerd_icons = !modal.use_nerd_icons;
-                    } else if point_in(col, row, field_rects[5]) {
-                        modal.selected_field = 5;
-                        modal.auto_discover = !modal.auto_discover;
-                    } else if point_in(col, row, field_rects[6]) {
-                        modal.selected_field = 6;
-                        modal.editing = true;
-                        modal.error = None;
-                    } else if point_in(col, row, field_rects[7]) {
-                        modal.selected_field = 7;
-                        modal.disable_auto_colors = !modal.disable_auto_colors;
-                    } else if point_in(col, row, field_rects[8]) {
-                        modal.selected_field = 8;
-                        modal.image_protocol_idx = (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
+                if let Some(modal) = app.config_modal.as_mut()
+                    && let Some(idx) = field_rects.iter().position(|r| point_in(col, row, *r))
+                {
+                    modal.selected_field = idx;
+                    match idx {
+                        0 | 1 | 2 | 3 | 6 => { modal.editing = true; modal.error = None; }
+                        4 => modal.use_nerd_icons = !modal.use_nerd_icons,
+                        5 => modal.auto_discover = !modal.auto_discover,
+                        7 => modal.disable_auto_colors = !modal.disable_auto_colors,
+                        _ => modal.image_protocol_idx = (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len(),
                     }
                 }
             } else {
@@ -212,17 +236,7 @@ pub async fn handle_mouse_event(
                 }
                 let ctrl_rects = ui::compute_full_art_control_rects(terminal_area, app);
                 if let Some((btn_idx, _)) = ctrl_rects.iter().enumerate().find(|(_, r)| point_in(col, row, **r)) {
-                    let action = match btn_idx {
-                        0 => Action::Prev,
-                        1 => Action::PlayPause,
-                        2 => Action::Stop,
-                        3 => Action::Next,
-                        4 => Action::ToggleShuffle,
-                        5 => Action::ToggleRepeat,
-                        6 => Action::VolumeDown,
-                        _ => Action::VolumeUp,
-                    };
-                    handle_action(app, action, client, tx, vol_sync_tx).await;
+                    handle_action(app, map_control_button_to_action(btn_idx), client, tx, vol_sync_tx).await;
                     return;
                 }
                 let queue_rect = ui::compute_full_art_queue_rect(terminal_area, app);
@@ -295,17 +309,7 @@ pub async fn handle_mouse_event(
                 .enumerate()
                 .find(|(_, r)| point_in(col, row, **r));
             if let Some((btn_idx, _)) = ctrl_hit {
-                let action = match btn_idx {
-                    0 => Action::Prev,
-                    1 => Action::PlayPause,
-                    2 => Action::Stop,
-                    3 => Action::Next,
-                    4 => Action::ToggleShuffle,
-                    5 => Action::ToggleRepeat,
-                    6 => Action::VolumeDown,
-                    _ => Action::VolumeUp,
-                };
-                handle_action(app, action, client, tx, vol_sync_tx).await;
+                handle_action(app, map_control_button_to_action(btn_idx), client, tx, vol_sync_tx).await;
             } else {
                 let art_rect = ui::compute_statusbar_art_rect(terminal_area, app.status_height, app.art_col_w);
                 if point_in(col, row, art_rect) && app.now_playing.is_some() {
@@ -466,10 +470,7 @@ pub async fn handle_mouse_event(
                         let rel = (row - results_top) as usize;
                         let idx = main_state.offset() + rel / 2;
                         if idx < app.search_results.len() {
-                            let is_double = last_main_click
-                                .as_ref()
-                                .map(|(t, i)| *i == idx && t.elapsed().as_millis() < 500)
-                                .unwrap_or(false);
+                            let is_double = is_double_click(last_main_click, idx);
                             *last_main_click = Some((Instant::now(), idx));
                             app.main_selected = idx;
                             if is_double || !utils::is_main_item_playable(app) {
@@ -492,10 +493,7 @@ pub async fn handle_mouse_event(
                     };
                     let idx = main_state.offset() + rel / row_h;
                     if idx < utils::main_list_len(app) {
-                        let is_double = last_main_click
-                            .as_ref()
-                            .map(|(t, i)| *i == idx && t.elapsed().as_millis() < 500)
-                            .unwrap_or(false);
+                        let is_double = is_double_click(last_main_click, idx);
                         *last_main_click = Some((Instant::now(), idx));
 
                         app.main_selected = idx;
@@ -844,9 +842,7 @@ async fn handle_insert_next(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
         }
         MainView::Library(LibraryView::Tracks { .. }) => {
             if let Some(track) = app.tracks.get(app.main_selected) {
-                let id = utils::json_id_to_string(
-                    track.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                );
+                let id = utils::extract_id(track.id.as_ref());
                 let name = track.title.clone();
                 let c = client.clone();
                 let t = tx.clone();
@@ -960,9 +956,7 @@ async fn handle_insert_next(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::S
         MainView::Search => {
             match app.search_results.get(app.main_selected).cloned() {
                 Some(SearchResultItem::Track(track)) => {
-                    let id = utils::json_id_to_string(
-                        track.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                    );
+                    let id = utils::extract_id(track.id.as_ref());
                     let name = track.title.clone();
                     let c = client.clone();
                     let t = tx.clone();
@@ -1007,9 +1001,7 @@ async fn handle_add_to_favorites(
     match app.main_view.clone() {
         MainView::Library(LibraryView::Tracks { .. }) => {
             if let Some(track) = app.tracks.get(app.main_selected) {
-                let id = utils::json_id_to_string(
-                    track.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                );
+                let id = utils::extract_id(track.id.as_ref());
                 let name = track.title.clone();
                 let c = client.clone();
                 let t = tx.clone();
@@ -1091,9 +1083,7 @@ async fn handle_add_to_favorites(
             if let Some(SearchResultItem::Track(track)) =
                 app.search_results.get(app.main_selected).cloned()
             {
-                let id = utils::json_id_to_string(
-                    track.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                );
+                let id = utils::extract_id(track.id.as_ref());
                 let name = track.title.clone();
                 let c = client.clone();
                 let t = tx.clone();
@@ -1593,45 +1583,13 @@ pub async fn handle_action(
 
         Action::ScopePrev => {
             if matches!(app.main_view, MainView::Search) && !app.focus_sidebar {
-                let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
-                let idx = scopes.iter().position(|s| s == &app.search_scope).unwrap_or(0);
-                app.search_scope = scopes[(idx + 3) % 4].clone();
-                if !app.search_query.is_empty() {
-                    app.search_results = vec![];
-                    app.main_selected = 0;
-                    let player_id = app.active_player.clone().unwrap_or_default();
-                    background::trigger_search(
-                        app.search_query.clone(),
-                        app.search_scope.clone(),
-                        app.app_services.clone(),
-                        app.radio_services.clone(),
-                        player_id,
-                        client.clone(),
-                        tx.clone(),
-                    );
-                }
+                cycle_search_scope(false, app, client, tx);
             }
         }
 
         Action::ScopeNext => {
             if matches!(app.main_view, MainView::Search) && !app.focus_sidebar {
-                let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
-                let idx = scopes.iter().position(|s| s == &app.search_scope).unwrap_or(0);
-                app.search_scope = scopes[(idx + 1) % 4].clone();
-                if !app.search_query.is_empty() {
-                    app.search_results = vec![];
-                    app.main_selected = 0;
-                    let player_id = app.active_player.clone().unwrap_or_default();
-                    background::trigger_search(
-                        app.search_query.clone(),
-                        app.search_scope.clone(),
-                        app.app_services.clone(),
-                        app.radio_services.clone(),
-                        player_id,
-                        client.clone(),
-                        tx.clone(),
-                    );
-                }
+                cycle_search_scope(true, app, client, tx);
             }
         }
 
@@ -2084,9 +2042,7 @@ pub async fn handle_main_select(
                     }
                     None => {
                         if let Some(track) = app.tracks.get(idx) {
-                            let track_id = utils::json_id_to_string(
-                                track.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                            );
+                            let track_id = utils::extract_id(track.id.as_ref());
                             tokio::spawn(async move {
                                 let _ = c.play_track(&pid, &track_id).await;
                             });
@@ -2267,9 +2223,7 @@ pub async fn handle_main_select(
                 }
                 SearchResultItem::Track(t) => {
                     if let Some(pid) = app.active_player.clone() {
-                        let track_id = utils::json_id_to_string(
-                            t.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                        );
+                        let track_id = utils::extract_id(t.id.as_ref());
                         let c = client.clone();
                         tokio::spawn(async move {
                             let _ = c.play_track(&pid, &track_id).await;
@@ -2327,6 +2281,55 @@ pub async fn handle_main_select(
     }
 }
 
+fn collect_url_items(items: &[crate::api::RadioItem]) -> Vec<(String, String)> {
+    items.iter().filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u))).collect()
+}
+
+fn spawn_add_url_folder(
+    pid: String,
+    items: Vec<(String, String)>,
+    title: String,
+    queue_was_empty: bool,
+    client: Arc<LmsClient>,
+    tx: mpsc::Sender<AppMsg>,
+) {
+    tokio::spawn(async move {
+        let mut added = 0usize;
+        for (name, url) in &items {
+            if client.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
+                added += 1;
+            }
+        }
+        if added > 0 {
+            if queue_was_empty { let _ = client.play(&pid).await; }
+            let _ = tx.send(AppMsg::StatusMsg(format!("Added {} items from \"{}\" to queue", added, title))).await;
+        }
+    });
+}
+
+fn spawn_replace_with_url_folder(
+    pid: String,
+    items: Vec<(String, String)>,
+    title: String,
+    client: Arc<LmsClient>,
+    tx: mpsc::Sender<AppMsg>,
+) {
+    tokio::spawn(async move {
+        if client.clear_queue(&pid).await.is_ok() {
+            let mut added = 0usize;
+            for (name, url) in &items {
+                if client.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
+                    added += 1;
+                }
+            }
+            if added > 0 {
+                let _ = client.play(&pid).await;
+                let _ = tx.send(AppMsg::StatusMsg(format!("Playing \"{}\" folder", title))).await;
+            }
+        }
+    });
+}
+
 async fn handle_add_parent_to_queue(
     app: &mut App,
     client: &Arc<LmsClient>,
@@ -2358,85 +2361,13 @@ async fn handle_add_parent_to_queue(
             });
         }
         MainView::Radio => {
-            let items: Vec<(String, String)> = app
-                .radio_items
-                .iter()
-                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
-                .collect();
-            let title = app.radio_title.clone();
-            let c = client.clone();
-            let t = tx.clone();
-            tokio::spawn(async move {
-                let mut added = 0usize;
-                for (name, url) in &items {
-                    if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
-                        added += 1;
-                    }
-                }
-                if added > 0 {
-                    if queue_was_empty { let _ = c.play(&pid).await; }
-                    let _ = t
-                        .send(AppMsg::StatusMsg(format!(
-                            "Added {} items from \"{}\" to queue",
-                            added, title
-                        )))
-                        .await;
-                }
-            });
+            spawn_add_url_folder(pid, collect_url_items(&app.radio_items), app.radio_title.clone(), queue_was_empty, client.clone(), tx.clone());
         }
         MainView::Apps => {
-            let items: Vec<(String, String)> = app
-                .app_items
-                .iter()
-                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
-                .collect();
-            let title = app.app_title.clone();
-            let c = client.clone();
-            let t = tx.clone();
-            tokio::spawn(async move {
-                let mut added = 0usize;
-                for (name, url) in &items {
-                    if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
-                        added += 1;
-                    }
-                }
-                if added > 0 {
-                    if queue_was_empty { let _ = c.play(&pid).await; }
-                    let _ = t
-                        .send(AppMsg::StatusMsg(format!(
-                            "Added {} items from \"{}\" to queue",
-                            added, title
-                        )))
-                        .await;
-                }
-            });
+            spawn_add_url_folder(pid, collect_url_items(&app.app_items), app.app_title.clone(), queue_was_empty, client.clone(), tx.clone());
         }
         MainView::Favourites => {
-            let items: Vec<(String, String)> = app
-                .fav_items
-                .iter()
-                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
-                .collect();
-            let title = app.fav_title.clone();
-            let c = client.clone();
-            let t = tx.clone();
-            tokio::spawn(async move {
-                let mut added = 0usize;
-                for (name, url) in &items {
-                    if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
-                        added += 1;
-                    }
-                }
-                if added > 0 {
-                    if queue_was_empty { let _ = c.play(&pid).await; }
-                    let _ = t
-                        .send(AppMsg::StatusMsg(format!(
-                            "Added {} items from \"{}\" to queue",
-                            added, title
-                        )))
-                        .await;
-                }
-            });
+            spawn_add_url_folder(pid, collect_url_items(&app.fav_items), app.fav_title.clone(), queue_was_empty, client.clone(), tx.clone());
         }
         MainView::Library(LibraryView::Folder { folder_id: Some(folder_id) }) => {
             let title = app.folder_title.clone();
@@ -2455,6 +2386,39 @@ async fn handle_add_parent_to_queue(
     }
 }
 
+fn spawn_add_url_to_queue(
+    pid: String,
+    url: String,
+    name: String,
+    queue_was_empty: bool,
+    client: Arc<LmsClient>,
+    tx: mpsc::Sender<AppMsg>,
+) {
+    tokio::spawn(async move {
+        if client.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok() {
+            if queue_was_empty { let _ = client.play(&pid).await; }
+            let _ = tx.send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name))).await;
+        }
+    });
+}
+
+fn spawn_replace_with_url(
+    pid: String,
+    url: String,
+    name: String,
+    client: Arc<LmsClient>,
+    tx: mpsc::Sender<AppMsg>,
+) {
+    tokio::spawn(async move {
+        if client.clear_queue(&pid).await.is_ok()
+            && client.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok()
+        {
+            let _ = client.play(&pid).await;
+            let _ = tx.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
+        }
+    });
+}
+
 async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
     let Some(pid) = app.active_player.clone() else {
         app.status_message = Some("No active player".to_string());
@@ -2463,8 +2427,13 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
     let queue_was_empty = app.queue.is_empty();
 
     match app.main_view.clone() {
-        MainView::Library(LibraryView::Artists) => {
-            if let Some(artist) = app.artists.get(app.main_selected) {
+        MainView::Library(LibraryView::Artists | LibraryView::AlbumArtists) => {
+            let list = if matches!(app.main_view, MainView::Library(LibraryView::Artists)) {
+                &app.artists
+            } else {
+                &app.album_artists
+            };
+            if let Some(artist) = list.get(app.main_selected) {
                 let id = utils::json_id_to_string(&artist.id);
                 let name = artist.artist.clone();
                 let c = client.clone();
@@ -2472,25 +2441,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
                 tokio::spawn(async move {
                     if c.add_artist_to_queue(&pid, &id).await.is_ok() {
                         if queue_was_empty { let _ = c.play(&pid).await; }
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
-                            .await;
-                    }
-                });
-            }
-        }
-        MainView::Library(LibraryView::AlbumArtists) => {
-            if let Some(artist) = app.album_artists.get(app.main_selected) {
-                let id = utils::json_id_to_string(&artist.id);
-                let name = artist.artist.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.add_artist_to_queue(&pid, &id).await.is_ok() {
-                        if queue_was_empty { let _ = c.play(&pid).await; }
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
-                            .await;
+                        let _ = t.send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name))).await;
                     }
                 });
             }
@@ -2513,9 +2464,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
         }
         MainView::Library(LibraryView::Tracks { .. }) => {
             if let Some(track) = app.tracks.get(app.main_selected) {
-                let id = utils::json_id_to_string(
-                    track.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                );
+                let id = utils::extract_id(track.id.as_ref());
                 let name = track.title.clone();
                 let c = client.clone();
                 let t = tx.clone();
@@ -2586,76 +2535,34 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
             if let Some(item) = app.radio_items.get(app.main_selected).cloned()
                 && let Some(url) = item.url
             {
-                let name = item.name.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok() {
-                        if queue_was_empty { let _ = c.play(&pid).await; }
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
-                            .await;
-                    }
-                });
+                spawn_add_url_to_queue(pid, url, item.name, queue_was_empty, client.clone(), tx.clone());
             }
         }
         MainView::Apps => {
             if let Some(item) = app.app_items.get(app.main_selected).cloned()
                 && let Some(url) = item.url
             {
-                let name = item.name.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok() {
-                        if queue_was_empty { let _ = c.play(&pid).await; }
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
-                            .await;
-                    }
-                });
+                spawn_add_url_to_queue(pid, url, item.name, queue_was_empty, client.clone(), tx.clone());
             }
         }
         MainView::AppSearch { .. } => {
             if let Some(item) = app.app_search_results.get(app.main_selected).cloned()
                 && let Some(url) = item.url
             {
-                let name = item.name.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok() {
-                        if queue_was_empty { let _ = c.play(&pid).await; }
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
-                            .await;
-                    }
-                });
+                spawn_add_url_to_queue(pid, url, item.name, queue_was_empty, client.clone(), tx.clone());
             }
         }
         MainView::Favourites => {
             if let Some(item) = app.fav_items.get(app.main_selected).cloned()
                 && let Some(url) = item.url
             {
-                let name = item.name.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok() {
-                        if queue_was_empty { let _ = c.play(&pid).await; }
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!("Added \"{}\" to queue", name)))
-                            .await;
-                    }
-                });
+                spawn_add_url_to_queue(pid, url, item.name, queue_was_empty, client.clone(), tx.clone());
             }
         }
         MainView::Search => {
             match app.search_results.get(app.main_selected).cloned() {
                 Some(SearchResultItem::Track(track)) => {
-                    let id = utils::json_id_to_string(
-                        track.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                    );
+                    let id = utils::extract_id(track.id.as_ref());
                     let name = track.title.clone();
                     let c = client.clone();
                     let t = tx.clone();
@@ -2724,21 +2631,13 @@ async fn handle_replace_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc:
     };
 
     match app.main_view.clone() {
-        MainView::Library(LibraryView::Artists) => {
-            if let Some(artist) = app.artists.get(app.main_selected) {
-                let id = utils::json_id_to_string(&artist.id);
-                let name = artist.artist.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.play_artist(&pid, &id).await.is_ok() {
-                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
-                    }
-                });
-            }
-        }
-        MainView::Library(LibraryView::AlbumArtists) => {
-            if let Some(artist) = app.album_artists.get(app.main_selected) {
+        MainView::Library(LibraryView::Artists | LibraryView::AlbumArtists) => {
+            let list = if matches!(app.main_view, MainView::Library(LibraryView::Artists)) {
+                &app.artists
+            } else {
+                &app.album_artists
+            };
+            if let Some(artist) = list.get(app.main_selected) {
                 let id = utils::json_id_to_string(&artist.id);
                 let name = artist.artist.clone();
                 let c = client.clone();
@@ -2765,9 +2664,7 @@ async fn handle_replace_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc:
         }
         MainView::Library(LibraryView::Tracks { .. }) => {
             if let Some(track) = app.tracks.get(app.main_selected) {
-                let id = utils::json_id_to_string(
-                    track.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                );
+                let id = utils::extract_id(track.id.as_ref());
                 let name = track.title.clone();
                 let c = client.clone();
                 let t = tx.clone();
@@ -2820,17 +2717,7 @@ async fn handle_replace_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc:
             if let Some(item) = app.radio_items.get(app.main_selected).cloned()
                 && let Some(url) = item.url
             {
-                let name = item.name.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.clear_queue(&pid).await.is_ok()
-                        && c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok()
-                    {
-                        let _ = c.play(&pid).await;
-                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
-                    }
-                });
+                spawn_replace_with_url(pid, url, item.name, client.clone(), tx.clone());
             }
         }
         MainView::Apps | MainView::AppSearch { .. } => {
@@ -2839,45 +2726,21 @@ async fn handle_replace_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc:
             } else {
                 app.app_search_results.get(app.main_selected).cloned()
             };
-            if let Some(item) = item
-                && let Some(url) = item.url
-            {
-                let name = item.name.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.clear_queue(&pid).await.is_ok()
-                        && c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok()
-                    {
-                        let _ = c.play(&pid).await;
-                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
-                    }
-                });
+            if let Some(item) = item && let Some(url) = item.url {
+                spawn_replace_with_url(pid, url, item.name, client.clone(), tx.clone());
             }
         }
         MainView::Favourites => {
             if let Some(item) = app.fav_items.get(app.main_selected).cloned()
                 && let Some(url) = item.url
             {
-                let name = item.name.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.clear_queue(&pid).await.is_ok()
-                        && c.add_url_with_title_to_queue(&pid, &url, &name).await.is_ok()
-                    {
-                        let _ = c.play(&pid).await;
-                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\"", name))).await;
-                    }
-                });
+                spawn_replace_with_url(pid, url, item.name, client.clone(), tx.clone());
             }
         }
         MainView::Search => {
             match app.search_results.get(app.main_selected).cloned() {
                 Some(SearchResultItem::Track(track)) => {
-                    let id = utils::json_id_to_string(
-                        track.id.as_ref().unwrap_or(&serde_json::Value::Null),
-                    );
+                    let id = utils::extract_id(track.id.as_ref());
                     let name = track.title.clone();
                     let c = client.clone();
                     let t = tx.clone();
@@ -2954,76 +2817,13 @@ async fn handle_replace_queue_with_parent(
             });
         }
         MainView::Radio => {
-            let items: Vec<(String, String)> = app
-                .radio_items
-                .iter()
-                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
-                .collect();
-            let title = app.radio_title.clone();
-            let c = client.clone();
-            let t = tx.clone();
-            tokio::spawn(async move {
-                if c.clear_queue(&pid).await.is_ok() {
-                    let mut added = 0usize;
-                    for (name, url) in &items {
-                        if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
-                            added += 1;
-                        }
-                    }
-                    if added > 0 {
-                        let _ = c.play(&pid).await;
-                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\" folder", title))).await;
-                    }
-                }
-            });
+            spawn_replace_with_url_folder(pid, collect_url_items(&app.radio_items), app.radio_title.clone(), client.clone(), tx.clone());
         }
         MainView::Apps => {
-            let items: Vec<(String, String)> = app
-                .app_items
-                .iter()
-                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
-                .collect();
-            let title = app.app_title.clone();
-            let c = client.clone();
-            let t = tx.clone();
-            tokio::spawn(async move {
-                if c.clear_queue(&pid).await.is_ok() {
-                    let mut added = 0usize;
-                    for (name, url) in &items {
-                        if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
-                            added += 1;
-                        }
-                    }
-                    if added > 0 {
-                        let _ = c.play(&pid).await;
-                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\" folder", title))).await;
-                    }
-                }
-            });
+            spawn_replace_with_url_folder(pid, collect_url_items(&app.app_items), app.app_title.clone(), client.clone(), tx.clone());
         }
         MainView::Favourites => {
-            let items: Vec<(String, String)> = app
-                .fav_items
-                .iter()
-                .filter_map(|i| i.url.clone().map(|u| (i.name.clone(), u)))
-                .collect();
-            let title = app.fav_title.clone();
-            let c = client.clone();
-            let t = tx.clone();
-            tokio::spawn(async move {
-                if c.clear_queue(&pid).await.is_ok() {
-                    let mut added = 0usize;
-                    for (name, url) in &items {
-                        if c.add_url_with_title_to_queue(&pid, url, name).await.is_ok() {
-                            added += 1;
-                        }
-                    }
-                    if added > 0 {
-                        let _ = c.play(&pid).await;
-                        let _ = t.send(AppMsg::StatusMsg(format!("Playing \"{}\" folder", title))).await;
-                    }
-                }
-            });
+            spawn_replace_with_url_folder(pid, collect_url_items(&app.fav_items), app.fav_title.clone(), client.clone(), tx.clone());
         }
         MainView::Library(LibraryView::Folder { folder_id: Some(folder_id) }) => {
             let title = app.folder_title.clone();
@@ -3070,42 +2870,10 @@ pub async fn handle_search_input_key(
             }
         }
         KeyCode::Tab => {
-            let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
-            let idx = scopes.iter().position(|s| s == &app.search_scope).unwrap_or(0);
-            app.search_scope = scopes[(idx + 1) % 4].clone();
-            if !app.search_query.is_empty() {
-                app.search_results = vec![];
-                app.main_selected = 0;
-                let player_id = app.active_player.clone().unwrap_or_default();
-                background::trigger_search(
-                    app.search_query.clone(),
-                    app.search_scope.clone(),
-                    app.app_services.clone(),
-                    app.radio_services.clone(),
-                    player_id,
-                    client.clone(),
-                    tx.clone(),
-                );
-            }
+            cycle_search_scope(true, app, client, tx);
         }
         KeyCode::BackTab => {
-            let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
-            let idx = scopes.iter().position(|s| s == &app.search_scope).unwrap_or(0);
-            app.search_scope = scopes[(idx + 3) % 4].clone();
-            if !app.search_query.is_empty() {
-                app.search_results = vec![];
-                app.main_selected = 0;
-                let player_id = app.active_player.clone().unwrap_or_default();
-                background::trigger_search(
-                    app.search_query.clone(),
-                    app.search_scope.clone(),
-                    app.app_services.clone(),
-                    app.radio_services.clone(),
-                    player_id,
-                    client.clone(),
-                    tx.clone(),
-                );
-            }
+            cycle_search_scope(false, app, client, tx);
         }
         KeyCode::Esc | KeyCode::Down => {
             app.search_input_active = false;

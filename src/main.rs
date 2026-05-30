@@ -28,6 +28,8 @@ use std::{
 use tokio::sync::mpsc;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
+const ART_RADIUS_NORMAL: u32 = 6;
+const ART_RADIUS_FULL:   u32 = 2;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -101,18 +103,7 @@ Config file: ~/.config/lyrtui/config.toml
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     // Picker must be created after EnterAlternateScreen, before reading events.
     let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-    match cfg.image_protocol.as_str() {
-        "halfblocks" => picker.set_protocol_type(ProtocolType::Halfblocks),
-        "sixel"      => picker.set_protocol_type(ProtocolType::Sixel),
-        "kitty"      => picker.set_protocol_type(ProtocolType::Kitty),
-        "iterm2"     => picker.set_protocol_type(ProtocolType::Iterm2),
-        _ => {
-            // "auto" or unknown: on Windows, terminal graphics protocols aren't supported
-            if cfg!(target_os = "windows") {
-                picker.set_protocol_type(ProtocolType::Halfblocks);
-            }
-        }
-    }
+    apply_image_protocol(&mut picker, &cfg.image_protocol);
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -157,15 +148,8 @@ async fn run(
     }
     // Set initial dynamic status height from actual terminal size (avoids a per-frame poll).
     // After this, dimensions are updated only on resize events so the image area stays stable.
-    {
-        if let Ok(sz) = terminal.size() {
-            let fw = app.font_size.0.max(1) as u32;
-            let fh = app.font_size.1.max(1) as u32;
-            let dyn_sh = (sz.height / 3).max(base_status_height);
-            app.status_height = dyn_sh;
-            let inner_h = dyn_sh.saturating_sub(2);
-            app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
-        }
+    if let Ok(sz) = terminal.size() {
+        update_status_height(&mut app, sz.height, base_status_height);
     }
     let mut album_art: Option<StatefulProtocol> = None;
     let mut album_art_full: Option<StatefulProtocol> = None;
@@ -304,8 +288,7 @@ async fn run(
                             }
                         }
                         app.art_image_size = Some((img.width(), img.height()));
-                        album_art = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 6)));
-                        album_art_full = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 2)));
+                        (album_art, album_art_full) = create_album_art_protocols(&img, &mut picker);
                         last_artwork_image = Some(img);
                     }
                 }
@@ -351,12 +334,8 @@ async fn run(
         // Request thumbnails for currently visible items
         {
             let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
-            let inner_h = term_h.saturating_sub(13);
-            let visible = ((inner_h / 2) as usize).max(1);
-            let offset = main_state.offset();
-            let end = (offset + visible + 5).min(utils::main_list_len(&app));
             let base = client.server_base_url();
-            for idx in offset..end {
+            for idx in thumb_range(term_h, &main_state, &app) {
                 if let Some(url) = utils::thumbnail_url_for(&app, idx, &base)
                     && !thumbnails.contains_key(&url)
                     && !pending_thumbs.contains(&url)
@@ -379,11 +358,7 @@ async fn run(
             }
         }
 
-        let had_overlay = app.confirm_delete_queue_item.is_some()
-            || app.confirm_clear_queue
-            || app.config_modal.is_some()
-            || app.context_menu.is_some()
-            || app.sync_modal.is_some();
+        let had_overlay = has_overlay(&app);
 
         match poll_event(TICK_RATE)? {
             InputEvent::Key(key) => {
@@ -391,20 +366,9 @@ async fn run(
                     let prev_protocol = cfg.image_protocol.clone();
                     handlers::handle_config_key(&mut app, key, &mut cfg, &client);
                     if cfg.image_protocol != prev_protocol {
-                        match cfg.image_protocol.as_str() {
-                            "halfblocks" => picker.set_protocol_type(ProtocolType::Halfblocks),
-                            "sixel"      => picker.set_protocol_type(ProtocolType::Sixel),
-                            "kitty"      => picker.set_protocol_type(ProtocolType::Kitty),
-                            "iterm2"     => picker.set_protocol_type(ProtocolType::Iterm2),
-                            _ => {
-                                if cfg!(target_os = "windows") {
-                                    picker.set_protocol_type(ProtocolType::Halfblocks);
-                                }
-                            }
-                        }
+                        apply_image_protocol(&mut picker, &cfg.image_protocol);
                         if let Some(img) = &last_artwork_image {
-                            album_art = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 6)));
-                            album_art_full = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 2)));
+                            (album_art, album_art_full) = create_album_art_protocols(img, &mut picker);
                         }
                         thumbnails = thumbnail_images
                             .iter()
@@ -457,8 +421,7 @@ async fn run(
                             // Render area size changes between modes; recreate protocol so the
                             // image is retransmitted at the correct dimensions.
                             if let Some(img) = &last_artwork_image {
-                                album_art = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 6)));
-                                album_art_full = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 2)));
+                                (album_art, album_art_full) = create_album_art_protocols(img, &mut picker);
                             }
                         }
                     }
@@ -484,14 +447,7 @@ async fn run(
             }
             InputEvent::Resize => {
                 if let Ok(sz) = terminal.size() {
-                    let fw = app.font_size.0.max(1) as u32;
-                    let fh = app.font_size.1.max(1) as u32;
-                    let dyn_sh = (sz.height / 3).max(base_status_height);
-                    if dyn_sh != app.status_height {
-                        app.status_height = dyn_sh;
-                        let inner_h = dyn_sh.saturating_sub(2);
-                        app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
-                    }
+                    update_status_height(&mut app, sz.height, base_status_height);
                 }
                 needs_redraw = true;
             }
@@ -504,27 +460,17 @@ async fn run(
 
         // When an overlay closes its Clear widget may overwrite image cells, causing terminals
         // to discard stored graphic-protocol data. Recreate affected protocols on overlay close.
-        let has_overlay = app.confirm_delete_queue_item.is_some()
-            || app.confirm_clear_queue
-            || app.config_modal.is_some()
-            || app.context_menu.is_some()
-            || app.sync_modal.is_some();
-        if had_overlay && !has_overlay {
+        if had_overlay && !has_overlay(&app) {
             let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
-            let inner_h = term_h.saturating_sub(13);
-            let visible = ((inner_h / 2) as usize).max(1);
-            let offset = main_state.offset();
-            let end = (offset + visible + 5).min(utils::main_list_len(&app));
             let base = client.server_base_url();
-            for idx in offset..end {
+            for idx in thumb_range(term_h, &main_state, &app) {
                 if let Some(url) = utils::thumbnail_url_for(&app, idx, &base)
                     && let Some(img) = thumbnail_images.get(&url) {
                     thumbnails.insert(url, picker.new_resize_protocol(img.clone()));
                 }
             }
             if let Some(img) = &last_artwork_image {
-                album_art = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 6)));
-                album_art_full = Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), 2)));
+                (album_art, album_art_full) = create_album_art_protocols(img, &mut picker);
             }
             needs_redraw = true;
         }
@@ -584,10 +530,8 @@ async fn handle_msg(
             if app.active_player.as_deref() == Some(pid.as_str()) {
                 // Preserve locally-pending volume so the 500ms poll doesn't overwrite
                 // an optimistic mute/unmute before the server has processed the command.
-                if app.volume_pending.contains_key(&pid) {
-                    if let Some(cur) = app.now_playing.as_ref() {
-                        np.volume = cur.volume;
-                    }
+                if app.volume_pending.contains_key(&pid) && let Some(cur) = app.now_playing.as_ref() {
+                    np.volume = cur.volume;
                 }
                 app.now_playing = Some(np);
             }
@@ -655,14 +599,7 @@ async fn handle_msg(
             app.player_sync_groups = groups;
         }
         AppMsg::StatusMsg(msg) => {
-            app.status_message_gen += 1;
-            let seq = app.status_message_gen;
-            app.status_message = Some(msg);
-            let t = tx.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(4)).await;
-                let _ = t.send(AppMsg::ClearStatusMsg(seq)).await;
-            });
+            set_timed_status(app, msg, tx);
         }
         AppMsg::ClearStatusMsg(seq) => {
             if app.status_message_gen == seq {
@@ -672,6 +609,7 @@ async fn handle_msg(
         AppMsg::SearchResultsLoaded(results) => {
             app.search_results = results;
             app.main_selected = 0;
+            app.is_loading = false;
         }
         AppMsg::AppSearchResultsLoaded(items) => {
             app.app_search_results = items;
@@ -679,19 +617,70 @@ async fn handle_msg(
             app.is_loading = false;
         }
         AppMsg::Error(e) => {
-            app.status_message_gen += 1;
-            let seq = app.status_message_gen;
-            app.status_message = Some(e);
-            let t = tx.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(4)).await;
-                let _ = t.send(AppMsg::ClearStatusMsg(seq)).await;
-            });
+            set_timed_status(app, e, tx);
         }
         AppMsg::ArtworkLoaded(_) | AppMsg::ThumbnailLoaded(..) | AppMsg::ThumbnailFailed(_) => {
             // handled inline in the event loop
         }
     }
+}
+
+fn thumb_range(term_h: u16, state: &ratatui::widgets::ListState, app: &App) -> std::ops::Range<usize> {
+    let inner_h = term_h.saturating_sub(13);
+    let visible = ((inner_h / 2) as usize).max(1);
+    let offset = state.offset();
+    let end = (offset + visible + 5).min(utils::main_list_len(app));
+    offset..end
+}
+
+fn has_overlay(app: &App) -> bool {
+    app.confirm_delete_queue_item.is_some()
+        || app.confirm_clear_queue
+        || app.config_modal.is_some()
+        || app.context_menu.is_some()
+        || app.sync_modal.is_some()
+}
+
+fn apply_image_protocol(picker: &mut Picker, protocol: &str) {
+    match protocol {
+        "halfblocks" => picker.set_protocol_type(ProtocolType::Halfblocks),
+        "sixel"      => picker.set_protocol_type(ProtocolType::Sixel),
+        "kitty"      => picker.set_protocol_type(ProtocolType::Kitty),
+        "iterm2"     => picker.set_protocol_type(ProtocolType::Iterm2),
+        _ => {
+            // "auto" or unknown: on Windows, terminal graphics protocols aren't supported
+            if cfg!(target_os = "windows") {
+                picker.set_protocol_type(ProtocolType::Halfblocks);
+            }
+        }
+    }
+}
+
+fn create_album_art_protocols(img: &image::DynamicImage, picker: &mut Picker) -> (Option<StatefulProtocol>, Option<StatefulProtocol>) {
+    (
+        Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), ART_RADIUS_NORMAL))),
+        Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), ART_RADIUS_FULL))),
+    )
+}
+
+fn update_status_height(app: &mut App, term_height: u16, base_height: u16) {
+    let fw = app.font_size.0.max(1) as u32;
+    let fh = app.font_size.1.max(1) as u32;
+    let dyn_sh = (term_height / 3).max(base_height);
+    app.status_height = dyn_sh;
+    let inner_h = dyn_sh.saturating_sub(2);
+    app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
+}
+
+fn set_timed_status(app: &mut App, msg: String, tx: &mpsc::Sender<AppMsg>) {
+    app.status_message_gen += 1;
+    let seq = app.status_message_gen;
+    app.status_message = Some(msg);
+    let t = tx.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        let _ = t.send(AppMsg::ClearStatusMsg(seq)).await;
+    });
 }
 
 /// Round the corners of an image by making corner pixels transparent.
