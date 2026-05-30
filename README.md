@@ -14,6 +14,7 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
   <img src="screenshots/screenshot-4.png" alt="Screenshot" width="1024"/>
   <img src="screenshots/screenshot-5.png" alt="Screenshot" width="1024"/>
   <img src="screenshots/screenshot-6.png" alt="Screenshot" width="1024"/>
+  <img src="screenshots/screenshot-7.png" alt="Screenshot" width="1024"/>
 </details>
 
 ## Features
