@@ -1452,7 +1452,7 @@ dependencies = [
 
 [[package]]
 name = "lyrtui"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "color-thief",
