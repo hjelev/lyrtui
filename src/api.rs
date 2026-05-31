@@ -380,6 +380,12 @@ impl LmsClient {
         Ok(())
     }
 
+    pub async fn seek(&self, player_id: &str, seconds: f64) -> Result<()> {
+        self.rpc(player_id, &[json!("time"), json!(seconds.max(0.0).floor())])
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_volume(&self, player_id: &str, volume: u8) -> Result<()> {
         self.rpc(player_id, &[json!("mixer"), json!("volume"), json!(volume)])
             .await?;

@@ -374,6 +374,60 @@ pub fn compute_statusbar_control_rects(
     })
 }
 
+/// Derives the clickable progress-bar fill rect from the now-playing info area,
+/// mirroring the bar math in `draw_now_playing_info` (non-bigscreen). The fill
+/// region starts after the 1-col left pill endcap and spans `bar_w` columns.
+fn progress_fill_rect(prog: Rect, use_nerd_icons: bool) -> Rect {
+    let prog_w = prog.width.saturating_sub(1);
+    let endcap_cols: u16 = if use_nerd_icons { 2 } else { 1 };
+    let bar_w = prog_w.saturating_sub(endcap_cols);
+    Rect::new(prog.x + 1, prog.y, bar_w, prog.height)
+}
+
+/// Returns the clickable progress-bar fill rect in the bottom status bar.
+pub fn compute_statusbar_progress_rect(
+    area: Rect,
+    status_height: u16,
+    art_col_w: u16,
+    app: &App,
+) -> Rect {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(status_height),
+            Constraint::Length(1),
+        ])
+        .split(area);
+    let status_inner = Rect::new(
+        outer[1].x + 1,
+        outer[1].y + 1,
+        outer[1].width.saturating_sub(2),
+        outer[1].height.saturating_sub(2),
+    );
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(art_col_w),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
+        .split(status_inner);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // title
+            Constraint::Length(1), // artist
+            Constraint::Length(1), // album
+            Constraint::Min(0),    // flexible spacer
+            Constraint::Length(1), // controls
+            Constraint::Length(1), // empty line
+            Constraint::Length(1), // progress
+        ])
+        .split(cols[2]);
+    progress_fill_rect(rows[6], app.use_nerd_icons)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     f: &mut Frame,
@@ -2920,6 +2974,44 @@ pub fn compute_full_art_control_rects(area: Rect, app: &App) -> [Rect; 8] {
         };
         Rect::new(x, ctrl.y, btn_w, 1)
     })
+}
+
+/// Returns the clickable progress-bar fill rect in big-screen (full art) mode.
+pub fn compute_full_art_progress_rect(area: Rect, app: &App) -> Rect {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(area);
+    let content_area = outer[0];
+    let image_col_w = art_rendered_cols(app, content_area);
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(image_col_w), Constraint::Min(1)])
+        .split(content_area);
+    let info_area = cols[1];
+    let info_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(8), Constraint::Min(1)])
+        .split(info_area);
+    let np_inner = Rect::new(
+        info_rows[0].x + 1,
+        info_rows[0].y + 1,
+        info_rows[0].width.saturating_sub(2),
+        info_rows[0].height.saturating_sub(2),
+    );
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // title
+            Constraint::Length(1), // artist
+            Constraint::Length(1), // album
+            Constraint::Min(0),    // flexible spacer
+            Constraint::Length(1), // controls
+            Constraint::Length(1), // empty line
+            Constraint::Length(1), // progress
+        ])
+        .split(np_inner);
+    progress_fill_rect(rows[6], app.use_nerd_icons)
 }
 
 /// Returns the rect covering the "`:exit art`" footer hint at the bottom-left of big-screen mode.

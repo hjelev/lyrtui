@@ -77,6 +77,27 @@ where
     });
 }
 
+/// Seeks the current track to the position corresponding to a left-click at
+/// column `col` within the progress-bar fill rect `bar`. Updates the elapsed
+/// time optimistically so the bar moves immediately, then fires the seek.
+fn seek_to_click(app: &mut App, client: &Arc<LmsClient>, col: u16, bar: Rect) {
+    let Some(pid) = app.active_player.clone() else {
+        return;
+    };
+    let Some(np) = app.now_playing.as_ref() else {
+        return;
+    };
+    if np.duration <= 0.0 || bar.width == 0 {
+        return;
+    }
+    let frac = ((col.saturating_sub(bar.x)) as f64 / bar.width as f64).clamp(0.0, 1.0);
+    let secs = frac * np.duration;
+    if let Some(np) = app.now_playing.as_mut() {
+        np.elapsed = secs;
+    }
+    spawn_fire(client, move |c| async move { c.seek(&pid, secs).await });
+}
+
 fn cycle_search_scope(
     forward: bool,
     app: &mut App,
@@ -309,6 +330,11 @@ pub async fn handle_mouse_event(
                     .await;
                     return;
                 }
+                let prog_rect = ui::compute_full_art_progress_rect(terminal_area, app);
+                if point_in(col, row, prog_rect) {
+                    seek_to_click(app, client, col, prog_rect);
+                    return;
+                }
                 let queue_rect = ui::compute_full_art_queue_rect(terminal_area, app);
                 if point_in(col, row, queue_rect) {
                     let inner_top = queue_rect.y + 1;
@@ -390,6 +416,15 @@ pub async fn handle_mouse_event(
                     vol_sync_tx,
                 )
                 .await;
+            } else if let Some(bar) = Some(ui::compute_statusbar_progress_rect(
+                terminal_area,
+                app.status_height,
+                app.art_col_w,
+                app,
+            ))
+            .filter(|b| point_in(col, row, *b))
+            {
+                seek_to_click(app, client, col, bar);
             } else {
                 let art_rect =
                     ui::compute_statusbar_art_rect(terminal_area, app.status_height, app.art_col_w);
