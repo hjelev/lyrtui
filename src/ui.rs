@@ -3169,36 +3169,36 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
 
-/// Returns (popup_rect, [host, port, username, password, nerd_icons, auto_discover, broadcast_mask, disable_auto_colors]).
-pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 9]) {
-    let popup = centered_rect_abs(54, 19, area);
+/// Returns (popup_rect, field_rects) where `field_rects[i]` is the clickable row for config
+/// field index `i` (0=host … 9+N=image-protocol, with N discovered-server rows in between).
+/// Must mirror `draw_config_modal`'s dynamic layout exactly so click hit-testing lands on the
+/// same rows that are rendered. OK/Cancel are returned by `compute_config_modal_button_rects`.
+pub fn compute_config_modal_rects(area: Rect, n_servers: usize) -> (Rect, Vec<Rect>) {
+    let popup = centered_rect_abs(54, 20 + n_servers as u16, area);
     let inner_x = popup.x + 1;
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
-    // row layout: [pad, host, port, username, password, divider, nerd, auto_discover, broadcast_mask, disable_auto_colors, image_protocol, error, spacer, help]
-    let host_rect = Rect::new(inner_x, inner_y + 1, inner_w, 1);
-    let port_rect = Rect::new(inner_x, inner_y + 2, inner_w, 1);
-    let user_rect = Rect::new(inner_x, inner_y + 3, inner_w, 1);
-    let pass_rect = Rect::new(inner_x, inner_y + 4, inner_w, 1);
-    let nerd_rect = Rect::new(inner_x, inner_y + 6, inner_w, 1);
-    let auto_rect = Rect::new(inner_x, inner_y + 7, inner_w, 1);
-    let mask_rect = Rect::new(inner_x, inner_y + 8, inner_w, 1);
-    let no_colors_rect = Rect::new(inner_x, inner_y + 9, inner_w, 1);
-    let img_proto_rect = Rect::new(inner_x, inner_y + 10, inner_w, 1);
-    (
-        popup,
-        [
-            host_rect,
-            port_rect,
-            user_rect,
-            pass_rect,
-            nerd_rect,
-            auto_rect,
-            mask_rect,
-            no_colors_rect,
-            img_proto_rect,
-        ],
-    )
+    // Offsets mirror the renderer's constraint rows (top pad=0, divider=5, scan=9):
+    //   host..pass = 1..4, nerd=6, auto=7, mask=8, scan=9,
+    //   discovered servers = 10..9+N, disable-auto-colors = 10+N, image-protocol = 11+N.
+    let row = |off: u16| Rect::new(inner_x, inner_y + off, inner_w, 1);
+    let mut rects = vec![
+        row(1), // 0 host
+        row(2), // 1 port
+        row(3), // 2 username
+        row(4), // 3 password
+        row(5), // 4 auto-discover
+        row(6), // 5 broadcast-mask
+        row(7), // 6 scan-button
+    ];
+    for j in 0..n_servers as u16 {
+        rects.push(row(8 + j)); // 7+j discovered server
+    }
+    // [8+N] divider sits here (not clickable)
+    rects.push(row(9 + n_servers as u16)); // 7+N nerd-icons
+    rects.push(row(10 + n_servers as u16)); // 8+N disable-auto-colors
+    rects.push(row(11 + n_servers as u16)); // 9+N image-protocol
+    (popup, rects)
 }
 
 fn draw_confirm_clear_queue(
@@ -3514,6 +3514,9 @@ pub fn compute_delete_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>) {
     use crate::app::FieldKind;
 
+    // Right-align every field label to this width so all colons share one column.
+    const CONFIG_LABEL_W: usize = 19; // == "Disable auto colors".len(), the longest label
+
     let area = f.area();
     let n_servers = modal.discovered_servers.len();
     // +1 for scan button row, +n_servers for server entries, +1 base for header growth
@@ -3537,10 +3540,9 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     f.render_widget(block, popup);
 
     // Build constraints dynamically:
-    // [0] pad | [1] host | [2] port | [3] username | [4] password | [5] divider
-    // [6] nerd-icons | [7] auto-discover | [8] broadcast-mask
-    // [9] scan-button | [10..9+N] discovered servers
-    // [10+N] disable-auto-colors | [11+N] image-protocol
+    // [0] pad | [1] host | [2] port | [3] username | [4] password
+    // [5] auto-discover | [6] broadcast-mask | [7] scan-button | [8..7+N] discovered servers
+    // [8+N] divider | [9+N] nerd-icons | [10+N] disable-auto-colors | [11+N] image-protocol
     // [12+N] error | [13+N] spacer | [14+N] help/buttons
     let mut constraints = vec![
         Constraint::Length(1), // [0] top pad
@@ -3568,8 +3570,15 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         .constraints(constraints)
         .split(inner);
 
-    // Row indices (static part)
-    let row_scan = 9usize;
+    // Row indices. Group 1 (above divider): host..password, auto-discover, broadcast-mask,
+    // scan-button, then the N discovered-server rows. Divider. Group 2: nerd-icons,
+    // disable-auto-colors, image-protocol. Then error, flexible spacer, buttons.
+    let row_auto = 5usize;
+    let row_mask = 6usize;
+    let row_scan = 7usize;
+    // discovered servers render at rows[8 + i]
+    let row_divider = 8 + n_servers;
+    let row_nerd = 9 + n_servers;
     let row_colors = 10 + n_servers;
     let row_proto = 11 + n_servers;
     let row_error = 12 + n_servers;
@@ -3604,19 +3613,19 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         };
 
         let line = Line::from(vec![
-            Span::styled(format!("  {:>8}: ", label), label_style),
+            Span::styled(format!("  {:>w$}: ", label, w = CONFIG_LABEL_W), label_style),
             Span::styled(value.to_string(), val_style),
         ]);
         f.render_widget(Paragraph::new(line), rows[i + 1]);
     }
 
-    // Divider
+    // Divider (separates connection/discovery settings from display settings)
     f.render_widget(
         Paragraph::new(Span::styled(
             "─".repeat(inner.width as usize),
             Style::default().fg(accent_dim),
         )),
-        rows[5],
+        rows[row_divider],
     );
 
     // Toggle helper closure
@@ -3635,7 +3644,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
             Style::default().fg(accent_mid)
         };
         let line = Line::from(vec![
-            Span::styled(format!("  {:>13}: ", label), lbl_style),
+            Span::styled(format!("  {:>w$}: ", label, w = CONFIG_LABEL_W), lbl_style),
             Span::styled(checkbox, val_style),
         ]);
         f.render_widget(Paragraph::new(line), row);
@@ -3643,22 +3652,22 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
 
     render_toggle(
         f,
-        rows[6],
+        rows[row_nerd],
         "Nerd icons",
         modal.use_nerd_icons,
-        modal.selected_field == 4,
+        modal.field_kind(modal.selected_field) == FieldKind::ToggleNerd,
     );
     render_toggle(
         f,
-        rows[7],
+        rows[row_auto],
         "Auto discover",
         modal.auto_discover,
-        modal.selected_field == 5,
+        modal.field_kind(modal.selected_field) == FieldKind::ToggleDiscover,
     );
 
-    // Broadcast mask text field (field 6)
+    // Broadcast mask text field
     {
-        let is_selected = modal.selected_field == 6;
+        let is_selected = modal.field_kind(modal.selected_field) == FieldKind::TextMask;
         let is_editing = is_selected && modal.editing;
         let val_style = if is_editing {
             Style::default().fg(Color::Black).bg(accent_bright)
@@ -3675,15 +3684,18 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
             Style::default().fg(accent_mid)
         };
         let line = Line::from(vec![
-            Span::styled("  Bcast mask: ", lbl_style),
+            Span::styled(
+                format!("  {:>w$}: ", "Bcast mask", w = CONFIG_LABEL_W),
+                lbl_style,
+            ),
             Span::styled(modal.broadcast_mask.clone(), val_style),
         ]);
-        f.render_widget(Paragraph::new(line), rows[8]);
+        f.render_widget(Paragraph::new(line), rows[row_mask]);
     }
 
-    // Scan button (field 7)
+    // Scan button
     {
-        let is_selected = modal.selected_field == 7;
+        let is_selected = modal.field_kind(modal.selected_field) == FieldKind::ScanButton;
         let no_results =
             modal.scan_attempted && !modal.is_scanning && modal.discovered_servers.is_empty();
         let (btn_text, btn_style) = if modal.is_scanning {
@@ -3709,9 +3721,9 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         );
     }
 
-    // Discovered server entries (fields 8..7+N)
+    // Discovered server entries (fields 7..6+N)
     for (i, ip) in modal.discovered_servers.iter().enumerate() {
-        let field_idx = 8 + i;
+        let field_idx = 7 + i;
         let is_selected = modal.selected_field == field_idx;
         let (prefix, ip_style, hint) = if is_selected {
             (
@@ -3734,7 +3746,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
             Span::styled(ip.clone(), ip_style),
             Span::styled(hint, Style::default().fg(accent_dim)),
         ]);
-        f.render_widget(Paragraph::new(line), rows[10 + i]);
+        f.render_widget(Paragraph::new(line), rows[8 + i]);
     }
 
     render_toggle(
@@ -3762,7 +3774,10 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
             Style::default().fg(accent_mid)
         };
         let line = Line::from(vec![
-            Span::styled("  Image protocol: ", lbl_style),
+            Span::styled(
+                format!("  {:>w$}: ", "Image protocol", w = CONFIG_LABEL_W),
+                lbl_style,
+            ),
             Span::styled(if is_selected { "< " } else { "  " }, lbl_style),
             Span::styled(proto_name, val_style),
             Span::styled(if is_selected { " >" } else { "  " }, lbl_style),
@@ -3806,28 +3821,29 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         btn_cols[1],
     );
 
-    // Place the terminal's native blinking cursor at the edit position.
-    // "  {:>8}: " = 12 chars; "  Bcast mask: " = 14 chars.
+    // Place the terminal's native blinking cursor at the edit position. Every label shares
+    // the same prefix width ("  " + CONFIG_LABEL_W + ": "), so the value always starts there.
     if modal.editing {
-        let (label_width, row_y) = match modal.selected_field {
-            f @ 0..=3 => (12u16, rows[f + 1].y),
-            6 => (14u16, rows[8].y),
-            _ => (0, 0),
+        let prefix_w = (2 + CONFIG_LABEL_W + 2) as u16;
+        let row_y = match modal.selected_field {
+            f @ 0..=3 => Some(rows[f + 1].y), // host/port/username/password
+            f if modal.field_kind(f) == FieldKind::TextMask => Some(rows[row_mask].y),
+            _ => None,
         };
-        if label_width > 0 {
-            f.set_cursor_position((inner.x + label_width + modal.cursor_pos as u16, row_y));
+        if let Some(row_y) = row_y {
+            f.set_cursor_position((inner.x + prefix_w + modal.cursor_pos as u16, row_y));
         }
     }
 }
 
-/// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
-pub fn compute_config_modal_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
-    let popup = centered_rect_abs(54, 19, area);
+/// Returns (popup_rect, [ok_button_rect, cancel_button_rect]). The buttons are pushed to the
+/// last inner row by the layout's flexible spacer, so their position is `popup.height - 2`
+/// regardless of how many discovered-server rows are present.
+pub fn compute_config_modal_button_rects(area: Rect, n_servers: usize) -> (Rect, [Rect; 2]) {
+    let popup = centered_rect_abs(54, 20 + n_servers as u16, area);
     let inner_x = popup.x + 1;
-    let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
-    // Layout rows: 12 fixed (0-11) + spacer(min→3) + buttons(1) → buttons at offset 16
-    let btn_y = inner_y + 16;
+    let btn_y = popup.y + popup.height.saturating_sub(2);
     let half_w = inner_w / 2;
     let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
     let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);

@@ -220,32 +220,24 @@ pub async fn handle_mouse_event(
     // Config modal intercepts all mouse events when open
     if app.config_modal.is_some() {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let (modal_area, field_rects) = ui::compute_config_modal_rects(terminal_area);
-            let (_, btn_rects) = ui::compute_config_modal_button_rects(terminal_area);
+            let n_servers = app
+                .config_modal
+                .as_ref()
+                .map(|m| m.discovered_servers.len())
+                .unwrap_or(0);
+            let (modal_area, field_rects) =
+                ui::compute_config_modal_rects(terminal_area, n_servers);
+            let (_, btn_rects) = ui::compute_config_modal_button_rects(terminal_area, n_servers);
             if point_in(col, row, btn_rects[0]) {
                 apply_config_save(app, cfg, client);
             } else if point_in(col, row, btn_rects[1]) {
                 app.config_modal = None;
-            } else if point_in(col, row, modal_area) {
-                if let Some(modal) = app.config_modal.as_mut()
-                    && let Some(idx) = field_rects.iter().position(|r| point_in(col, row, *r))
-                {
+            } else if let Some(idx) = field_rects.iter().position(|r| point_in(col, row, *r)) {
+                if let Some(modal) = app.config_modal.as_mut() {
                     modal.selected_field = idx;
-                    match idx {
-                        0 | 1 | 2 | 3 | 6 => {
-                            modal.editing = true;
-                            modal.error = None;
-                        }
-                        4 => modal.use_nerd_icons = !modal.use_nerd_icons,
-                        5 => modal.auto_discover = !modal.auto_discover,
-                        7 => modal.disable_auto_colors = !modal.disable_auto_colors,
-                        _ => {
-                            modal.image_protocol_idx =
-                                (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len()
-                        }
-                    }
                 }
-            } else {
+                activate_config_field(app, idx, cfg, client, tx);
+            } else if !point_in(col, row, modal_area) {
                 app.config_modal = None;
             }
         }
@@ -1802,6 +1794,81 @@ fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsCl
     }
 }
 
+/// Activate config-modal field `idx` (the action triggered by pressing Enter on it, or
+/// clicking it): toggles flip, the scan button starts discovery, a discovered-server row
+/// fills the host field, OK saves, Cancel closes, and text fields enter edit mode. Shared by
+/// the keyboard and mouse handlers so the two can't drift apart.
+fn activate_config_field(
+    app: &mut App,
+    idx: usize,
+    cfg: &mut config::Config,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    let Some(kind) = app.config_modal.as_ref().map(|m| m.field_kind(idx)) else {
+        return;
+    };
+    match kind {
+        FieldKind::ToggleNerd => {
+            if let Some(m) = app.config_modal.as_mut() {
+                m.use_nerd_icons ^= true;
+            }
+        }
+        FieldKind::ToggleDiscover => {
+            if let Some(m) = app.config_modal.as_mut() {
+                m.auto_discover ^= true;
+            }
+        }
+        FieldKind::ToggleColors => {
+            if let Some(m) = app.config_modal.as_mut() {
+                m.disable_auto_colors ^= true;
+            }
+        }
+        FieldKind::SelectorProtocol => {
+            if let Some(m) = app.config_modal.as_mut() {
+                m.image_protocol_idx = (m.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
+            }
+        }
+        FieldKind::ScanButton => {
+            if let Some(modal) = app.config_modal.as_mut()
+                && !modal.is_scanning
+            {
+                modal.is_scanning = true;
+                modal.scan_attempted = true;
+                modal.discovered_servers.clear();
+                let mask = modal.broadcast_mask.clone();
+                let tx2 = tx.clone();
+                tokio::spawn(async move {
+                    let servers = tokio::task::spawn_blocking(move || {
+                        discovery::discover_lms_all(&mask, Duration::from_secs(3))
+                    })
+                    .await
+                    .unwrap_or_default();
+                    let _ = tx2.send(AppMsg::DiscoveredServers(servers)).await;
+                });
+            }
+        }
+        FieldKind::DiscoveredServer(i) => {
+            if let Some(modal) = app.config_modal.as_mut()
+                && let Some(ip) = modal.discovered_servers.get(i).cloned()
+            {
+                modal.host = ip;
+                modal.selected_field = 0;
+            }
+        }
+        FieldKind::OkButton => apply_config_save(app, cfg, client),
+        FieldKind::CancelButton => app.config_modal = None,
+        // Text fields (host/port/username/password/broadcast-mask): enter edit mode.
+        _ => {
+            if let Some(modal) = app.config_modal.as_mut() {
+                modal.editing = true;
+                modal.error = None;
+                modal.cursor_pos = modal.current_field_char_count();
+            }
+        }
+    }
+}
+
 pub fn handle_config_key(
     app: &mut App,
     key: KeyEvent,
@@ -1918,71 +1985,10 @@ pub fn handle_config_key(
                 }
             }
             KeyCode::Enter | KeyCode::Char('i') => {
-                let kind = app.config_modal.as_ref().map(|m| m.field_kind(selected));
-                match kind {
-                    Some(FieldKind::ToggleNerd) => {
-                        if let Some(m) = app.config_modal.as_mut() {
-                            m.use_nerd_icons ^= true;
-                        }
-                    }
-                    Some(FieldKind::ToggleDiscover) => {
-                        if let Some(m) = app.config_modal.as_mut() {
-                            m.auto_discover ^= true;
-                        }
-                    }
-                    Some(FieldKind::ToggleColors) => {
-                        if let Some(m) = app.config_modal.as_mut() {
-                            m.disable_auto_colors ^= true;
-                        }
-                    }
-                    Some(FieldKind::SelectorProtocol) => {
-                        if let Some(m) = app.config_modal.as_mut() {
-                            m.image_protocol_idx =
-                                (m.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
-                        }
-                    }
-                    Some(FieldKind::ScanButton) => {
-                        if let Some(modal) = app.config_modal.as_mut()
-                            && !modal.is_scanning
-                        {
-                            modal.is_scanning = true;
-                            modal.scan_attempted = true;
-                            modal.discovered_servers.clear();
-                            let mask = modal.broadcast_mask.clone();
-                            let tx2 = tx.clone();
-                            tokio::spawn(async move {
-                                let servers = tokio::task::spawn_blocking(move || {
-                                    discovery::discover_lms_all(&mask, Duration::from_secs(3))
-                                })
-                                .await
-                                .unwrap_or_default();
-                                let _ = tx2.send(AppMsg::DiscoveredServers(servers)).await;
-                            });
-                        }
-                    }
-                    Some(FieldKind::DiscoveredServer(i)) => {
-                        if let Some(modal) = app.config_modal.as_mut()
-                            && let Some(ip) = modal.discovered_servers.get(i).cloned()
-                        {
-                            modal.host = ip;
-                            modal.selected_field = 0;
-                        }
-                    }
-                    Some(FieldKind::OkButton) => {
-                        apply_config_save(app, cfg, client);
-                    }
-                    Some(FieldKind::CancelButton) => {
-                        app.config_modal = None;
-                    }
-                    _ => {
-                        if let Some(modal) = app.config_modal.as_mut() {
-                            modal.editing = true;
-                            modal.error = None;
-                            modal.cursor_pos = modal.current_field_char_count();
-                        }
-                    }
-                }
+                activate_config_field(app, selected, cfg, client, tx);
             }
+            // Left/Right navigate the field list like Up/Down, except on the image-protocol
+            // selector where they cycle its value (it renders inline "< >" arrows).
             KeyCode::Left => {
                 let kind = app.config_modal.as_ref().map(|m| m.field_kind(selected));
                 if let Some(FieldKind::SelectorProtocol) = kind
@@ -1993,6 +1999,10 @@ pub fn handle_config_key(
                     } else {
                         modal.image_protocol_idx - 1
                     };
+                } else if let Some(modal) = app.config_modal.as_mut()
+                    && modal.selected_field > 0
+                {
+                    modal.selected_field -= 1;
                 }
             }
             KeyCode::Right => {
@@ -2002,6 +2012,11 @@ pub fn handle_config_key(
                 {
                     modal.image_protocol_idx =
                         (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
+                } else if let Some(modal) = app.config_modal.as_mut() {
+                    let max = modal.field_count() - 1;
+                    if modal.selected_field < max {
+                        modal.selected_field += 1;
+                    }
                 }
             }
             KeyCode::Char(' ') => {

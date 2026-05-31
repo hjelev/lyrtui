@@ -104,9 +104,9 @@ pub struct ConfigModal {
     pub discovered_servers: Vec<String>,
     pub is_scanning: bool,
     pub scan_attempted: bool,
-    // Field layout: 0=host 1=port 2=username 3=password 4=nerd_icons 5=auto_discover
-    //   6=broadcast_mask 7=scan_button 8..=7+N=discovered_servers
-    //   7+N+1=disable_auto_colors 7+N+2=image_protocol 7+N+3=OK 7+N+4=Cancel
+    // Field layout: 0=host 1=port 2=username 3=password 4=auto_discover 5=broadcast_mask
+    //   6=scan_button 7..=6+N=discovered_servers
+    //   7+N=nerd_icons 8+N=disable_auto_colors 9+N=image_protocol 10+N=OK 11+N=Cancel
     pub selected_field: usize,
     pub editing: bool,
     pub cursor_pos: usize,
@@ -161,11 +161,11 @@ impl ConfigModal {
             1 => FieldKind::TextPort,
             2 => FieldKind::TextUser,
             3 => FieldKind::TextPass,
-            4 => FieldKind::ToggleNerd,
-            5 => FieldKind::ToggleDiscover,
-            6 => FieldKind::TextMask,
-            7 => FieldKind::ScanButton,
-            i if i >= 8 && i <= 7 + n => FieldKind::DiscoveredServer(i - 8),
+            4 => FieldKind::ToggleDiscover,
+            5 => FieldKind::TextMask,
+            6 => FieldKind::ScanButton,
+            i if i >= 7 && i <= 6 + n => FieldKind::DiscoveredServer(i - 7),
+            i if i == 7 + n => FieldKind::ToggleNerd,
             i if i == 8 + n => FieldKind::ToggleColors,
             i if i == 9 + n => FieldKind::SelectorProtocol,
             i if i == 10 + n => FieldKind::OkButton,

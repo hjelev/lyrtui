@@ -159,7 +159,7 @@ username = ""                # optional: LMS HTTP basic auth username
 password = ""                # optional: LMS HTTP basic auth password
 ```
 
-You can edit this file directly or use the in-app config menu (`c`).
+You can edit this file directly or use the in-app config menu (`c`). Inside the menu, move between fields with the arrow keys (`↑`/`↓` or `←`/`→`) or `Tab`, press `Enter` to edit a field or toggle a setting, and click any field with the mouse. On the image-protocol selector, `←`/`→` cycle the value.
 
 #### Auto-discovery
 
