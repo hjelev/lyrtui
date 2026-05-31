@@ -550,6 +550,10 @@ pub fn draw(
         );
     }
 
+    if app.confirm_quit {
+        draw_confirm_quit(f, app.quit_selected_button, app.effective_accent());
+    }
+
     if let Some(idx) = app.confirm_delete_queue_item {
         let title = app.queue.get(idx).map(|t| t.title.as_str()).unwrap_or("");
         draw_confirm_delete_queue_item(
@@ -3379,6 +3383,86 @@ pub fn compute_clear_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
     let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
     let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
     (popup, [ok_rect, cancel_rect])
+}
+
+fn draw_confirm_quit(f: &mut Frame, selected_button: u8, accent: Option<[u8; 3]>) {
+    let area = f.area();
+    let popup = centered_rect_abs(44, 7, area);
+
+    f.render_widget(Clear, popup);
+
+    let accent_color = accent
+        .map(|c| Color::Rgb(c[0], c[1], c[2]))
+        .unwrap_or(Color::Yellow);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent_color))
+        .title_style(Style::default().fg(accent_color))
+        .title(" Quit lyrtui ");
+
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let msg = Paragraph::new("Close lyrtui?")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::White));
+    f.render_widget(msg, rows[1]);
+
+    let btn_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(rows[3]);
+
+    let ok_style = if selected_button == 0 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let cancel_style = if selected_button == 1 {
+        Style::default().fg(Color::Black).bg(accent_color).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    f.render_widget(
+        Paragraph::new("[ Quit ]")
+            .alignment(Alignment::Center)
+            .style(ok_style),
+        btn_cols[0],
+    );
+    f.render_widget(
+        Paragraph::new("[ Cancel ]")
+            .alignment(Alignment::Center)
+            .style(cancel_style),
+        btn_cols[1],
+    );
+}
+
+/// Returns (popup_rect, [quit_button_rect, cancel_button_rect]) for the quit dialog.
+/// Same geometry as the clear-queue confirmation.
+pub fn compute_quit_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
+    compute_clear_queue_button_rects(area)
+}
+
+/// Returns the rect covering the " Navigation " title text on the sidebar's top border.
+pub fn compute_sidebar_nav_title_rect(area: Rect, status_height: u16) -> Rect {
+    let (sidebar_area, _) = compute_areas(area, status_height);
+    // ratatui renders a left-aligned block title starting one column in from the corner.
+    let title_w = " Navigation ".chars().count() as u16;
+    let w = title_w.min(sidebar_area.width.saturating_sub(1));
+    Rect::new(sidebar_area.x + 1, sidebar_area.y, w, 1)
 }
 
 fn sync_modal_popup_height(n_players: usize) -> u16 {

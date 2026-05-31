@@ -107,6 +107,7 @@ The playback flags (`-p`, `--next`, `--prev`) target the `default_player` from c
 - **Left click** on the volume `−` / `+` buttons in the now-playing bar — adjust volume
 - **Left click** on the shuffle or repeat buttons — toggle/cycle playback mode
 - **Left click** on the progress bar (now-playing bar or full-art view) — seek the current track to that position
+- **Left click** on the `Navigation` title (sidebar header) — opens a "Close lyrtui?" confirmation dialog (mouse-only; pressing `q` still quits directly)
 - **Right click** anywhere — go back (same as `Esc` / `h`)
 - **Scroll wheel** — scroll the list under the cursor
 

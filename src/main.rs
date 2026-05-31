@@ -639,6 +639,11 @@ async fn run(
                     }
                 } else if app.sync_modal.is_some() {
                     handlers::handle_sync_modal_key(&mut app, key, &client).await;
+                } else if app.confirm_quit {
+                    handlers::handle_confirm_quit_key(&mut app, key).await;
+                    if app.should_quit {
+                        break;
+                    }
                 } else if app.confirm_clear_queue {
                     handlers::handle_confirm_clear_queue_key(&mut app, key, &client, &tx).await;
                 } else if app.confirm_delete_queue_item.is_some() {
@@ -715,6 +720,9 @@ async fn run(
                     &mut cfg,
                 )
                 .await;
+                if app.should_quit {
+                    break;
+                }
                 needs_redraw = true;
             }
             InputEvent::Resize => {
@@ -933,6 +941,7 @@ fn thumb_range(
 fn has_overlay(app: &App) -> bool {
     app.confirm_delete_queue_item.is_some()
         || app.confirm_clear_queue
+        || app.confirm_quit
         || app.config_modal.is_some()
         || app.context_menu.is_some()
         || app.sync_modal.is_some()

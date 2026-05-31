@@ -203,6 +203,21 @@ pub async fn handle_mouse_event(
         return;
     }
 
+    // Quit confirmation dialog intercepts all mouse events when open
+    if app.confirm_quit {
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let (popup, [quit_rect, cancel_rect]) = ui::compute_quit_button_rects(terminal_area);
+            if point_in(col, row, quit_rect) {
+                app.confirm_quit = false;
+                app.should_quit = true;
+            } else if point_in(col, row, cancel_rect) || !point_in(col, row, popup) {
+                app.confirm_quit = false;
+                app.quit_selected_button = 1;
+            }
+        }
+        return;
+    }
+
     // Delete queue item dialog intercepts all mouse events when open
     if let Some(idx) = app.confirm_delete_queue_item {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
@@ -469,6 +484,14 @@ pub async fn handle_mouse_event(
                     app.focus_sidebar = false;
                     app.main_selected = idx;
                 }
+                return;
+            }
+
+            let nav_title_rect =
+                ui::compute_sidebar_nav_title_rect(terminal_area, app.status_height);
+            if !app.full_art_mode && point_in(col, row, nav_title_rect) {
+                app.confirm_quit = true;
+                app.quit_selected_button = 1;
                 return;
             }
 
@@ -860,6 +883,31 @@ pub async fn handle_confirm_clear_queue_key(
         KeyCode::Esc => {
             app.confirm_clear_queue = false;
             app.clear_queue_selected_button = 0;
+        }
+        _ => {}
+    }
+}
+
+pub async fn handle_confirm_quit_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Tab | KeyCode::Right | KeyCode::Left => {
+            app.quit_selected_button = 1 - app.quit_selected_button;
+        }
+        KeyCode::Char('y') => {
+            app.confirm_quit = false;
+            app.should_quit = true;
+        }
+        KeyCode::Enter => {
+            let confirmed = app.quit_selected_button == 0;
+            app.confirm_quit = false;
+            app.quit_selected_button = 1;
+            if confirmed {
+                app.should_quit = true;
+            }
+        }
+        KeyCode::Esc | KeyCode::Char('n') => {
+            app.confirm_quit = false;
+            app.quit_selected_button = 1;
         }
         _ => {}
     }
