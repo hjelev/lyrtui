@@ -16,6 +16,36 @@ pub struct Player {
     pub power: u8,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct PlayerDetail {
+    pub playerid: String,
+    pub name: String,
+    pub model: Option<String>,
+    pub modelname: Option<String>,
+    #[serde(default)]
+    pub connected: u8,
+    pub ip: Option<String>,
+    #[serde(default)]
+    pub power: u8,
+    #[serde(rename = "isplaying", default)]
+    pub is_playing: u8,
+    pub firmware: Option<String>,
+    #[serde(rename = "canpoweroff", default)]
+    pub can_power_off: u8,
+    pub uuid: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ServerInfo {
+    pub version: Option<String>,
+    pub uuid: Option<String>,
+    pub mac: Option<String>,
+    pub ip: Option<String>,
+    #[serde(rename = "player count")]
+    pub player_count: Option<u64>,
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct NowPlaying {
     pub title: String,
@@ -802,6 +832,24 @@ impl LmsClient {
             return Err(anyhow!("no response from server"));
         }
         Ok(())
+    }
+
+    pub async fn get_server_info(&self) -> Result<ServerInfo> {
+        let result = self.rpc("", &[json!("serverstatus"), json!(0), json!(0)]).await?;
+        if result.is_null() {
+            return Err(anyhow!("no response from server"));
+        }
+        Ok(serde_json::from_value(result)?)
+    }
+
+    pub async fn get_players_detailed(&self) -> Result<Vec<PlayerDetail>> {
+        let result = self.rpc("", &[json!("players"), json!(0), json!(100)]).await?;
+        let count = result["count"].as_u64().unwrap_or(0);
+        if count == 0 {
+            return Ok(vec![]);
+        }
+        let players: Vec<PlayerDetail> = serde_json::from_value(result["players_loop"].clone())?;
+        Ok(players)
     }
 
     /// Fetch the currently-playing cover art URL for a Radio Paradise channel.
