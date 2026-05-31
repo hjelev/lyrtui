@@ -14,11 +14,14 @@ use app::{App, AppMsg, ConfigModal, MainView};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use events::{key_to_action, poll_event, Action, InputEvent};
-use ratatui::{backend::CrosstermBackend, widgets::ListState, Terminal};
-use ratatui_image::{picker::{Picker, ProtocolType}, protocol::StatefulProtocol};
+use events::{Action, InputEvent, key_to_action, poll_event};
+use ratatui::{Terminal, backend::CrosstermBackend, widgets::ListState};
+use ratatui_image::{
+    picker::{Picker, ProtocolType},
+    protocol::StatefulProtocol,
+};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -39,36 +42,49 @@ async fn print_info() -> Result<()> {
     println!("  url:             {}", cfg.base_url());
     match (&cfg.username, &cfg.password) {
         (Some(u), Some(_)) => println!("  auth:            username={}, password=set", u),
-        (Some(u), None)    => println!("  auth:            username={}, password=not set", u),
-        _                  => println!("  auth:            none"),
+        (Some(u), None) => println!("  auth:            username={}, password=not set", u),
+        _ => println!("  auth:            none"),
     }
     match &cfg.default_player {
         Some(id) => println!("  default player:  {}", id),
-        None     => println!("  default player:  none"),
+        None => println!("  default player:  none"),
     }
-    println!("  auto-discover:   {} (mask: {})", yn(cfg.auto_discover), cfg.broadcast_mask);
+    println!(
+        "  auto-discover:   {} (mask: {})",
+        yn(cfg.auto_discover),
+        cfg.broadcast_mask
+    );
     println!("  nerd icons:      {}", yn(cfg.use_nerd_icons));
     println!("  image protocol:  {}", cfg.image_protocol);
     println!("  full art mode:   {}", yn(cfg.full_art_mode));
     println!("  auto colors:     {}", yn(!cfg.disable_auto_colors));
     println!("  global volume:   {}", yn(cfg.global_volume_control));
 
-    let credentials = cfg.username.as_ref()
-        .zip(cfg.password.as_ref())
-        .map(|(u, p)| (u.clone(), p.clone()));
-    let client = LmsClient::new(cfg.base_url(), credentials);
+    let client = LmsClient::new(cfg.base_url(), cfg.credentials());
 
     // ── Server ─────────────────────────────────────────────────────────────────
     println!("\nSERVER  (live)");
     match client.get_server_info().await {
         Err(e) => println!("  [unreachable: {}]", e),
         Ok(info) => {
-            if let Some(v)  = &info.version      { println!("  version:         {}", v); }
-            if let Some(n)  = &info.name         { println!("  name:            {}", n); }
-            if let Some(ip) = &info.ip           { println!("  ip:              {}", ip); }
-            if let Some(m)  = &info.mac          { println!("  mac:             {}", m); }
-            if let Some(id) = &info.uuid         { println!("  uuid:            {}", id); }
-            if let Some(c)  = info.player_count  { println!("  players:         {}", c); }
+            if let Some(v) = &info.version {
+                println!("  version:         {}", v);
+            }
+            if let Some(n) = &info.name {
+                println!("  name:            {}", n);
+            }
+            if let Some(ip) = &info.ip {
+                println!("  ip:              {}", ip);
+            }
+            if let Some(m) = &info.mac {
+                println!("  mac:             {}", m);
+            }
+            if let Some(id) = &info.uuid {
+                println!("  uuid:            {}", id);
+            }
+            if let Some(c) = info.player_count {
+                println!("  players:         {}", c);
+            }
         }
     }
 
@@ -91,18 +107,36 @@ async fn print_info() -> Result<()> {
         } else {
             "STOPPED".to_string()
         };
-        let indicator = if p.power == 0 { "○" } else if p.is_playing == 1 { "▶" } else { "■" };
+        let indicator = if p.power == 0 {
+            "○"
+        } else if p.is_playing == 1 {
+            "▶"
+        } else {
+            "■"
+        };
         println!("\n  [{}] {:<38} {} {}", i + 1, p.name, indicator, status);
         println!("      id:          {}", p.playerid);
-        if let Some(ip) = &p.ip { println!("      ip:          {}", ip); }
+        if let Some(ip) = &p.ip {
+            println!("      ip:          {}", ip);
+        }
         match (&p.model, &p.modelname) {
             (Some(m), Some(mn)) => println!("      model:       {} ({})", m, mn),
-            (Some(m), None)     => println!("      model:       {}", m),
-            _                   => {}
+            (Some(m), None) => println!("      model:       {}", m),
+            _ => {}
         }
-        if let Some(fw) = &p.firmware { println!("      firmware:    {}", fw); }
-        if let Some(uid) = &p.uuid && !uid.is_empty() { println!("      uuid:        {}", uid); }
-        println!("      power:       {}    connected: {}", yn(p.power == 1), yn(p.connected == 1));
+        if let Some(fw) = &p.firmware {
+            println!("      firmware:    {}", fw);
+        }
+        if let Some(uid) = &p.uuid
+            && !uid.is_empty()
+        {
+            println!("      uuid:        {}", uid);
+        }
+        println!(
+            "      power:       {}    connected: {}",
+            yn(p.power == 1),
+            yn(p.connected == 1)
+        );
 
         if p.power == 1 {
             match client.get_now_playing(&p.playerid).await {
@@ -111,11 +145,17 @@ async fn print_info() -> Result<()> {
                     if !np.title.is_empty() {
                         println!("      now:         \"{}\" — {}", np.title, np.artist);
                         let mut meta = np.album.clone();
-                        if let Some(y) = np.year { meta = format!("{} ({})", meta, y); }
-                        if let (Some(idx), Some(total)) = (np.playlist_cur_index, np.playlist_tracks) {
+                        if let Some(y) = np.year {
+                            meta = format!("{} ({})", meta, y);
+                        }
+                        if let (Some(idx), Some(total)) =
+                            (np.playlist_cur_index, np.playlist_tracks)
+                        {
                             meta = format!("{}  [track {} / {}]", meta, idx + 1, total);
                         }
-                        if !meta.is_empty() { println!("                   {}", meta); }
+                        if !meta.is_empty() {
+                            println!("                   {}", meta);
+                        }
                     } else {
                         println!("      now:         (nothing playing)");
                     }
@@ -137,25 +177,31 @@ async fn resolve_player(client: &LmsClient, cfg: &config::Config) -> Result<Stri
         return Ok(id.clone());
     }
     let players = client.get_players().await?;
-    players.into_iter().next()
+    players
+        .into_iter()
+        .next()
         .map(|p| p.playerid)
         .ok_or_else(|| anyhow::anyhow!("no players found on server"))
 }
 
 fn format_track(title: &str, artist: &str) -> String {
     match (title.is_empty(), artist.is_empty()) {
-        (true, _)      => "(unknown)".to_string(),
-        (false, true)  => format!("\"{}\"", title),
+        (true, _) => "(unknown)".to_string(),
+        (false, true) => format!("\"{}\"", title),
         (false, false) => format!("\"{}\" — {}", title, artist),
     }
 }
 
-async fn cmd_play_pause() -> Result<()> {
+/// Load config and resolve the default player for one-shot CLI commands.
+async fn cli_player() -> Result<(LmsClient, String)> {
     let cfg = config::Config::load()?;
-    let credentials = cfg.username.as_ref().zip(cfg.password.as_ref())
-        .map(|(u, p)| (u.clone(), p.clone()));
-    let client = LmsClient::new(cfg.base_url(), credentials);
+    let client = LmsClient::new(cfg.base_url(), cfg.credentials());
     let pid = resolve_player(&client, &cfg).await?;
+    Ok((client, pid))
+}
+
+async fn cmd_play_pause() -> Result<()> {
+    let (client, pid) = cli_player().await?;
     let np = client.get_now_playing(&pid).await?;
     let track = format_track(&np.title, &np.artist);
     if np.is_playing {
@@ -169,11 +215,7 @@ async fn cmd_play_pause() -> Result<()> {
 }
 
 async fn cmd_next() -> Result<()> {
-    let cfg = config::Config::load()?;
-    let credentials = cfg.username.as_ref().zip(cfg.password.as_ref())
-        .map(|(u, p)| (u.clone(), p.clone()));
-    let client = LmsClient::new(cfg.base_url(), credentials);
-    let pid = resolve_player(&client, &cfg).await?;
+    let (client, pid) = cli_player().await?;
     client.next(&pid).await?;
     if let Ok(np) = client.get_now_playing(&pid).await {
         println!("next  {}", format_track(&np.title, &np.artist));
@@ -182,11 +224,7 @@ async fn cmd_next() -> Result<()> {
 }
 
 async fn cmd_prev() -> Result<()> {
-    let cfg = config::Config::load()?;
-    let credentials = cfg.username.as_ref().zip(cfg.password.as_ref())
-        .map(|(u, p)| (u.clone(), p.clone()));
-    let client = LmsClient::new(cfg.base_url(), credentials);
-    let pid = resolve_player(&client, &cfg).await?;
+    let (client, pid) = cli_player().await?;
     client.prev(&pid).await?;
     if let Ok(np) = client.get_now_playing(&pid).await {
         println!("prev  {}", format_track(&np.title, &np.artist));
@@ -196,7 +234,7 @@ async fn cmd_prev() -> Result<()> {
 
 const TICK_RATE: Duration = Duration::from_millis(250);
 const ART_RADIUS_NORMAL: u32 = 6;
-const ART_RADIUS_FULL:   u32 = 2;
+const ART_RADIUS_FULL: u32 = 2;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -231,6 +269,7 @@ USAGE:
 
 OPTIONS:
   -h, --help       Print this help message and exit
+  -v, --version    Print version and exit
   -i, --info       Print saved config and live server/player info, then exit
   -p, --play-pause Toggle play/pause on the default player
       --next       Skip to the next track
@@ -252,10 +291,6 @@ PLAYBACK:
   +/-              Volume up / down
   < / >            Seek backward / forward
 
-LIBRARY:
-  /                Search
-  r                Refresh
-
 CONFIG:
   c                Open config modal
 
@@ -272,18 +307,13 @@ Config file: ~/.config/lyrtui/config.toml
     // Run discovery if this is a first run (no config file) or auto_discover is on.
     let config_file_exists = config::config_path().exists();
     if (!config_file_exists || cfg.auto_discover)
-        && let Some(discovered_ip) = discovery::discover_lms(
-            &cfg.broadcast_mask,
-            Duration::from_secs(2),
-        )
+        && let Some(discovered_ip) =
+            discovery::discover_lms(&cfg.broadcast_mask, Duration::from_secs(2))
     {
         cfg.host = discovered_ip;
     }
 
-    let credentials = cfg.username.as_ref()
-        .zip(cfg.password.as_ref())
-        .map(|(u, p)| (u.clone(), p.clone()));
-    let client = Arc::new(LmsClient::new(cfg.base_url(), credentials));
+    let client = Arc::new(LmsClient::new(cfg.base_url(), cfg.credentials()));
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -297,7 +327,11 @@ Config file: ~/.config/lyrtui/config.toml
     let result = run(&mut terminal, client, cfg, picker).await;
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     result
@@ -363,12 +397,24 @@ async fn run(
                             let pids: Vec<String> =
                                 players.iter().map(|p| p.playerid.clone()).collect();
                             let _ = t.send(AppMsg::PlayersLoaded(players)).await;
+                            // Fan the per-player status calls out concurrently instead of
+                            // awaiting them serially (N round-trips → ~1 round-trip latency).
+                            let mut set = tokio::task::JoinSet::new();
+                            for pid in pids {
+                                let c2 = c.clone();
+                                set.spawn(async move {
+                                    c2.get_player_status_info(&pid)
+                                        .await
+                                        .ok()
+                                        .map(|(vol, synced)| (pid, vol, synced))
+                                });
+                            }
                             let mut volumes = std::collections::HashMap::new();
                             let mut sync_groups = std::collections::HashMap::new();
-                            for pid in &pids {
-                                if let Ok((vol, synced)) = c.get_player_status_info(pid).await {
+                            while let Some(res) = set.join_next().await {
+                                if let Ok(Some((pid, vol, synced))) = res {
                                     volumes.insert(pid.clone(), vol);
-                                    sync_groups.insert(pid.clone(), synced);
+                                    sync_groups.insert(pid, synced);
                                 }
                             }
                             if !volumes.is_empty() {
@@ -438,19 +484,19 @@ async fn run(
     let mut needs_redraw = true;
     loop {
         if needs_redraw {
-        terminal.draw(|f| {
-            ui::draw(
-                f,
-                &app,
-                album_art.as_mut(),
-                album_art_full.as_mut(),
-                &mut sidebar_state,
-                &mut main_state,
-                &mut thumbnails,
-                &cfg.host,
-                cfg.port,
-            )
-        })?;
+            terminal.draw(|f| {
+                ui::draw(
+                    f,
+                    &app,
+                    album_art.as_mut(),
+                    album_art_full.as_mut(),
+                    &mut sidebar_state,
+                    &mut main_state,
+                    &mut thumbnails,
+                    &cfg.host,
+                    cfg.port,
+                )
+            })?;
         } // end if needs_redraw
         needs_redraw = false;
 
@@ -462,14 +508,24 @@ async fn run(
                 AppMsg::ArtworkLoaded(bytes) => {
                     if let Ok(img) = image::load_from_memory(&bytes) {
                         let rgb = img.to_rgb8();
-                        if let Ok(colors) = color_thief::get_palette(rgb.as_raw(), color_thief::ColorFormat::Rgb, 10, 5) {
+                        if let Ok(colors) = color_thief::get_palette(
+                            rgb.as_raw(),
+                            color_thief::ColorFormat::Rgb,
+                            10,
+                            5,
+                        ) {
                             // Pick the first palette color with usable brightness:
                             // - not too dark (unreadable on dark bg, and black text unreadable on it as bg)
                             // - not too light (washed out / near white)
-                            let picked = colors.iter().find(|c| {
-                                let luma = (c.r as u32 * 299 + c.g as u32 * 587 + c.b as u32 * 114) / 1000;
-                                (70..=210).contains(&luma)
-                            }).or_else(|| colors.first());
+                            let picked = colors
+                                .iter()
+                                .find(|c| {
+                                    let luma =
+                                        (c.r as u32 * 299 + c.g as u32 * 587 + c.b as u32 * 114)
+                                            / 1000;
+                                    (70..=210).contains(&luma)
+                                })
+                                .or_else(|| colors.first());
                             if let Some(c) = picked {
                                 app.accent_color = Some([c.r, c.g, c.b]);
                             }
@@ -487,7 +543,8 @@ async fn run(
                     let (fw, fh) = app.font_size;
                     let target_w = (crate::ui::THUMB_W as u32 * fw as u32).max(1);
                     let target_h = (2u32 * fh as u32).max(1);
-                    let small = img.resize(target_w, target_h, image::imageops::FilterType::Triangle);
+                    let small =
+                        img.resize(target_w, target_h, image::imageops::FilterType::Triangle);
                     thumbnail_images.insert(url.clone(), small.clone());
                     thumbnails.insert(url, picker.new_resize_protocol(small));
                 }
@@ -500,7 +557,10 @@ async fn run(
         }
 
         // Fetch artwork when the playing track changes
-        let current_url = app.now_playing.as_ref().and_then(|np| np.artwork_url.clone());
+        let current_url = app
+            .now_playing
+            .as_ref()
+            .and_then(|np| np.artwork_url.clone());
         if current_url != last_artwork_url {
             last_artwork_url = current_url.clone();
             album_art = None;
@@ -539,10 +599,16 @@ async fn run(
                     tokio::spawn(async move {
                         match c.fetch_image_bytes(&u).await {
                             Ok(bytes) => match image::load_from_memory(&bytes) {
-                                Ok(img) => { let _ = t.send(AppMsg::ThumbnailLoaded(u, img)).await; }
-                                Err(_)  => { let _ = t.send(AppMsg::ThumbnailFailed(u)).await; }
+                                Ok(img) => {
+                                    let _ = t.send(AppMsg::ThumbnailLoaded(u, img)).await;
+                                }
+                                Err(_) => {
+                                    let _ = t.send(AppMsg::ThumbnailFailed(u)).await;
+                                }
                             },
-                            Err(_) => { let _ = t.send(AppMsg::ThumbnailFailed(u)).await; }
+                            Err(_) => {
+                                let _ = t.send(AppMsg::ThumbnailFailed(u)).await;
+                            }
                         }
                     });
                 }
@@ -558,12 +624,17 @@ async fn run(
                     handlers::handle_config_key(&mut app, key, &mut cfg, &client, &tx);
                     if cfg.image_protocol != prev_protocol {
                         apply_image_protocol(&mut picker, &cfg.image_protocol);
-                        if let Some(img) = &last_artwork_image {
-                            (album_art, album_art_full) = create_album_art_protocols(img, &mut picker);
-                        }
+                        refresh_album_art(
+                            &last_artwork_image,
+                            &mut picker,
+                            &mut album_art,
+                            &mut album_art_full,
+                        );
                         thumbnails = thumbnail_images
                             .iter()
-                            .map(|(url, img)| (url.clone(), picker.new_resize_protocol(img.clone())))
+                            .map(|(url, img)| {
+                                (url.clone(), picker.new_resize_protocol(img.clone()))
+                            })
                             .collect();
                     }
                 } else if app.sync_modal.is_some() {
@@ -571,12 +642,15 @@ async fn run(
                 } else if app.confirm_clear_queue {
                     handlers::handle_confirm_clear_queue_key(&mut app, key, &client, &tx).await;
                 } else if app.confirm_delete_queue_item.is_some() {
-                    handlers::handle_confirm_delete_queue_item_key(&mut app, key, &client, &tx).await;
+                    handlers::handle_confirm_delete_queue_item_key(&mut app, key, &client, &tx)
+                        .await;
                 } else if app.context_menu.is_some() {
                     handlers::handle_context_menu_key(&mut app, key, &client, &tx).await;
                 } else if matches!(app.main_view, MainView::Search) && app.search_input_active {
                     handlers::handle_search_input_key(&mut app, key, &client, &tx).await;
-                } else if matches!(app.main_view, MainView::AppSearch { .. }) && app.app_search_input_active {
+                } else if matches!(app.main_view, MainView::AppSearch { .. })
+                    && app.app_search_input_active
+                {
                     handlers::handle_app_search_input_key(&mut app, key, &client, &tx).await;
                 } else if matches!(app.main_view, MainView::Players)
                     && !app.focus_sidebar
@@ -588,8 +662,10 @@ async fn run(
                     let action = key_to_action(key);
                     if matches!(action, Action::OpenConfig) {
                         app.config_modal = Some(ConfigModal::new(
-                            &cfg.host, cfg.port,
-                            cfg.username.as_deref(), cfg.password.as_deref(),
+                            &cfg.host,
+                            cfg.port,
+                            cfg.username.as_deref(),
+                            cfg.password.as_deref(),
                             cfg.use_nerd_icons,
                             cfg.auto_discover,
                             &cfg.broadcast_mask,
@@ -599,7 +675,9 @@ async fn run(
                     } else {
                         let prev_gvc = app.global_volume_control;
                         let prev_art = app.full_art_mode;
-                        if handlers::handle_action(&mut app, action, &client, &tx, &vol_sync_tx).await {
+                        if handlers::handle_action(&mut app, action, &client, &tx, &vol_sync_tx)
+                            .await
+                        {
                             break;
                         }
                         if app.global_volume_control != prev_gvc {
@@ -611,9 +689,12 @@ async fn run(
                             let _ = cfg.save();
                             // Render area size changes between modes; recreate protocol so the
                             // image is retransmitted at the correct dimensions.
-                            if let Some(img) = &last_artwork_image {
-                                (album_art, album_art_full) = create_album_art_protocols(img, &mut picker);
-                            }
+                            refresh_album_art(
+                                &last_artwork_image,
+                                &mut picker,
+                                &mut album_art,
+                                &mut album_art_full,
+                            );
                         }
                     }
                 }
@@ -645,7 +726,9 @@ async fn run(
             InputEvent::Tick => {
                 // Only redraw on tick if new data arrived; prevents Sixel retransmission
                 // flicker and Kitty blank-frame blinks when nothing has actually changed.
-                if had_msgs { needs_redraw = true; }
+                if had_msgs {
+                    needs_redraw = true;
+                }
             }
         }
 
@@ -656,13 +739,17 @@ async fn run(
             let base = client.server_base_url();
             for idx in thumb_range(term_h, &main_state, &app) {
                 if let Some(url) = utils::thumbnail_url_for(&app, idx, &base)
-                    && let Some(img) = thumbnail_images.get(&url) {
+                    && let Some(img) = thumbnail_images.get(&url)
+                {
                     thumbnails.insert(url, picker.new_resize_protocol(img.clone()));
                 }
             }
-            if let Some(img) = &last_artwork_image {
-                (album_art, album_art_full) = create_album_art_protocols(img, &mut picker);
-            }
+            refresh_album_art(
+                &last_artwork_image,
+                &mut picker,
+                &mut album_art,
+                &mut album_art_full,
+            );
             needs_redraw = true;
         }
     }
@@ -711,7 +798,11 @@ async fn handle_msg(
                     if let Some(h) = app.now_playing_handle.take() {
                         h.abort();
                     }
-                    app.now_playing_handle = Some(background::start_now_playing_loop(pid.clone(), client.clone(), tx.clone()));
+                    app.now_playing_handle = Some(background::start_now_playing_loop(
+                        pid.clone(),
+                        client.clone(),
+                        tx.clone(),
+                    ));
                 }
                 app.active_player = Some(pid);
             }
@@ -721,7 +812,9 @@ async fn handle_msg(
             if app.active_player.as_deref() == Some(pid.as_str()) {
                 // Preserve locally-pending volume so the 500ms poll doesn't overwrite
                 // an optimistic mute/unmute before the server has processed the command.
-                if app.volume_pending.contains_key(&pid) && let Some(cur) = app.now_playing.as_ref() {
+                if app.volume_pending.contains_key(&pid)
+                    && let Some(cur) = app.now_playing.as_ref()
+                {
                     np.volume = cur.volume;
                 }
                 app.now_playing = Some(np);
@@ -779,7 +872,8 @@ async fn handle_msg(
         AppMsg::PlayerVolumesLoaded(volumes) => {
             let now = std::time::Instant::now();
             // Drop stale pending entries, then skip pids still within the guard window
-            app.volume_pending.retain(|_, t| now.duration_since(*t).as_secs() < 3);
+            app.volume_pending
+                .retain(|_, t| now.duration_since(*t).as_secs() < 3);
             for (pid, vol) in volumes {
                 if !app.volume_pending.contains_key(&pid) {
                     app.player_volumes.insert(pid, vol);
@@ -824,7 +918,11 @@ async fn handle_msg(
     }
 }
 
-fn thumb_range(term_h: u16, state: &ratatui::widgets::ListState, app: &App) -> std::ops::Range<usize> {
+fn thumb_range(
+    term_h: u16,
+    state: &ratatui::widgets::ListState,
+    app: &App,
+) -> std::ops::Range<usize> {
     let inner_h = term_h.saturating_sub(13);
     let visible = ((inner_h / 2) as usize).max(1);
     let offset = state.offset();
@@ -843,9 +941,9 @@ fn has_overlay(app: &App) -> bool {
 fn apply_image_protocol(picker: &mut Picker, protocol: &str) {
     match protocol {
         "halfblocks" => picker.set_protocol_type(ProtocolType::Halfblocks),
-        "sixel"      => picker.set_protocol_type(ProtocolType::Sixel),
-        "kitty"      => picker.set_protocol_type(ProtocolType::Kitty),
-        "iterm2"     => picker.set_protocol_type(ProtocolType::Iterm2),
+        "sixel" => picker.set_protocol_type(ProtocolType::Sixel),
+        "kitty" => picker.set_protocol_type(ProtocolType::Kitty),
+        "iterm2" => picker.set_protocol_type(ProtocolType::Iterm2),
         _ => {
             // "auto" or unknown: on Windows, terminal graphics protocols aren't supported
             if cfg!(target_os = "windows") {
@@ -855,11 +953,27 @@ fn apply_image_protocol(picker: &mut Picker, protocol: &str) {
     }
 }
 
-fn create_album_art_protocols(img: &image::DynamicImage, picker: &mut Picker) -> (Option<StatefulProtocol>, Option<StatefulProtocol>) {
+fn create_album_art_protocols(
+    img: &image::DynamicImage,
+    picker: &mut Picker,
+) -> (Option<StatefulProtocol>, Option<StatefulProtocol>) {
     (
         Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), ART_RADIUS_NORMAL))),
         Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), ART_RADIUS_FULL))),
     )
+}
+
+/// Recreate the normal/full album-art protocols from the cached image (if any), forcing the
+/// terminal to retransmit at current dimensions. No-op when no artwork is cached.
+fn refresh_album_art(
+    last_artwork_image: &Option<image::DynamicImage>,
+    picker: &mut Picker,
+    album_art: &mut Option<StatefulProtocol>,
+    album_art_full: &mut Option<StatefulProtocol>,
+) {
+    if let Some(img) = last_artwork_image {
+        (*album_art, *album_art_full) = create_album_art_protocols(img, picker);
+    }
 }
 
 fn update_status_height(app: &mut App, term_height: u16, base_height: u16) {
@@ -890,12 +1004,16 @@ fn with_rounded_corners(img: image::DynamicImage, radius_pct: u32) -> image::Dyn
     let r = ((w.min(h) * radius_pct / 100) as f64).max(4.0);
     for y in 0..h {
         for x in 0..w {
-            let corner = match (x < r as u32, x >= w.saturating_sub(r as u32),
-                                y < r as u32, y >= h.saturating_sub(r as u32)) {
-                (true, _, true, _)  => Some((r as u32, r as u32)),
-                (_, true, true, _)  => Some((w - r as u32, r as u32)),
-                (true, _, _, true)  => Some((r as u32, h - r as u32)),
-                (_, true, _, true)  => Some((w - r as u32, h - r as u32)),
+            let corner = match (
+                x < r as u32,
+                x >= w.saturating_sub(r as u32),
+                y < r as u32,
+                y >= h.saturating_sub(r as u32),
+            ) {
+                (true, _, true, _) => Some((r as u32, r as u32)),
+                (_, true, true, _) => Some((w - r as u32, r as u32)),
+                (true, _, _, true) => Some((r as u32, h - r as u32)),
+                (_, true, _, true) => Some((w - r as u32, h - r as u32)),
                 _ => None,
             };
             if let Some((cx, cy)) = corner {

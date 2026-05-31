@@ -6,8 +6,12 @@ use tokio::sync::mpsc;
 use crate::api::{LmsClient, RadioItem};
 use crate::app::{AppMsg, SearchResultItem, SearchScope};
 
-fn spawn_if_ok<F, Fut, T>(client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>, op: F, wrap: fn(T) -> AppMsg)
-where
+fn spawn_if_ok<F, Fut, T>(
+    client: Arc<LmsClient>,
+    tx: mpsc::Sender<AppMsg>,
+    op: F,
+    wrap: fn(T) -> AppMsg,
+) where
     F: FnOnce(Arc<LmsClient>) -> Fut + Send + 'static,
     Fut: Future<Output = anyhow::Result<T>> + Send + 'static,
     T: Send + 'static,
@@ -19,12 +23,18 @@ where
     });
 }
 
-pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) -> tokio::task::AbortHandle {
+pub fn start_now_playing_loop(
+    pid: String,
+    client: Arc<LmsClient>,
+    tx: mpsc::Sender<AppMsg>,
+) -> tokio::task::AbortHandle {
     tokio::spawn(async move {
         let mut last_queue_timestamp: f64 = -1.0;
         loop {
+            let mut playing = false;
             if let Ok(np) = client.get_now_playing(&pid).await {
                 let ts = np.playlist_timestamp;
+                playing = np.is_playing;
                 let _ = tx.send(AppMsg::NowPlayingUpdated(pid.clone(), np)).await;
 
                 if ts != last_queue_timestamp
@@ -34,7 +44,10 @@ pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sen
                     let _ = tx.send(AppMsg::QueueLoaded(pid.clone(), q)).await;
                 }
             }
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            // Poll fast while playing (keeps the progress bar smooth); back off when paused,
+            // stopped, or unreachable to cut idle network/CPU.
+            let delay = if playing { 500 } else { 2000 };
+            tokio::time::sleep(Duration::from_millis(delay)).await;
         }
     })
     .abort_handle()
@@ -42,8 +55,14 @@ pub fn start_now_playing_loop(pid: String, client: Arc<LmsClient>, tx: mpsc::Sen
 
 /// Browse an app's menu tree to find the item_id of its "New Search" node.
 /// Checks the top level first, then one level deeper into any "Search"-named folder.
-async fn find_app_search_item_id(client: &Arc<LmsClient>, player_id: &str, cmd: &str) -> Option<String> {
-    let Ok(items) = client.browse_radio(player_id, cmd, None).await else { return None; };
+async fn find_app_search_item_id(
+    client: &Arc<LmsClient>,
+    player_id: &str,
+    cmd: &str,
+) -> Option<String> {
+    let Ok(items) = client.browse_radio(player_id, cmd, None).await else {
+        return None;
+    };
     for item in &items {
         if item.item_type == "search" {
             return item.item_id.clone();
@@ -78,8 +97,8 @@ pub fn trigger_search(
         let mut results = Vec::new();
 
         let do_library = matches!(scope, SearchScope::MyMusic | SearchScope::All);
-        let do_radios  = matches!(scope, SearchScope::Radios  | SearchScope::All);
-        let do_apps    = matches!(scope, SearchScope::Apps    | SearchScope::All);
+        let do_radios = matches!(scope, SearchScope::Radios | SearchScope::All);
+        let do_apps = matches!(scope, SearchScope::Apps | SearchScope::All);
 
         let lib_handle = if do_library {
             let c = client.clone();
@@ -89,8 +108,10 @@ pub fn trigger_search(
             None
         };
 
-        let mut radio_handles: Vec<tokio::task::JoinHandle<anyhow::Result<Vec<RadioItem>>>> = Vec::new();
-        let mut app_handles: Vec<tokio::task::JoinHandle<anyhow::Result<Vec<RadioItem>>>> = Vec::new();
+        let mut radio_handles: Vec<tokio::task::JoinHandle<anyhow::Result<Vec<RadioItem>>>> =
+            Vec::new();
+        let mut app_handles: Vec<tokio::task::JoinHandle<anyhow::Result<Vec<RadioItem>>>> =
+            Vec::new();
 
         if do_radios {
             for svc in &radio_services {
@@ -98,9 +119,9 @@ pub fn trigger_search(
                     let c = client.clone();
                     let q = query.clone();
                     let pid = player_id.clone();
-                    radio_handles.push(tokio::spawn(async move {
-                        c.search_app(&pid, &cmd, &q).await
-                    }));
+                    radio_handles.push(tokio::spawn(
+                        async move { c.search_app(&pid, &cmd, &q).await },
+                    ));
                 }
             }
         }
@@ -113,7 +134,8 @@ pub fn trigger_search(
                     let pid = player_id.clone();
                     app_handles.push(tokio::spawn(async move {
                         let item_id = find_app_search_item_id(&c, &pid, &cmd).await;
-                        c.search_app_via_item(&pid, &cmd, item_id.as_deref(), &q).await
+                        c.search_app_via_item(&pid, &cmd, item_id.as_deref(), &q)
+                            .await
                     }));
                 }
             }
@@ -122,10 +144,18 @@ pub fn trigger_search(
         if let Some(h) = lib_handle
             && let Ok(Ok((artists, albums, tracks, playlists))) = h.await
         {
-            for a in artists   { results.push(SearchResultItem::Artist(a)); }
-            for a in albums    { results.push(SearchResultItem::Album(a)); }
-            for t in tracks    { results.push(SearchResultItem::Track(t)); }
-            for p in playlists { results.push(SearchResultItem::Playlist(p)); }
+            for a in artists {
+                results.push(SearchResultItem::Artist(a));
+            }
+            for a in albums {
+                results.push(SearchResultItem::Album(a));
+            }
+            for t in tracks {
+                results.push(SearchResultItem::Track(t));
+            }
+            for p in playlists {
+                results.push(SearchResultItem::Playlist(p));
+            }
         }
 
         let q_lower = query.to_lowercase();
@@ -159,18 +189,31 @@ pub fn trigger_app_specific_search(
     tx: mpsc::Sender<AppMsg>,
 ) {
     tokio::spawn(async move {
-        if let Ok(items) = client.search_app_via_item(&player_id, &cmd, item_id.as_deref(), &query).await {
+        if let Ok(items) = client
+            .search_app_via_item(&player_id, &cmd, item_id.as_deref(), &query)
+            .await
+        {
             let _ = tx.send(AppMsg::AppSearchResultsLoaded(items)).await;
         }
     });
 }
 
 pub fn load_albums(artist_id: Option<String>, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
-    spawn_if_ok(client, tx, |c| async move { c.get_albums(artist_id.as_deref()).await }, AppMsg::AlbumsLoaded);
+    spawn_if_ok(
+        client,
+        tx,
+        |c| async move { c.get_albums(artist_id.as_deref()).await },
+        AppMsg::AlbumsLoaded,
+    );
 }
 
 pub fn load_radio_services(client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
-    spawn_if_ok(client, tx, |c| async move { c.get_radio_services().await }, AppMsg::RadioItemsLoaded);
+    spawn_if_ok(
+        client,
+        tx,
+        |c| async move { c.get_radio_services().await },
+        AppMsg::RadioItemsLoaded,
+    );
 }
 
 pub fn load_radio_items(
@@ -180,9 +223,12 @@ pub fn load_radio_items(
     client: Arc<LmsClient>,
     tx: mpsc::Sender<AppMsg>,
 ) {
-    spawn_if_ok(client, tx, |c| async move {
-        c.browse_radio(&player_id, &cmd, item_id.as_deref()).await
-    }, AppMsg::RadioItemsLoaded);
+    spawn_if_ok(
+        client,
+        tx,
+        |c| async move { c.browse_radio(&player_id, &cmd, item_id.as_deref()).await },
+        AppMsg::RadioItemsLoaded,
+    );
 }
 
 pub fn load_fav_items(
@@ -191,13 +237,24 @@ pub fn load_fav_items(
     client: Arc<LmsClient>,
     tx: mpsc::Sender<AppMsg>,
 ) {
-    spawn_if_ok(client, tx, |c| async move {
-        c.browse_radio(&player_id, "favorites", item_id.as_deref()).await
-    }, AppMsg::FavItemsLoaded);
+    spawn_if_ok(
+        client,
+        tx,
+        |c| async move {
+            c.browse_radio(&player_id, "favorites", item_id.as_deref())
+                .await
+        },
+        AppMsg::FavItemsLoaded,
+    );
 }
 
 pub fn load_app_services(client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
-    spawn_if_ok(client, tx, |c| async move { c.get_apps().await }, AppMsg::AppItemsLoaded);
+    spawn_if_ok(
+        client,
+        tx,
+        |c| async move { c.get_apps().await },
+        AppMsg::AppItemsLoaded,
+    );
 }
 
 pub fn load_app_items(
@@ -208,7 +265,12 @@ pub fn load_app_items(
     tx: mpsc::Sender<AppMsg>,
 ) {
     tokio::spawn(async move {
-        let Ok(mut items) = client.browse_radio(&player_id, &cmd, item_id.as_deref()).await else { return; };
+        let Ok(mut items) = client
+            .browse_radio(&player_id, &cmd, item_id.as_deref())
+            .await
+        else {
+            return;
+        };
         if cmd == "radioparadise" {
             let mut set = tokio::task::JoinSet::new();
             for (i, item) in items.iter().enumerate() {
@@ -233,17 +295,37 @@ fn rp_channel_num(item_id: Option<&str>) -> Option<u8> {
 }
 
 pub fn load_folder_items(folder_id: Option<u32>, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
-    spawn_if_ok(client, tx, move |c| async move { c.browse_music_folder(folder_id).await }, AppMsg::FolderItemsLoaded);
+    spawn_if_ok(
+        client,
+        tx,
+        move |c| async move { c.browse_music_folder(folder_id).await },
+        AppMsg::FolderItemsLoaded,
+    );
 }
 
 pub fn load_playlists(client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
-    spawn_if_ok(client, tx, |c| async move { c.get_playlists().await }, AppMsg::PlaylistsLoaded);
+    spawn_if_ok(
+        client,
+        tx,
+        |c| async move { c.get_playlists().await },
+        AppMsg::PlaylistsLoaded,
+    );
 }
 
 pub fn load_all_tracks(client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
-    spawn_if_ok(client, tx, |c| async move { c.get_all_tracks().await }, AppMsg::TracksLoaded);
+    spawn_if_ok(
+        client,
+        tx,
+        |c| async move { c.get_all_tracks().await },
+        AppMsg::TracksLoaded,
+    );
 }
 
 pub fn load_tracks(album_id: String, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
-    spawn_if_ok(client, tx, |c| async move { c.get_tracks(&album_id).await }, AppMsg::TracksLoaded);
+    spawn_if_ok(
+        client,
+        tx,
+        |c| async move { c.get_tracks(&album_id).await },
+        AppMsg::TracksLoaded,
+    );
 }

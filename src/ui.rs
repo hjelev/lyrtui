@@ -1,15 +1,17 @@
-use crate::api::{FolderItemType, NowPlaying};
-use crate::app::{App, ConfigModal, ConnectionState, IMAGE_PROTOCOLS, LibraryView, MainView, SearchResultItem, SearchScope, SidebarItem, SyncModal};
-use serde_json::Value;
+use crate::api::{FolderItemType, NowPlaying, Track};
+use crate::app::{
+    App, ConfigModal, ConnectionState, IMAGE_PROTOCOLS, LibraryView, MainView, SearchResultItem,
+    SearchScope, SidebarItem, SyncModal,
+};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph,
-        Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState,
     },
-    Frame,
 };
 use ratatui_image::{Resize, StatefulImage, protocol::StatefulProtocol};
 use std::collections::HashMap;
@@ -19,24 +21,54 @@ const THUMB_SEP: u16 = 1; // gap between image and text
 pub const PLAYERS_PWR_BTN_W: u16 = 3; // width of the power button column in the Players screen
 pub const PLAYERS_SYNC_BTN_W: u16 = 3; // width of the sync button column " ⇄ "
 
-const PILL_BG_FOCUSED:   Color = Color::Rgb(45, 100, 170);
-const PILL_FG_FOCUSED:   Color = Color::Rgb(220, 235, 255);
+/// Column widths for one row of the Players screen. Computed once and shared between the
+/// renderer (`draw_players`) and the mouse hit-tester (`handle_mouse_event`) so click targets
+/// can never drift out of sync with what is drawn.
+pub struct PlayersRowLayout {
+    /// Width of the trailing " 🔊 NNN%" volume string (icon padded to constant width).
+    pub vol_str_w: usize,
+    /// Width of the volume bar column (shared by the global row and per-player rows).
+    pub bar_w: usize,
+    /// Width of the player-name column (also aligns the global "Global vol" label).
+    pub name_col_w: usize,
+}
+
+/// Derive the shared Players-row column widths from the panel `area` (the outer panel rect, the
+/// same value `draw_players` gets and the mouse handler holds as `main_area`). Inner usable
+/// width is `area.width - 3` (2 borders + 1 reserved for the pill endcap).
+pub fn players_row_layout(area: Rect, use_nerd_icons: bool) -> PlayersRowLayout {
+    let vol_icon_w: usize = if use_nerd_icons { 2 } else { 0 };
+    let vol_str_w = 1 + vol_icon_w + 4; // 1 space + icon + 3 digits + '%'
+    let row_w = (area.width.saturating_sub(3)) as usize;
+    let fixed = PLAYERS_PWR_BTN_W as usize + PLAYERS_SYNC_BTN_W as usize + vol_str_w + 1 + 3;
+    let flex = row_w.saturating_sub(fixed);
+    let bar_w = flex / 2;
+    let name_col_w = flex.saturating_sub(bar_w);
+    PlayersRowLayout {
+        vol_str_w,
+        bar_w,
+        name_col_w,
+    }
+}
+
+const PILL_BG_FOCUSED: Color = Color::Rgb(45, 100, 170);
+const PILL_FG_FOCUSED: Color = Color::Rgb(220, 235, 255);
 const PILL_BG_UNFOCUSED: Color = Color::Rgb(50, 50, 68);
-const THUMB_BG_DEFAULT:  Color = Color::Rgb(25, 25, 35);
+const THUMB_BG_DEFAULT: Color = Color::Rgb(25, 25, 35);
 const THUMB_PLACEHOLDER: Color = Color::Rgb(80, 80, 110);
-const BAR_FOCUSED:       Color = Color::Rgb(100, 180, 255);
-const BAR_UNFOCUSED:     Color = Color::Rgb(60, 80, 110);
+const BAR_FOCUSED: Color = Color::Rgb(100, 180, 255);
+const BAR_UNFOCUSED: Color = Color::Rgb(60, 80, 110);
 
 fn sidebar_nerd_icon(item: &SidebarItem) -> &'static str {
     match item {
-        SidebarItem::MyMusic    => "\u{F001}",  // nf-fa-music
-        SidebarItem::Search     => "\u{F002}",  // nf-fa-search
-        SidebarItem::Radio      => "\u{F130}",  // nf-fa-microphone
-        SidebarItem::Apps       => "\u{F009}",  // nf-fa-th-large
-        SidebarItem::Favourites => "\u{F005}",  // nf-fa-star
-        SidebarItem::Queue      => "\u{F03A}",  // nf-fa-list
-        SidebarItem::Players    => "\u{F028}",  // nf-fa-volume-up
-        SidebarItem::Help       => "\u{F059}",  // nf-fa-question-circle
+        SidebarItem::MyMusic => "\u{F001}",    // nf-fa-music
+        SidebarItem::Search => "\u{F002}",     // nf-fa-search
+        SidebarItem::Radio => "\u{F130}",      // nf-fa-microphone
+        SidebarItem::Apps => "\u{F009}",       // nf-fa-th-large
+        SidebarItem::Favourites => "\u{F005}", // nf-fa-star
+        SidebarItem::Queue => "\u{F03A}",      // nf-fa-list
+        SidebarItem::Players => "\u{F028}",    // nf-fa-volume-up
+        SidebarItem::Help => "\u{F059}",       // nf-fa-question-circle
     }
 }
 
@@ -47,7 +79,14 @@ fn focus_border_color(accent: Option<[u8; 3]>) -> Color {
     }
 }
 
-fn accent_tint(accent: Option<[u8; 3]>, pct: u16, r_off: u16, g_off: u16, b_off: u16, fallback: Color) -> Color {
+fn accent_tint(
+    accent: Option<[u8; 3]>,
+    pct: u16,
+    r_off: u16,
+    g_off: u16,
+    b_off: u16,
+    fallback: Color,
+) -> Color {
     match accent {
         Some([r, g, b]) => Color::Rgb(
             (r as u16 * pct / 100 + r_off).min(255) as u8,
@@ -72,7 +111,11 @@ fn border_style_for_focus(focused: bool, accent: Option<[u8; 3]>) -> Style {
 
 fn thumbnail_bg_color(is_selected: bool, focused: bool) -> Color {
     if is_selected {
-        if focused { PILL_BG_FOCUSED } else { PILL_BG_UNFOCUSED }
+        if focused {
+            PILL_BG_FOCUSED
+        } else {
+            PILL_BG_UNFOCUSED
+        }
     } else {
         THUMB_BG_DEFAULT
     }
@@ -92,8 +135,12 @@ fn render_thumbnail(
         }
         None => {
             f.render_widget(
-                Paragraph::new(if thumb_rect.height >= 2 { "\n ♪" } else { " ♪" })
-                    .style(Style::default().fg(THUMB_PLACEHOLDER).bg(bg)),
+                Paragraph::new(if thumb_rect.height >= 2 {
+                    "\n ♪"
+                } else {
+                    " ♪"
+                })
+                .style(Style::default().fg(THUMB_PLACEHOLDER).bg(bg)),
                 thumb_rect,
             );
         }
@@ -155,15 +202,19 @@ fn icon_vol(nerd: bool) -> &'static str {
 }
 
 fn icon_mute(nerd: bool) -> &'static str {
-    if nerd { "\u{F026}" } else { "×" }  // nf-fa-volume-off
+    if nerd { "\u{F026}" } else { "×" } // nf-fa-volume-off
 }
 
 fn icon_vol_or_mute(nerd: bool, vol: u8) -> &'static str {
-    if vol == 0 { icon_mute(nerd) } else { icon_vol(nerd) }
+    if vol == 0 {
+        icon_mute(nerd)
+    } else {
+        icon_vol(nerd)
+    }
 }
 
 fn icon_power(nerd: bool) -> &'static str {
-    if nerd { "\u{F011}" } else { "o" }  // nf-fa-power-off
+    if nerd { "\u{F011}" } else { "o" } // nf-fa-power-off
 }
 
 fn icon_player_dot(nerd: bool) -> &'static str {
@@ -211,7 +262,11 @@ struct RowItem {
 pub fn compute_areas(area: Rect, status_height: u16) -> (Rect, Rect) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(status_height),
+            Constraint::Length(1),
+        ])
         .split(area);
     let panes = Layout::default()
         .direction(Direction::Horizontal)
@@ -233,10 +288,17 @@ pub fn compute_search_panel_rects(main_area: Rect) -> (Rect, Rect) {
 /// Returns the SearchScope whose tab was clicked at `col` in the tab bar.
 /// Separator clicks select the preceding tab; clicks past the last tab select All.
 pub fn search_scope_at_col(col: u16, tab_bar: Rect, use_nerd_icons: bool) -> Option<SearchScope> {
-    if col < tab_bar.x { return None; }
+    if col < tab_bar.x {
+        return None;
+    }
     let rel = (col - tab_bar.x) as usize;
     let labels = ["My Music", "Radios", "Apps", "All"];
-    let scopes = [SearchScope::MyMusic, SearchScope::Radios, SearchScope::Apps, SearchScope::All];
+    let scopes = [
+        SearchScope::MyMusic,
+        SearchScope::Radios,
+        SearchScope::Apps,
+        SearchScope::All,
+    ];
     let extra = if use_nerd_icons { 2usize } else { 0 };
     let sep = 3usize; // " │ "
     let mut start = 0usize;
@@ -251,10 +313,18 @@ pub fn search_scope_at_col(col: u16, tab_bar: Rect, use_nerd_icons: bool) -> Opt
 }
 
 /// Returns the six clickable button rects in the Now Playing controls row: [Prev, PlayPause, Stop, Next, Shuffle, Repeat].
-pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w: u16) -> [Rect; 8] {
+pub fn compute_statusbar_control_rects(
+    area: Rect,
+    status_height: u16,
+    art_col_w: u16,
+) -> [Rect; 8] {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(status_height),
+            Constraint::Length(1),
+        ])
         .split(area);
     let status_inner = Rect::new(
         outer[1].x + 1,
@@ -264,7 +334,11 @@ pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w
     );
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(art_col_w), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(art_col_w),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
         .split(status_inner);
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -289,7 +363,12 @@ pub fn compute_statusbar_control_rects(area: Rect, status_height: u16, art_col_w
             ctrl.x + 4 * (btn_w + gap) + sep + ((i - 4) as u16) * (btn_w + gap)
         } else {
             // volume down (6) and volume up (7) after a second sep gap
-            ctrl.x + 4 * (btn_w + gap) + sep + 2 * (btn_w + gap) + sep + ((i - 6) as u16) * (btn_w + gap)
+            ctrl.x
+                + 4 * (btn_w + gap)
+                + sep
+                + 2 * (btn_w + gap)
+                + sep
+                + ((i - 6) as u16) * (btn_w + gap)
         };
         Rect::new(x, ctrl.y, btn_w, 1)
     })
@@ -315,7 +394,11 @@ pub fn draw(
         // Outer layout: main content | status bar | notification line
         let outer = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(app.status_height), Constraint::Length(1)])
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(app.status_height),
+                Constraint::Length(1),
+            ])
             .split(area);
 
         let main_area = outer[0];
@@ -334,26 +417,59 @@ pub fn draw(
         draw_statusbar(f, app, status_area, album_art);
 
         if let Some(msg) = &app.status_message {
-            let p = Paragraph::new(msg.as_str())
-                .style(Style::default().fg(Color::Green));
+            let p = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Green));
             f.render_widget(p, notif_area);
         } else {
             let footer = if matches!(app.main_view, MainView::Players) {
-                hint_line(&[
-                    ("t", "power"), ("s", "sync"), ("Spc", "play/pause"), ("n/p", "next/prev"),
-                    ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
-                ], app.effective_accent())
+                hint_line(
+                    &[
+                        ("t", "power"),
+                        ("s", "sync"),
+                        ("Spc", "play/pause"),
+                        ("n/p", "next/prev"),
+                        ("+/-", "vol"),
+                        ("`", "art mode"),
+                        ("c", "config"),
+                        ("q", "quit"),
+                    ],
+                    app.effective_accent(),
+                )
             } else if matches!(app.main_view, MainView::Search) {
                 if app.search_input_active {
-                    hint_line(&[("Type", "query"), ("Tab", "scope"), ("Enter", "search"), ("Esc/↓", "results"), ("q", "quit")], app.effective_accent())
+                    hint_line(
+                        &[
+                            ("Type", "query"),
+                            ("Tab", "scope"),
+                            ("Enter", "search"),
+                            ("Esc/↓", "results"),
+                            ("q", "quit"),
+                        ],
+                        app.effective_accent(),
+                    )
                 } else {
-                    hint_line(&[("j/k", "navigate"), ("Enter", "select"), ("Esc", "back"), ("q", "quit")], app.effective_accent())
+                    hint_line(
+                        &[
+                            ("j/k", "navigate"),
+                            ("Enter", "select"),
+                            ("Esc", "back"),
+                            ("q", "quit"),
+                        ],
+                        app.effective_accent(),
+                    )
                 }
             } else {
-                hint_line(&[
-                    ("a", "add to queue"), ("Spc", "play/pause"), ("n/p", "next/prev"),
-                    ("+/-", "vol"), ("`", "art mode"), ("c", "config"), ("q", "quit"),
-                ], app.effective_accent())
+                hint_line(
+                    &[
+                        ("a", "add to queue"),
+                        ("Spc", "play/pause"),
+                        ("n/p", "next/prev"),
+                        ("+/-", "vol"),
+                        ("`", "art mode"),
+                        ("c", "config"),
+                        ("q", "quit"),
+                    ],
+                    app.effective_accent(),
+                )
             };
             f.render_widget(Paragraph::new(footer), notif_area);
         }
@@ -372,12 +488,22 @@ pub fn draw(
     }
 
     if app.confirm_clear_queue {
-        draw_confirm_clear_queue(f, app.queue.len(), app.clear_queue_selected_button, app.effective_accent());
+        draw_confirm_clear_queue(
+            f,
+            app.queue.len(),
+            app.clear_queue_selected_button,
+            app.effective_accent(),
+        );
     }
 
     if let Some(idx) = app.confirm_delete_queue_item {
         let title = app.queue.get(idx).map(|t| t.title.as_str()).unwrap_or("");
-        draw_confirm_delete_queue_item(f, title, app.delete_queue_selected_button, app.effective_accent());
+        draw_confirm_delete_queue_item(
+            f,
+            title,
+            app.delete_queue_selected_button,
+            app.effective_accent(),
+        );
     }
 
     if app.context_menu.is_some() {
@@ -408,20 +534,40 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
                 if app.use_nerd_icons {
                     ListItem::new(Line::from(vec![
                         pill_endcap_left(pill_bg, true),
-                        Span::styled(format!(" {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
-                        Span::styled(format!("{} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                        Span::styled(
+                            format!(" {} ", sidebar_nerd_icon(item)),
+                            Style::default()
+                                .fg(focus_border_color(app.effective_accent()))
+                                .bg(pill_bg),
+                        ),
+                        Span::styled(
+                            format!("{} ", label),
+                            Style::default()
+                                .fg(pill_fg)
+                                .add_modifier(Modifier::BOLD)
+                                .bg(pill_bg),
+                        ),
                         pill_endcap_right(pill_bg, true),
                     ]))
                 } else {
                     ListItem::new(Line::from(vec![
                         pill_endcap_left(pill_bg, false),
-                        Span::styled(format!(" {} ", label), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
+                        Span::styled(
+                            format!(" {} ", label),
+                            Style::default()
+                                .fg(pill_fg)
+                                .add_modifier(Modifier::BOLD)
+                                .bg(pill_bg),
+                        ),
                         pill_endcap_right(pill_bg, false),
                     ]))
                 }
             } else if app.use_nerd_icons {
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {} ", sidebar_nerd_icon(item)), Style::default().fg(focus_border_color(app.effective_accent()))),
+                    Span::styled(
+                        format!("  {} ", sidebar_nerd_icon(item)),
+                        Style::default().fg(focus_border_color(app.effective_accent())),
+                    ),
                     Span::raw(label.to_string()),
                 ]))
             } else {
@@ -451,7 +597,8 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             area.height.saturating_sub(2),
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), app.focus_sidebar);
+        let (track_style, thumb_style) =
+            scrollbar_accent_styles(app.effective_accent(), app.focus_sidebar);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -463,7 +610,14 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     }
 }
 
-fn draw_main(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
+fn draw_main(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+    base: &str,
+) {
     match &app.main_view {
         MainView::MyMusic => draw_my_music(f, app, area, state),
         MainView::Library(lib) => draw_library(f, app, area, lib, state, thumbnails, base),
@@ -492,43 +646,66 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
     let entries: [(&str, &str, &str); 6] = if app.use_nerd_icons {
         [
-            ("\u{F0C0}", "Artists",       "your music library by artist"), // nf-fa-users
-            ("\u{F007}", "Album Artists", "artists with full albums"),     // nf-fa-user
-            ("\u{F025}", "Albums",        "all albums"),                   // nf-fa-headphones
-            ("\u{F001}", "Tracks",        "all tracks"),                   // nf-fa-music
-            ("\u{F07B}", "Folders",       "browse by folder"),             // nf-fa-folder
-            ("\u{F0C9}", "Playlists",     "saved playlists"),              // nf-fa-list
+            ("\u{F0C0}", "Artists", "your music library by artist"), // nf-fa-users
+            ("\u{F007}", "Album Artists", "artists with full albums"), // nf-fa-user
+            ("\u{F025}", "Albums", "all albums"),                    // nf-fa-headphones
+            ("\u{F001}", "Tracks", "all tracks"),                    // nf-fa-music
+            ("\u{F07B}", "Folders", "browse by folder"),             // nf-fa-folder
+            ("\u{F0C9}", "Playlists", "saved playlists"),            // nf-fa-list
         ]
     } else {
         [
-            ("▸", "Artists",       "your music library by artist"),
+            ("▸", "Artists", "your music library by artist"),
             ("▸", "Album Artists", "artists with full albums"),
-            ("▸", "Albums",        "all albums"),
-            ("▸", "Tracks",        "all tracks"),
-            ("▸", "Folders",       "browse by folder"),
-            ("▸", "Playlists",     "saved playlists"),
+            ("▸", "Albums", "all albums"),
+            ("▸", "Tracks", "all tracks"),
+            ("▸", "Folders", "browse by folder"),
+            ("▸", "Playlists", "saved playlists"),
         ]
     };
 
     let (pill_bg, pill_fg) = pill_colors(focused);
 
-    let items: Vec<ListItem> = entries.iter().enumerate().map(|(i, (icon, label, sub))| {
-        if i == app.main_selected {
-            ListItem::new(Line::from(vec![
-                pill_endcap_left(pill_bg, app.use_nerd_icons),
-                Span::styled(format!(" {}  ", icon), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
-                Span::styled(label.to_string(), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
-                Span::styled(format!("  — {} ", sub), Style::default().fg(focus_border_color(app.effective_accent())).bg(pill_bg)),
-                pill_endcap_right(pill_bg, app.use_nerd_icons),
-            ]))
-        } else {
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("  {}  ", icon), Style::default().fg(focus_border_color(app.effective_accent()))),
-                Span::raw(label.to_string()),
-                Span::styled(format!("  — {}", sub), Style::default().fg(mid)),
-            ]))
-        }
-    }).collect();
+    let items: Vec<ListItem> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, (icon, label, sub))| {
+            if i == app.main_selected {
+                ListItem::new(Line::from(vec![
+                    pill_endcap_left(pill_bg, app.use_nerd_icons),
+                    Span::styled(
+                        format!(" {}  ", icon),
+                        Style::default()
+                            .fg(focus_border_color(app.effective_accent()))
+                            .bg(pill_bg),
+                    ),
+                    Span::styled(
+                        label.to_string(),
+                        Style::default()
+                            .fg(pill_fg)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(pill_bg),
+                    ),
+                    Span::styled(
+                        format!("  — {} ", sub),
+                        Style::default()
+                            .fg(focus_border_color(app.effective_accent()))
+                            .bg(pill_bg),
+                    ),
+                    pill_endcap_right(pill_bg, app.use_nerd_icons),
+                ]))
+            } else {
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("  {}  ", icon),
+                        Style::default().fg(focus_border_color(app.effective_accent())),
+                    ),
+                    Span::raw(label.to_string()),
+                    Span::styled(format!("  — {}", sub), Style::default().fg(mid)),
+                ]))
+            }
+        })
+        .collect();
 
     state.select(Some(app.main_selected));
 
@@ -540,104 +717,232 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     f.render_stateful_widget(list, area, state);
 }
 
-fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
+/// Build the shared two-row item for a track, used by both the Tracks library view and the
+/// Queue. `is_current` paints the row green; `thumb_url` is passed in because the Tracks view
+/// falls back to a cover-by-id URL while the Queue uses the track's own artwork URL.
+fn track_row_item(
+    t: &Track,
+    index: usize,
+    is_current: bool,
+    thumb_url: Option<String>,
+    mid: Color,
+    nerd: bool,
+) -> RowItem {
+    let (icon_style, title_style, l2_style) = if is_current {
+        (
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Green),
+        )
+    } else {
+        (
+            Style::default().fg(mid),
+            Style::default().fg(Color::White),
+            Style::default().fg(mid),
+        )
+    };
+    let icon = if is_current {
+        if nerd { "\u{F04B} " } else { "▶ " }
+    } else if nerd {
+        "\u{F001} "
+    } else {
+        "▸ "
+    };
+    let artist_album = match (t.artist.as_deref(), t.album.as_deref()) {
+        (Some(ar), Some(al)) => format!("{} — {}", ar, al),
+        (Some(ar), None) => ar.to_string(),
+        _ => String::new(),
+    };
+    let subtitle = if artist_album.is_empty() {
+        format!("{}", index + 1)
+    } else {
+        format!("{}  {}", index + 1, artist_album)
+    };
+    RowItem {
+        thumb_url,
+        line1: Line::from(vec![
+            Span::styled(icon, icon_style),
+            Span::styled(t.title.clone(), title_style),
+        ]),
+        line2: Line::from(Span::styled(subtitle, l2_style)),
+        duration: t.duration.map(format_duration),
+    }
+}
+
+fn draw_library(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    view: &LibraryView,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+    base: &str,
+) {
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
     match view {
         LibraryView::Artists => {
-            let items = app.artists.iter().map(|a| RowItem {
-                thumb_url: Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
-                line1: if app.use_nerd_icons {
-                    Line::from(vec![
-                        Span::styled("\u{F007} ", Style::default().fg(focus_border_color(app.effective_accent()))),  // nf-fa-user
-                        Span::raw(a.artist.clone()),
-                    ])
-                } else {
-                    Line::from(Span::raw(a.artist.clone()))
-                },
-                line2: Line::from(Span::styled("artist", Style::default().fg(mid))),
-                duration: None,
-            }).collect();
-            draw_two_row_list(f, area, " Artists ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
-        }
-        LibraryView::AlbumArtists => {
-            let items = app.album_artists.iter().map(|a| RowItem {
-                thumb_url: Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
-                line1: if app.use_nerd_icons {
-                    Line::from(vec![
-                        Span::styled("\u{F007} ", Style::default().fg(focus_border_color(app.effective_accent()))),  // nf-fa-user
-                        Span::raw(a.artist.clone()),
-                    ])
-                } else {
-                    Line::from(Span::raw(a.artist.clone()))
-                },
-                line2: Line::from(Span::styled("album artist", Style::default().fg(mid))),
-                duration: None,
-            }).collect();
-            draw_two_row_list(f, area, " Album Artists ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
-        }
-        LibraryView::Albums { .. } => {
-            let items = app.albums.iter().map(|a| {
-                let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
-                RowItem {
-                    thumb_url: Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&a.id))),
+            let items = app
+                .artists
+                .iter()
+                .map(|a| RowItem {
+                    thumb_url: Some(crate::utils::music_image_url(
+                        base,
+                        crate::utils::json_id_to_string(&a.id),
+                        "artist.jpg",
+                    )),
                     line1: if app.use_nerd_icons {
                         Line::from(vec![
-                            Span::styled("\u{F025} ", Style::default().fg(focus_border_color(app.effective_accent()))),  // nf-fa-headphones
-                            Span::raw(a.album.clone()),
+                            Span::styled(
+                                "\u{F007} ",
+                                Style::default().fg(focus_border_color(app.effective_accent())),
+                            ), // nf-fa-user
+                            Span::raw(a.artist.clone()),
                         ])
                     } else {
-                        Line::from(Span::raw(a.album.clone()))
+                        Line::from(Span::raw(a.artist.clone()))
                     },
-                    line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
+                    line2: Line::from(Span::styled("artist", Style::default().fg(mid))),
                     duration: None,
-                }
-            }).collect();
-            draw_two_row_list(f, area, " Albums ", items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
+                })
+                .collect();
+            draw_two_row_list(
+                f,
+                area,
+                " Artists ",
+                items,
+                app.main_selected,
+                focused,
+                false,
+                state,
+                thumbnails,
+                app.effective_accent(),
+            );
+        }
+        LibraryView::AlbumArtists => {
+            let items = app
+                .album_artists
+                .iter()
+                .map(|a| RowItem {
+                    thumb_url: Some(crate::utils::music_image_url(
+                        base,
+                        crate::utils::json_id_to_string(&a.id),
+                        "artist.jpg",
+                    )),
+                    line1: if app.use_nerd_icons {
+                        Line::from(vec![
+                            Span::styled(
+                                "\u{F007} ",
+                                Style::default().fg(focus_border_color(app.effective_accent())),
+                            ), // nf-fa-user
+                            Span::raw(a.artist.clone()),
+                        ])
+                    } else {
+                        Line::from(Span::raw(a.artist.clone()))
+                    },
+                    line2: Line::from(Span::styled("album artist", Style::default().fg(mid))),
+                    duration: None,
+                })
+                .collect();
+            draw_two_row_list(
+                f,
+                area,
+                " Album Artists ",
+                items,
+                app.main_selected,
+                focused,
+                false,
+                state,
+                thumbnails,
+                app.effective_accent(),
+            );
+        }
+        LibraryView::Albums { .. } => {
+            let items = app
+                .albums
+                .iter()
+                .map(|a| {
+                    let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
+                    RowItem {
+                        thumb_url: Some(crate::utils::music_image_url(
+                            base,
+                            crate::utils::json_id_to_string(&a.id),
+                            "cover.jpg",
+                        )),
+                        line1: if app.use_nerd_icons {
+                            Line::from(vec![
+                                Span::styled(
+                                    "\u{F025} ",
+                                    Style::default().fg(focus_border_color(app.effective_accent())),
+                                ), // nf-fa-headphones
+                                Span::raw(a.album.clone()),
+                            ])
+                        } else {
+                            Line::from(Span::raw(a.album.clone()))
+                        },
+                        line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
+                        duration: None,
+                    }
+                })
+                .collect();
+            draw_two_row_list(
+                f,
+                area,
+                " Albums ",
+                items,
+                app.main_selected,
+                focused,
+                app.is_loading,
+                state,
+                thumbnails,
+                app.effective_accent(),
+            );
         }
         LibraryView::Tracks { album_id } => {
-            let title = if album_id.is_some() { " Tracks " } else { " All Tracks " };
-            let playing_title = app.now_playing.as_ref().map(|n| n.title.as_str()).unwrap_or("");
-            let items = app.tracks.iter().enumerate().map(|(i, t)| {
-                let is_current = t.title == playing_title && !playing_title.is_empty();
-                let (icon_style, title_style, l2_style) = if is_current {
-                    (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-                     Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-                     Style::default().fg(Color::Green))
-                } else {
-                    (Style::default().fg(mid),
-                     Style::default().fg(Color::White),
-                     Style::default().fg(mid))
-                };
-                let icon = if is_current {
-                    if app.use_nerd_icons { "\u{F04B} " } else { "▶ " }
-                } else if app.use_nerd_icons {
-                    "\u{F001} "
-                } else {
-                    "▸ "
-                };
-                let artist_album = match (t.artist.as_deref(), t.album.as_deref()) {
-                    (Some(ar), Some(al)) => format!("{} — {}", ar, al),
-                    (Some(ar), None) => ar.to_string(),
-                    _ => String::new(),
-                };
-                let subtitle = if artist_album.is_empty() {
-                    format!("{}", i + 1)
-                } else {
-                    format!("{}  {}", i + 1, artist_album)
-                };
-                RowItem {
-                    thumb_url: t.artwork_url.clone()
-                        .or_else(|| t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, value_id_str(id)))),
-                    line1: Line::from(vec![
-                        Span::styled(icon, icon_style),
-                        Span::styled(t.title.clone(), title_style),
-                    ]),
-                    line2: Line::from(Span::styled(subtitle, l2_style)),
-                    duration: t.duration.map(format_duration),
-                }
-            }).collect();
-            draw_two_row_list(f, area, title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
+            let title = if album_id.is_some() {
+                " Tracks "
+            } else {
+                " All Tracks "
+            };
+            let playing_title = app
+                .now_playing
+                .as_ref()
+                .map(|n| n.title.as_str())
+                .unwrap_or("");
+            let items = app
+                .tracks
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    let is_current = t.title == playing_title && !playing_title.is_empty();
+                    let thumb_url = t.artwork_url.clone().or_else(|| {
+                        t.id.as_ref().map(|id| {
+                            crate::utils::music_image_url(
+                                base,
+                                crate::utils::json_id_to_string(id),
+                                "cover.jpg",
+                            )
+                        })
+                    });
+                    track_row_item(t, i, is_current, thumb_url, mid, app.use_nerd_icons)
+                })
+                .collect();
+            draw_two_row_list(
+                f,
+                area,
+                title,
+                items,
+                app.main_selected,
+                focused,
+                app.is_loading,
+                state,
+                thumbnails,
+                app.effective_accent(),
+            );
         }
         LibraryView::Folder { .. } => {
             let breadcrumb = breadcrumb_str(
@@ -645,96 +950,136 @@ fn draw_library(f: &mut Frame, app: &App, area: Rect, view: &LibraryView, state:
                 &app.folder_title,
             );
             let title = format!(" Folders — {} ", breadcrumb);
-            let items = app.folder_items.iter().map(|item| {
-                let is_track = item.item_type == FolderItemType::Track;
-                let (icon, fg) = if is_track {
-                    ("▶ ", focus_border_color(app.effective_accent()))
-                } else {
-                    ("▸ ", Color::White)
-                };
-                RowItem {
-                    thumb_url: if is_track {
-                        Some(format!("{}/music/{}/cover.jpg", base, item.id))
+            let items = app
+                .folder_items
+                .iter()
+                .map(|item| {
+                    let is_track = item.item_type == FolderItemType::Track;
+                    let (icon, fg) = if is_track {
+                        ("▶ ", focus_border_color(app.effective_accent()))
                     } else {
-                        None
-                    },
-                    line1: Line::from(Span::styled(
-                        format!("{}{}", icon, item.filename),
-                        Style::default().fg(fg),
-                    )),
-                    line2: Line::from(Span::styled(
-                        if is_track { String::new() } else { "folder".to_string() },
-                        Style::default().fg(mid),
-                    )),
-                    duration: if is_track { item.duration.map(format_duration) } else { None },
-                }
-            }).collect();
-            draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
+                        ("▸ ", Color::White)
+                    };
+                    RowItem {
+                        thumb_url: if is_track {
+                            Some(crate::utils::music_image_url(base, item.id, "cover.jpg"))
+                        } else {
+                            None
+                        },
+                        line1: Line::from(Span::styled(
+                            format!("{}{}", icon, item.filename),
+                            Style::default().fg(fg),
+                        )),
+                        line2: Line::from(Span::styled(
+                            if is_track {
+                                String::new()
+                            } else {
+                                "folder".to_string()
+                            },
+                            Style::default().fg(mid),
+                        )),
+                        duration: if is_track {
+                            item.duration.map(format_duration)
+                        } else {
+                            None
+                        },
+                    }
+                })
+                .collect();
+            draw_two_row_list(
+                f,
+                area,
+                &title,
+                items,
+                app.main_selected,
+                focused,
+                app.is_loading,
+                state,
+                thumbnails,
+                app.effective_accent(),
+            );
         }
         LibraryView::Playlists => {
-            let items = app.playlists.iter().map(|p| RowItem {
-                thumb_url: Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&p.id))),
-                line1: if app.use_nerd_icons {
-                    Line::from(vec![
-                        Span::styled("\u{F0C9} ", Style::default().fg(focus_border_color(app.effective_accent()))),  // nf-fa-list
-                        Span::raw(p.name.clone()),
-                    ])
-                } else {
-                    Line::from(Span::raw(p.name.clone()))
-                },
-                line2: Line::from(Span::styled("playlist", Style::default().fg(mid))),
-                duration: None,
-            }).collect();
-            draw_two_row_list(f, area, " Playlists ", items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
+            let items = app
+                .playlists
+                .iter()
+                .map(|p| RowItem {
+                    thumb_url: Some(crate::utils::music_image_url(
+                        base,
+                        crate::utils::json_id_to_string(&p.id),
+                        "cover.jpg",
+                    )),
+                    line1: if app.use_nerd_icons {
+                        Line::from(vec![
+                            Span::styled(
+                                "\u{F0C9} ",
+                                Style::default().fg(focus_border_color(app.effective_accent())),
+                            ), // nf-fa-list
+                            Span::raw(p.name.clone()),
+                        ])
+                    } else {
+                        Line::from(Span::raw(p.name.clone()))
+                    },
+                    line2: Line::from(Span::styled("playlist", Style::default().fg(mid))),
+                    duration: None,
+                })
+                .collect();
+            draw_two_row_list(
+                f,
+                area,
+                " Playlists ",
+                items,
+                app.main_selected,
+                focused,
+                app.is_loading,
+                state,
+                thumbnails,
+                app.effective_accent(),
+            );
         }
     }
 }
 
-fn draw_queue(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+fn draw_queue(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+) {
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
     let cur_idx = app.now_playing.as_ref().and_then(|n| n.playlist_cur_index);
 
-    let items = app.queue.iter().enumerate().map(|(i, t)| {
-        let is_current = cur_idx.map(|idx| idx == i).unwrap_or(false);
-        let (icon_style, title_style, l2_style) = if is_current {
-            (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-             Style::default().fg(Color::Green))
-        } else {
-            (Style::default().fg(mid),
-             Style::default().fg(Color::White),
-             Style::default().fg(mid))
-        };
-        let icon = if is_current {
-            if app.use_nerd_icons { "\u{F04B} " } else { "▶ " }
-        } else if app.use_nerd_icons {
-            "\u{F001} "  // nf-fa-music (tracks icon)
-        } else {
-            "▸ "
-        };
-        let artist_album = match (t.artist.as_deref(), t.album.as_deref()) {
-            (Some(ar), Some(al)) => format!("{} — {}", ar, al),
-            (Some(ar), None) => ar.to_string(),
-            _ => String::new(),
-        };
-        let subtitle = if artist_album.is_empty() {
-            format!("{}", i + 1)
-        } else {
-            format!("{}  {}", i + 1, artist_album)
-        };
-        RowItem {
-            thumb_url: t.artwork_url.clone(),
-            line1: Line::from(vec![
-                Span::styled(icon, icon_style),
-                Span::styled(t.title.clone(), title_style),
-            ]),
-            line2: Line::from(Span::styled(subtitle, l2_style)),
-            duration: t.duration.map(format_duration),
-        }
-    }).collect();
+    let items = app
+        .queue
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let is_current = cur_idx.map(|idx| idx == i).unwrap_or(false);
+            track_row_item(
+                t,
+                i,
+                is_current,
+                t.artwork_url.clone(),
+                mid,
+                app.use_nerd_icons,
+            )
+        })
+        .collect();
 
-    draw_two_row_list(f, area, " Queue ", items, app.main_selected, focused, false, state, thumbnails, app.effective_accent());
+    draw_two_row_list(
+        f,
+        area,
+        " Queue ",
+        items,
+        app.main_selected,
+        focused,
+        false,
+        state,
+        thumbnails,
+        app.effective_accent(),
+    );
 }
 
 fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
@@ -756,23 +1101,17 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(inner);
 
-    let pwr_w = PLAYERS_PWR_BTN_W as usize;
     let pwr_icon = icon_power(app.use_nerd_icons);
 
-    // Shared layout: compute bar width once so global row and per-player rows are aligned.
-    // vol_icon_str width is constant (mute/vol icons have same width) so layout math is stable.
+    // Shared layout: compute bar/name widths once via the same helper the mouse handler uses,
+    // so global row and per-player rows align and click targets match what's drawn.
     let vol_icon_str: &str = if app.use_nerd_icons { "\u{F028} " } else { "" };
     let mute_icon_str: &str = if app.use_nerd_icons { "\u{F026} " } else { "" };
-    // Pad volume to 3 digits so vol_str width is constant (" 🔊  75%" / "  75%").
-    let vol_str_w = 1 + vol_icon_str.chars().count() + 4; // 1 space + icon + 3 digits + '%'
-    // Reserve 1 col on each side for the pill endcap characters.
-    let row_w = (chunks[0].width as usize).saturating_sub(1); // same for all rows (vertical split)
-    // Fixed: pwr btn + sync btn + vol string + 1 gap + 3 label padding (" " + "  ")
-    let player_fixed_w = pwr_w + PLAYERS_SYNC_BTN_W as usize + vol_str_w + 1 + 3;
-    let player_total_flex = row_w.saturating_sub(player_fixed_w);
-    let player_bar_w = player_total_flex / 2;
-    // Name column width; also used to align the global label so bars share the same column.
-    let player_name_col_w = player_total_flex.saturating_sub(player_bar_w);
+    let PlayersRowLayout {
+        vol_str_w: _,
+        bar_w: player_bar_w,
+        name_col_w: player_name_col_w,
+    } = players_row_layout(area, app.use_nerd_icons);
 
     let (pill_bg, _pill_fg) = pill_colors(focused);
 
@@ -780,21 +1119,47 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let global_avg: u8 = if app.players.is_empty() {
         0
     } else {
-        let sum: u32 = app.players.iter()
+        let sum: u32 = app
+            .players
+            .iter()
             .map(|p| app.player_volumes.get(&p.playerid).copied().unwrap_or(0) as u32)
             .sum();
         (sum / app.players.len() as u32) as u8
     };
 
     let glob_focused = focused && app.players_focus_global;
-    let glob_bg = if glob_focused { Color::Rgb(45, 100, 170) } else { Color::Reset };
-    let glob_fg = if glob_focused { Color::Rgb(220, 235, 255) } else { mid };
+    let glob_bg = if glob_focused {
+        Color::Rgb(45, 100, 170)
+    } else {
+        Color::Reset
+    };
+    let glob_fg = if glob_focused {
+        Color::Rgb(220, 235, 255)
+    } else {
+        mid
+    };
 
-    let checkbox = if app.global_volume_control { "[x]" } else { "[ ]" };
-    let glob_icon = if global_avg == 0 { mute_icon_str } else { vol_icon_str };
+    let checkbox = if app.global_volume_control {
+        "[x]"
+    } else {
+        "[ ]"
+    };
+    let glob_icon = if global_avg == 0 {
+        mute_icon_str
+    } else {
+        vol_icon_str
+    };
     let vol_str = format!(" {}{:3}%", glob_icon, global_avg);
-    let filled = if player_bar_w > 0 { (global_avg as usize * player_bar_w) / 100 } else { 0 };
-    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(player_bar_w.saturating_sub(filled)));
+    let filled = if player_bar_w > 0 {
+        (global_avg as usize * player_bar_w) / 100
+    } else {
+        0
+    };
+    let bar = format!(
+        "{}{}",
+        "█".repeat(filled),
+        "░".repeat(player_bar_w.saturating_sub(filled))
+    );
 
     // Pad the label suffix so the bar starts at the same column as per-player bars.
     // Per-player bar starts at: pwr(3) + label(player_name_col_w+3) + sync(3) = player_name_col_w+9.
@@ -817,9 +1182,18 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let global_line = if glob_focused {
         Line::from(vec![
             pill_endcap_left(pill_bg, app.use_nerd_icons),
-            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
+            Span::styled(
+                format!(" {} ", pwr_icon),
+                Style::default().fg(glob_pwr_fg).bg(glob_bg),
+            ),
             Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                checkbox,
+                Style::default()
+                    .fg(checkbox_color)
+                    .bg(glob_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
             Span::styled(bar, Style::default().fg(BAR_FOCUSED).bg(glob_bg)),
             Span::styled(&vol_str, Style::default().fg(Color::White).bg(glob_bg)),
@@ -828,9 +1202,18 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     } else {
         Line::from(vec![
             Span::raw(" "),
-            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
+            Span::styled(
+                format!(" {} ", pwr_icon),
+                Style::default().fg(glob_pwr_fg).bg(glob_bg),
+            ),
             Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                checkbox,
+                Style::default()
+                    .fg(checkbox_color)
+                    .bg(glob_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
             Span::styled(bar, Style::default().fg(BAR_UNFOCUSED).bg(glob_bg)),
             Span::styled(&vol_str, Style::default().fg(mid).bg(glob_bg)),
@@ -859,9 +1242,13 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     };
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
-        if vis_i >= total { break; }
+        if vis_i >= total {
+            break;
+        }
         let y = list_area.y + item_i as u16;
-        if y >= list_area.y + list_area.height { break; }
+        if y >= list_area.y + list_area.height {
+            break;
+        }
 
         let p = &app.players[vis_i];
         let active = app.active_player.as_deref() == Some(p.playerid.as_str());
@@ -870,30 +1257,54 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let vol = app.player_volumes.get(&p.playerid).copied().unwrap_or(0);
 
         // Use shared bar/name widths so all rows (global + per-player) are aligned.
-        let player_vol_icon = if vol == 0 { mute_icon_str } else { vol_icon_str };
+        let player_vol_icon = if vol == 0 {
+            mute_icon_str
+        } else {
+            vol_icon_str
+        };
         let vol_str = format!(" {}{:3}%", player_vol_icon, vol);
         let bar_w = player_bar_w;
         let name_col_w = player_name_col_w;
-        let filled = if bar_w > 0 { (vol as usize * bar_w) / 100 } else { 0 };
-        let bar_str = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
+        let filled = if bar_w > 0 {
+            (vol as usize * bar_w) / 100
+        } else {
+            0
+        };
+        let bar_str = format!(
+            "{}{}",
+            "█".repeat(filled),
+            "░".repeat(bar_w.saturating_sub(filled))
+        );
 
         let marker = if active { "● " } else { "○ " };
         let name_raw = format!("{}{}", marker, p.name);
 
         // Pad/truncate to name_col_w display chars.
         let name_padded = if name_raw.chars().count() > name_col_w {
-            let s: String = name_raw.chars().take(name_col_w.saturating_sub(1)).collect();
+            let s: String = name_raw
+                .chars()
+                .take(name_col_w.saturating_sub(1))
+                .collect();
             format!("{}…", s)
         } else {
             format!("{:<width$}", name_raw, width = name_col_w)
         };
         let label = format!(" {}  ", name_padded);
 
-        let row_bg = if is_sel { Color::Rgb(45, 100, 170) } else { Color::Reset };
-        let name_fg = if is_sel { Color::Rgb(220, 235, 255) }
-                      else if active { Color::Green }
-                      else if powered { Color::White }
-                      else { mid };
+        let row_bg = if is_sel {
+            Color::Rgb(45, 100, 170)
+        } else {
+            Color::Reset
+        };
+        let name_fg = if is_sel {
+            Color::Rgb(220, 235, 255)
+        } else if active {
+            Color::Green
+        } else if powered {
+            Color::White
+        } else {
+            mid
+        };
         let bar_color = if is_sel { BAR_FOCUSED } else { BAR_UNFOCUSED };
         let vol_fg = if is_sel { Color::White } else { mid };
 
@@ -905,7 +1316,8 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         };
 
         // Sync button — bright accent if player is currently in a sync group, dim otherwise
-        let is_synced = app.player_sync_groups
+        let is_synced = app
+            .player_sync_groups
             .get(&p.playerid)
             .map(|v| !v.is_empty())
             .unwrap_or(false);
@@ -918,9 +1330,12 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let line = if is_sel {
             Line::from(vec![
                 pill_endcap_left(pill_bg, app.use_nerd_icons),
-                Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
-                Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
-                Span::styled(" ⇄ ",   Style::default().fg(sync_fg).bg(row_bg)),
+                Span::styled(
+                    format!(" {} ", pwr_icon),
+                    Style::default().fg(player_pwr_fg).bg(row_bg),
+                ),
+                Span::styled(label, Style::default().fg(name_fg).bg(row_bg)),
+                Span::styled(" ⇄ ", Style::default().fg(sync_fg).bg(row_bg)),
                 Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
                 Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
                 pill_endcap_right(pill_bg, app.use_nerd_icons),
@@ -928,14 +1343,20 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         } else {
             Line::from(vec![
                 Span::raw(" "),
-                Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
-                Span::styled(label,   Style::default().fg(name_fg).bg(row_bg)),
-                Span::styled(" ⇄ ",   Style::default().fg(sync_fg).bg(row_bg)),
+                Span::styled(
+                    format!(" {} ", pwr_icon),
+                    Style::default().fg(player_pwr_fg).bg(row_bg),
+                ),
+                Span::styled(label, Style::default().fg(name_fg).bg(row_bg)),
+                Span::styled(" ⇄ ", Style::default().fg(sync_fg).bg(row_bg)),
                 Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
                 Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
             ])
         };
-        f.render_widget(Paragraph::new(line), Rect::new(list_area.x, y, list_area.width, 1));
+        f.render_widget(
+            Paragraph::new(line),
+            Rect::new(list_area.x, y, list_area.width, 1),
+        );
     }
 
     if total > visible {
@@ -958,82 +1379,156 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     }
 }
 
-fn draw_radio(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+/// Shared renderer for the Radio / Apps / Favourites browse views. They differ only in their
+/// data source, breadcrumb title, and whether playable item names are accent-tinted (Radio) or
+/// rendered white (Apps/Favourites).
+#[allow(clippy::too_many_arguments)]
+fn draw_browse_list(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    items: &[crate::api::RadioItem],
+    title: &str,
+    tint_playable_name: bool,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+) {
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
-    let breadcrumb = breadcrumb_str(app.radio_nav_stack.iter().map(|n| n.title.as_str()), &app.radio_title);
-    let title = format!(" {} ", breadcrumb);
-    let items = app.radio_items.iter().map(|item| {
-        let (icon, fg): (&str, Color) = match (app.use_nerd_icons, item.is_playable()) {
-            (true,  true)  => ("\u{F130} ", focus_border_color(app.effective_accent())),  // nf-fa-microphone
-            (true,  false) => ("\u{F07B} ", Color::White),                                 // nf-fa-folder
-            (false, true)  => ("▶ ", focus_border_color(app.effective_accent())),
-            (false, false) => ("▸ ", Color::White),
-        };
-        RowItem {
-            thumb_url: item.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(fg))),
-            line2: Line::from(Span::styled(
-                if item.is_playable() { "stream" } else { "folder" },
-                Style::default().fg(mid),
-            )),
-            duration: None,
-        }
-    }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
+    let accent = app.effective_accent();
+    let nerd = app.use_nerd_icons;
+    let row_items = items
+        .iter()
+        .map(|item| {
+            let (icon, icon_fg): (&str, Color) = match (nerd, item.is_playable()) {
+                (true, true) => ("\u{F130} ", focus_border_color(accent)), // nf-fa-microphone
+                (true, false) => ("\u{F07B} ", Color::White),              // nf-fa-folder
+                (false, true) => ("▶ ", focus_border_color(accent)),
+                (false, false) => ("▸ ", Color::White),
+            };
+            let name_fg = if tint_playable_name {
+                icon_fg
+            } else {
+                Color::White
+            };
+            RowItem {
+                thumb_url: item.artwork_url.clone(),
+                line1: Line::from(Span::styled(
+                    format!("{}{}", icon, item.name),
+                    Style::default().fg(name_fg),
+                )),
+                line2: Line::from(Span::styled(
+                    if item.is_playable() {
+                        "stream"
+                    } else {
+                        "folder"
+                    },
+                    Style::default().fg(mid),
+                )),
+                duration: None,
+            }
+        })
+        .collect();
+    draw_two_row_list(
+        f,
+        area,
+        title,
+        row_items,
+        app.main_selected,
+        focused,
+        app.is_loading,
+        state,
+        thumbnails,
+        accent,
+    );
 }
 
-fn draw_apps(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
-    let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.effective_accent());
-    let breadcrumb = breadcrumb_str(app.app_nav_stack.iter().map(|n| n.title.as_str()), &app.app_title);
-    let title = format!(" {} ", breadcrumb);
-    let items = app.app_items.iter().map(|item| {
-        let icon = match (app.use_nerd_icons, item.is_playable()) {
-            (true,  true)  => "\u{F130} ",  // nf-fa-microphone
-            (true,  false) => "\u{F07B} ",  // nf-fa-folder
-            (false, true)  => "▶ ",
-            (false, false) => "▸ ",
-        };
-        RowItem {
-            thumb_url: item.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(Color::White))),
-            line2: Line::from(Span::styled(
-                if item.is_playable() { "stream" } else { "folder" },
-                Style::default().fg(mid),
-            )),
-            duration: None,
-        }
-    }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
+fn draw_radio(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+) {
+    let title = format!(
+        " {} ",
+        breadcrumb_str(
+            app.radio_nav_stack.iter().map(|n| n.title.as_str()),
+            &app.radio_title
+        )
+    );
+    draw_browse_list(
+        f,
+        app,
+        area,
+        &app.radio_items,
+        &title,
+        true,
+        state,
+        thumbnails,
+    );
 }
 
-fn draw_favourites(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
-    let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.effective_accent());
-    let breadcrumb = breadcrumb_str(app.fav_nav_stack.iter().map(|n| n.title.as_str()), &app.fav_title);
-    let title = format!(" {} ", breadcrumb);
-    let items = app.fav_items.iter().map(|item| {
-        let icon = match (app.use_nerd_icons, item.is_playable()) {
-            (true,  true)  => "\u{F130} ",  // nf-fa-microphone
-            (true,  false) => "\u{F07B} ",  // nf-fa-folder
-            (false, true)  => "▶ ",
-            (false, false) => "▸ ",
-        };
-        RowItem {
-            thumb_url: item.artwork_url.clone(),
-            line1: Line::from(Span::styled(format!("{}{}", icon, item.name), Style::default().fg(Color::White))),
-            line2: Line::from(Span::styled(
-                if item.is_playable() { "stream" } else { "folder" },
-                Style::default().fg(mid),
-            )),
-            duration: None,
-        }
-    }).collect();
-    draw_two_row_list(f, area, &title, items, app.main_selected, focused, app.is_loading, state, thumbnails, app.effective_accent());
+fn draw_apps(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+) {
+    let title = format!(
+        " {} ",
+        breadcrumb_str(
+            app.app_nav_stack.iter().map(|n| n.title.as_str()),
+            &app.app_title
+        )
+    );
+    draw_browse_list(
+        f,
+        app,
+        area,
+        &app.app_items,
+        &title,
+        false,
+        state,
+        thumbnails,
+    );
 }
 
-fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>, base: &str) {
+fn draw_favourites(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+) {
+    let title = format!(
+        " {} ",
+        breadcrumb_str(
+            app.fav_nav_stack.iter().map(|n| n.title.as_str()),
+            &app.fav_title
+        )
+    );
+    draw_browse_list(
+        f,
+        app,
+        area,
+        &app.fav_items,
+        &title,
+        false,
+        state,
+        thumbnails,
+    );
+}
+
+fn draw_search(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+    base: &str,
+) {
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
 
@@ -1049,7 +1544,11 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(1), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
         .split(inner);
 
     // Search input box
@@ -1059,11 +1558,16 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
         Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
     let cursor = if app.search_input_active { "█" } else { "" };
-    let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" };  // nf-fa-search
+    let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" }; // nf-fa-search
     let input_text = format!(" {} {}{}", search_icon, app.search_query, cursor);
     let input = Paragraph::new(input_text)
         .style(Style::default().fg(Color::White))
-        .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(input_border_style));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(input_border_style),
+        );
     f.render_widget(input, chunks[0]);
 
     // Scope tab bar
@@ -1072,17 +1576,17 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
         let dim = unfocus_border_color(app.effective_accent());
         let tabs: [(&str, &str, SearchScope); 4] = if app.use_nerd_icons {
             [
-                ("\u{F001}", "My Music", SearchScope::MyMusic),  // nf-fa-music
-                ("\u{F130}", "Radios",   SearchScope::Radios),   // nf-fa-microphone
-                ("\u{F109}", "Apps",     SearchScope::Apps),     // nf-fa-laptop
-                ("\u{F002}", "All",      SearchScope::All),      // nf-fa-search
+                ("\u{F001}", "My Music", SearchScope::MyMusic), // nf-fa-music
+                ("\u{F130}", "Radios", SearchScope::Radios),    // nf-fa-microphone
+                ("\u{F109}", "Apps", SearchScope::Apps),        // nf-fa-laptop
+                ("\u{F002}", "All", SearchScope::All),          // nf-fa-search
             ]
         } else {
             [
                 ("♪", "My Music", SearchScope::MyMusic),
-                ("○", "Radios",   SearchScope::Radios),
-                ("□", "Apps",     SearchScope::Apps),
-                ("*", "All",      SearchScope::All),
+                ("○", "Radios", SearchScope::Radios),
+                ("□", "Apps", SearchScope::Apps),
+                ("*", "All", SearchScope::All),
             ]
         };
         let mut spans: Vec<Span> = Vec::new();
@@ -1118,7 +1622,12 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             Paragraph::new(msg)
                 .style(Style::default().fg(mid))
                 .alignment(Alignment::Center),
-            Rect::new(results_area.x, results_area.y + results_area.height / 2, results_area.width, 1),
+            Rect::new(
+                results_area.x,
+                results_area.y + results_area.height / 2,
+                results_area.width,
+                1,
+            ),
         );
         return;
     }
@@ -1134,18 +1643,42 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
     let text_w = results_area.width.saturating_sub(THUMB_W + THUMB_SEP);
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
-        if vis_i >= total { break; }
+        if vis_i >= total {
+            break;
+        }
         let y = results_area.y + (item_i as u16) * 2;
-        if y + 1 >= results_area.y + results_area.height { break; }
+        if y + 1 >= results_area.y + results_area.height {
+            break;
+        }
 
         let is_sel = vis_i == selected;
-        let (s1, s2) = if is_sel { cursor_styles(results_focused) } else { (Style::default(), Style::default()) };
+        let (s1, s2) = if is_sel {
+            cursor_styles(results_focused)
+        } else {
+            (Style::default(), Style::default())
+        };
 
         let thumb_url = match &app.search_results[vis_i] {
-            SearchResultItem::Artist(a) => Some(format!("{}/music/{}/artist.jpg", base, value_id_str(&a.id))),
-            SearchResultItem::Album(alb) => Some(format!("{}/music/{}/cover.jpg", base, value_id_str(&alb.id))),
-            SearchResultItem::Track(t) => t.id.as_ref().map(|id| format!("{}/music/{}/cover.jpg", base, value_id_str(id))),
-            SearchResultItem::AppItem(item) | SearchResultItem::RadioItem(item) => item.artwork_url.clone(),
+            SearchResultItem::Artist(a) => Some(crate::utils::music_image_url(
+                base,
+                crate::utils::json_id_to_string(&a.id),
+                "artist.jpg",
+            )),
+            SearchResultItem::Album(alb) => Some(crate::utils::music_image_url(
+                base,
+                crate::utils::json_id_to_string(&alb.id),
+                "cover.jpg",
+            )),
+            SearchResultItem::Track(t) => t.id.as_ref().map(|id| {
+                crate::utils::music_image_url(
+                    base,
+                    crate::utils::json_id_to_string(id),
+                    "cover.jpg",
+                )
+            }),
+            SearchResultItem::AppItem(item) | SearchResultItem::RadioItem(item) => {
+                item.artwork_url.clone()
+            }
             SearchResultItem::Playlist(_) => None,
         };
         let thumb_rect = Rect::new(results_area.x, y, THUMB_W, 2);
@@ -1156,7 +1689,11 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             SearchResultItem::Artist(a) => (
                 Line::from(vec![
                     Span::styled(
-                        if app.use_nerd_icons { "\u{F007} " } else { "▸ " },  // nf-fa-user
+                        if app.use_nerd_icons {
+                            "\u{F007} "
+                        } else {
+                            "▸ "
+                        }, // nf-fa-user
                         Style::default().fg(focus_border_color(app.effective_accent())),
                     ),
                     Span::styled(a.artist.clone(), Style::default().fg(Color::White)),
@@ -1167,7 +1704,11 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             SearchResultItem::Album(alb) => (
                 Line::from(vec![
                     Span::styled(
-                        if app.use_nerd_icons { "\u{F025} " } else { "▸ " },  // nf-fa-headphones
+                        if app.use_nerd_icons {
+                            "\u{F025} "
+                        } else {
+                            "▸ "
+                        }, // nf-fa-headphones
                         Style::default().fg(focus_border_color(app.effective_accent())),
                     ),
                     Span::styled(alb.album.clone(), Style::default().fg(Color::White)),
@@ -1180,7 +1721,10 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             ),
             SearchResultItem::Track(t) => (
                 Line::from(vec![
-                    Span::styled("▶ ", Style::default().fg(focus_border_color(app.effective_accent()))),
+                    Span::styled(
+                        "▶ ",
+                        Style::default().fg(focus_border_color(app.effective_accent())),
+                    ),
                     Span::styled(t.title.clone(), Style::default().fg(Color::White)),
                 ]),
                 Line::from(Span::styled(
@@ -1253,7 +1797,8 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
             results_area.height,
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), results_focused);
+        let (track_style, thumb_style) =
+            scrollbar_accent_styles(app.effective_accent(), results_focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -1265,7 +1810,13 @@ fn draw_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thum
     }
 }
 
-fn draw_app_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, thumbnails: &mut HashMap<String, StatefulProtocol>) {
+fn draw_app_search(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+) {
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
     let accent = focus_border_color(app.effective_accent());
@@ -1295,12 +1846,21 @@ fn draw_app_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
     } else {
         Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
-    let cursor = if app.app_search_input_active { "█" } else { "" };
+    let cursor = if app.app_search_input_active {
+        "█"
+    } else {
+        ""
+    };
     let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" };
     let input_text = format!(" {} {}{}", search_icon, app.app_search_query, cursor);
     let input = Paragraph::new(input_text)
         .style(Style::default().fg(Color::White))
-        .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(input_border_style));
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(input_border_style),
+        );
     f.render_widget(input, chunks[0]);
 
     let results_area = chunks[1];
@@ -1317,7 +1877,12 @@ fn draw_app_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
             Paragraph::new(msg)
                 .style(Style::default().fg(mid))
                 .alignment(Alignment::Center),
-            Rect::new(results_area.x, results_area.y + results_area.height / 2, results_area.width, 1),
+            Rect::new(
+                results_area.x,
+                results_area.y + results_area.height / 2,
+                results_area.width,
+                1,
+            ),
         );
         return;
     }
@@ -1333,13 +1898,21 @@ fn draw_app_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
     let text_w = results_area.width.saturating_sub(THUMB_W + THUMB_SEP);
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
-        if vis_i >= total { break; }
+        if vis_i >= total {
+            break;
+        }
         let y = results_area.y + (item_i as u16) * 2;
-        if y + 1 >= results_area.y + results_area.height { break; }
+        if y + 1 >= results_area.y + results_area.height {
+            break;
+        }
 
         let item = &app.app_search_results[vis_i];
         let is_sel = vis_i == selected;
-        let (s1, s2) = if is_sel { cursor_styles(results_focused) } else { (Style::default(), Style::default()) };
+        let (s1, s2) = if is_sel {
+            cursor_styles(results_focused)
+        } else {
+            (Style::default(), Style::default())
+        };
 
         let thumb_url = item.artwork_url.clone();
         let thumb_rect = Rect::new(results_area.x, y, THUMB_W, 2);
@@ -1367,8 +1940,14 @@ fn draw_app_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
         ]);
         let line2 = Line::from(Span::styled(type_label, Style::default().fg(mid)));
 
-        f.render_widget(Paragraph::new(line1).style(s1), Rect::new(text_x, y, text_w, 1));
-        f.render_widget(Paragraph::new(line2).style(s2), Rect::new(text_x, y + 1, text_w, 1));
+        f.render_widget(
+            Paragraph::new(line1).style(s1),
+            Rect::new(text_x, y, text_w, 1),
+        );
+        f.render_widget(
+            Paragraph::new(line2).style(s2),
+            Rect::new(text_x, y + 1, text_w, 1),
+        );
     }
 
     if total > visible {
@@ -1379,7 +1958,8 @@ fn draw_app_search(f: &mut Frame, app: &App, area: Rect, state: &mut ListState, 
             results_area.height,
         );
         let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), results_focused);
+        let (track_style, thumb_style) =
+            scrollbar_accent_styles(app.effective_accent(), results_focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -1416,47 +1996,52 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Length(col_w), Constraint::Min(1)])
         .split(inner);
 
-    let header = |s: &'static str| Line::from(Span::styled(s, Style::default().fg(accent).add_modifier(Modifier::BOLD)));
+    let header = |s: &'static str| {
+        Line::from(Span::styled(
+            s,
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ))
+    };
 
     let left: Vec<Line> = vec![
         header("Navigation"),
-        shortcut("j / ↓",        "Move down",                          mid),
-        shortcut("k / ↑",        "Move up",                            mid),
-        shortcut("PgDn",         "Jump down 10 items",                 mid),
-        shortcut("PgUp",         "Jump up 10 items",                   mid),
-        shortcut("Home",         "Jump to top",                        mid),
-        shortcut("End",          "Jump to bottom",                     mid),
-        shortcut("Enter / l / →", "Select / enter / focus main",       mid),
-        shortcut("Esc / h / ←",  "Back / focus sidebar",               mid),
-        shortcut("1–8",          "Jump to sidebar item directly",      mid),
+        shortcut("j / ↓", "Move down", mid),
+        shortcut("k / ↑", "Move up", mid),
+        shortcut("PgDn", "Jump down 10 items", mid),
+        shortcut("PgUp", "Jump up 10 items", mid),
+        shortcut("Home", "Jump to top", mid),
+        shortcut("End", "Jump to bottom", mid),
+        shortcut("Enter / l / →", "Select / enter / focus main", mid),
+        shortcut("Esc / h / ←", "Back / focus sidebar", mid),
+        shortcut("1–8", "Jump to sidebar item directly", mid),
         Line::from(""),
         header("Playback"),
-        shortcut("Space",  "Play / pause",                              mid),
-        shortcut("n",      "Next track",                                mid),
-        shortcut("p",      "Previous track",                            mid),
-        shortcut("s",      "Toggle shuffle",                            mid),
-        shortcut("r",      "Cycle repeat (off → single → queue → ∞)",  mid),
-        shortcut("+ / =",  "Volume up",                                 mid),
-        shortcut("-",      "Volume down",                               mid),
+        shortcut("Space", "Play / pause", mid),
+        shortcut("n", "Next track", mid),
+        shortcut("p", "Previous track", mid),
+        shortcut("s", "Toggle shuffle", mid),
+        shortcut("r", "Cycle repeat (off → single → queue → ∞)", mid),
+        shortcut("+ / =", "Volume up", mid),
+        shortcut("-", "Volume down", mid),
     ];
 
     let right: Vec<Line> = vec![
         header("Library & Queue"),
-        shortcut("a",        "Add selected item to queue",              mid),
-        shortcut("d / Del",  "Remove selected item from queue",         mid),
-        shortcut("x",        "Clear queue",                             mid),
+        shortcut("a", "Add selected item to queue", mid),
+        shortcut("d / Del", "Remove selected item from queue", mid),
+        shortcut("x", "Clear queue", mid),
         Line::from(""),
         header("Search"),
-        shortcut("[ / ]",    "Cycle search scope (prev / next)",        mid),
+        shortcut("[ / ]", "Cycle search scope (prev / next)", mid),
         Line::from(""),
         header("Players"),
-        shortcut("t",        "Toggle player power",                     mid),
+        shortcut("t", "Toggle player power", mid),
         shortcut("Enter (on Global vol)", "Toggle global volume control", mid),
         Line::from(""),
         header("App"),
-        shortcut("`",        "Toggle Big Art Mode",                     mid),
-        shortcut("c",        "Open server configuration",               mid),
-        shortcut("q / Ctrl-c", "Quit",                                  mid),
+        shortcut("`", "Toggle Big Art Mode", mid),
+        shortcut("c", "Open server configuration", mid),
+        shortcut("q / Ctrl-c", "Quit", mid),
     ];
 
     let content_lines = left.len().max(right.len()) as u16;
@@ -1514,7 +2099,9 @@ fn hint_line(pairs: &[(&str, &str)], accent: Option<[u8; 3]>) -> Line<'static> {
 }
 
 fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut StatefulProtocol>) {
-    let player_name = app.active_player.as_ref()
+    let player_name = app
+        .active_player
+        .as_ref()
         .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "Now Playing".to_string());
@@ -1523,7 +2110,11 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     let player_icon = icon_player_dot(app.use_nerd_icons);
     let title_line = if let Some(np) = &app.now_playing {
         let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
-        let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
+        let globe = if app.global_volume_control {
+            icon_globe(app.use_nerd_icons)
+        } else {
+            ""
+        };
         Line::from(vec![
             Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
             Span::styled(player_name, Style::default().fg(Color::White)),
@@ -1535,7 +2126,10 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     } else {
         Line::from(vec![
             Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
-            Span::styled(format!("{} ", player_name), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{} ", player_name),
+                Style::default().fg(Color::White),
+            ),
         ])
     };
     let block = Block::default()
@@ -1559,7 +2153,11 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     // Split: art column | 1-col gap | info column
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(art_col_w), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(art_col_w),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
         .split(inner);
 
     if let Some(proto) = album_art {
@@ -1607,29 +2205,37 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let mid = mid_accent_color(app.effective_accent());
 
     let play_icon = if app.use_nerd_icons {
-        if np.is_playing { "\u{F04B}" } else { "\u{F04C}" }  // nf-fa-play / nf-fa-pause
+        if np.is_playing {
+            "\u{F04B}"
+        } else {
+            "\u{F04C}"
+        } // nf-fa-play / nf-fa-pause
     } else if np.is_playing {
         "▶"
     } else {
         "⏸"
     };
     let shuffle_icon = if np.shuffle > 0 {
-        if app.use_nerd_icons { " \u{F074}" } else { " ⇌" }  // nf-fa-random
+        if app.use_nerd_icons {
+            " \u{F074}"
+        } else {
+            " ⇌"
+        } // nf-fa-random
     } else {
         ""
     };
     let repeat_icon = if app.use_nerd_icons {
         match np.repeat {
-            1 => " \u{F01E}1",  // repeat single track
-            2 => " \u{F01E}",   // repeat queue
-            3 => " \u{221E}",   // don't stop the music
+            1 => " \u{F01E}1", // repeat single track
+            2 => " \u{F01E}",  // repeat queue
+            3 => " \u{221E}",  // don't stop the music
             _ => "",
         }
     } else {
         match np.repeat {
-            1 => " ↺1",  // repeat single track
-            2 => " ↺",   // repeat queue
-            3 => " ∞",   // don't stop the music
+            1 => " ↺1", // repeat single track
+            2 => " ↺",  // repeat queue
+            3 => " ∞",  // don't stop the music
             _ => "",
         }
     };
@@ -1641,14 +2247,26 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let title_line = Line::from(vec![
         Span::raw(indent),
         Span::styled(format!("{} ", play_icon), Style::default().fg(Color::Green)),
-        Span::styled(np.title.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            np.title.clone(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(queue_pos, Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{}{}", shuffle_icon, repeat_icon), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{}{}", shuffle_icon, repeat_icon),
+            Style::default().fg(Color::DarkGray),
+        ),
     ]);
     f.render_widget(Paragraph::new(title_line), rows[0]);
 
     let accent = focus_border_color(app.effective_accent());
-    let artist_label = if app.use_nerd_icons { "  \u{F007} " } else { "  by " };  // nf-fa-user
+    let artist_label = if app.use_nerd_icons {
+        "  \u{F007} "
+    } else {
+        "  by "
+    }; // nf-fa-user
     let artist_line = Line::from(vec![
         Span::raw(indent),
         Span::styled(artist_label, Style::default().fg(mid)),
@@ -1660,23 +2278,43 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         Some(y) => format!("  {} ({})", np.album, y),
         None => format!("  {}", np.album),
     };
-    let album_label = if app.use_nerd_icons { "  \u{F025} " } else { "  from " };  // nf-fa-headphones
+    let album_label = if app.use_nerd_icons {
+        "  \u{F025} "
+    } else {
+        "  from "
+    }; // nf-fa-headphones
     let album_line = Line::from(vec![
         Span::raw(indent),
         Span::styled(album_label, Style::default().fg(mid)),
-        Span::styled(album_text.trim_start().to_string(), Style::default().fg(accent)),
+        Span::styled(
+            album_text.trim_start().to_string(),
+            Style::default().fg(accent),
+        ),
     ]);
     f.render_widget(Paragraph::new(album_line), rows[2]);
 
     if bigscreen {
-        let player_name = app.active_player.as_ref()
+        let player_name = app
+            .active_player
+            .as_ref()
             .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
             .map(|p| p.name.as_str())
             .unwrap_or("—");
         let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
-        let globe_icon = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
+        let globe_icon = if app.global_volume_control {
+            icon_globe(app.use_nerd_icons)
+        } else {
+            ""
+        };
         let player_vol_line = Line::from(vec![
-            Span::styled(if app.use_nerd_icons { " \u{f075a} " } else { " ▶ " }, Style::default().fg(mid)),
+            Span::styled(
+                if app.use_nerd_icons {
+                    " \u{f075a} "
+                } else {
+                    " ▶ "
+                },
+                Style::default().fg(mid),
+            ),
             Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
             Span::styled(format!("  {} ", vol_icon), Style::default().fg(mid)),
             Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
@@ -1691,35 +2329,58 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         let ctrl_x = ctrl.x + if bigscreen { 1 } else { 0 };
         let ctrl_max_x = ctrl.x + ctrl.width;
         let play_pause_icon = if app.use_nerd_icons {
-            if np.is_playing { "\u{F04C}" } else { "\u{F04B}" }  // nf-fa-pause / nf-fa-play
+            if np.is_playing {
+                "\u{F04C}"
+            } else {
+                "\u{F04B}"
+            } // nf-fa-pause / nf-fa-play
         } else if np.is_playing {
             "‖"
         } else {
             "▶"
         };
-        let prev_icon = if app.use_nerd_icons { "\u{F048}" } else { "«" };  // nf-fa-step-backward
-        let stop_icon = if app.use_nerd_icons { "\u{F04D}" } else { "■" };  // nf-fa-stop
-        let next_icon = if app.use_nerd_icons { "\u{F051}" } else { "»" };  // nf-fa-step-forward
+        let prev_icon = if app.use_nerd_icons { "\u{F048}" } else { "«" }; // nf-fa-step-backward
+        let stop_icon = if app.use_nerd_icons {
+            "\u{F04D}"
+        } else {
+            "■"
+        }; // nf-fa-stop
+        let next_icon = if app.use_nerd_icons { "\u{F051}" } else { "»" }; // nf-fa-step-forward
         let btn_w: u16 = 3;
         let gap: u16 = 1;
         let sep: u16 = 2;
         let media_icons = [prev_icon, play_pause_icon, stop_icon, next_icon];
         for (i, icon) in media_icons.iter().enumerate() {
             let x = ctrl_x + (i as u16) * (btn_w + gap);
-            if x + btn_w > ctrl_max_x { break; }
+            if x + btn_w > ctrl_max_x {
+                break;
+            }
             f.render_widget(
-                Paragraph::new(format!(" {} ", icon))
-                    .style(Style::default().fg(focus_border_color(app.effective_accent())).bg(btn_bg_color(app.effective_accent()))),
+                Paragraph::new(format!(" {} ", icon)).style(
+                    Style::default()
+                        .fg(focus_border_color(app.effective_accent()))
+                        .bg(btn_bg_color(app.effective_accent())),
+                ),
                 Rect::new(x, ctrl.y, btn_w, 1),
             );
         }
-        let shuf_icon = if app.use_nerd_icons { "\u{F074}" } else { "⇄" };  // nf-fa-random
+        let shuf_icon = if app.use_nerd_icons {
+            "\u{F074}"
+        } else {
+            "⇄"
+        }; // nf-fa-random
         let shuffle_x = ctrl_x + 4 * (btn_w + gap) + sep;
         if shuffle_x + btn_w <= ctrl_max_x {
             let (sfg, sbg) = if np.shuffle > 0 {
-                (focus_border_color(app.effective_accent()), btn_active_bg_color(app.effective_accent()))
+                (
+                    focus_border_color(app.effective_accent()),
+                    btn_active_bg_color(app.effective_accent()),
+                )
             } else {
-                (btn_dim_color(app.effective_accent()), btn_bg_color(app.effective_accent()))
+                (
+                    btn_dim_color(app.effective_accent()),
+                    btn_bg_color(app.effective_accent()),
+                )
             };
             f.render_widget(
                 Paragraph::new(format!(" {} ", shuf_icon)).style(Style::default().fg(sfg).bg(sbg)),
@@ -1732,12 +2393,20 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 1 => (
                     focus_border_color(app.effective_accent()),
                     btn_active_bg_color(app.effective_accent()),
-                    if app.use_nerd_icons { " \u{F01E}1".to_string() } else { " ↺1".to_string() },
+                    if app.use_nerd_icons {
+                        " \u{F01E}1".to_string()
+                    } else {
+                        " ↺1".to_string()
+                    },
                 ),
                 2 => (
                     focus_border_color(app.effective_accent()),
                     btn_active_bg_color(app.effective_accent()),
-                    if app.use_nerd_icons { " \u{F01E} ".to_string() } else { " ↺ ".to_string() },
+                    if app.use_nerd_icons {
+                        " \u{F01E} ".to_string()
+                    } else {
+                        " ↺ ".to_string()
+                    },
                 ),
                 3 => (
                     focus_border_color(app.effective_accent()),
@@ -1747,7 +2416,11 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 _ => (
                     btn_dim_color(app.effective_accent()),
                     btn_bg_color(app.effective_accent()),
-                    if app.use_nerd_icons { " \u{F01E} ".to_string() } else { " ↺ ".to_string() },
+                    if app.use_nerd_icons {
+                        " \u{F01E} ".to_string()
+                    } else {
+                        " ↺ ".to_string()
+                    },
                 ),
             };
             f.render_widget(
@@ -1757,19 +2430,29 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         }
         let vol_down_x = repeat_x + btn_w + sep;
         if vol_down_x + btn_w <= ctrl_max_x {
-            let vol_down_icon = if app.use_nerd_icons { "\u{F027}" } else { "−" };  // nf-fa-volume-down
+            let vol_down_icon = if app.use_nerd_icons {
+                "\u{F027}"
+            } else {
+                "−"
+            }; // nf-fa-volume-down
             f.render_widget(
-                Paragraph::new(format!(" {} ", vol_down_icon))
-                    .style(Style::default().fg(focus_border_color(app.effective_accent())).bg(btn_bg_color(app.effective_accent()))),
+                Paragraph::new(format!(" {} ", vol_down_icon)).style(
+                    Style::default()
+                        .fg(focus_border_color(app.effective_accent()))
+                        .bg(btn_bg_color(app.effective_accent())),
+                ),
                 Rect::new(vol_down_x, ctrl.y, btn_w, 1),
             );
         }
         let vol_up_x = vol_down_x + btn_w + gap;
         if vol_up_x + btn_w <= ctrl_max_x {
-            let vol_up_icon = if app.use_nerd_icons { "\u{F028}" } else { "+" };  // nf-fa-volume-up
+            let vol_up_icon = if app.use_nerd_icons { "\u{F028}" } else { "+" }; // nf-fa-volume-up
             f.render_widget(
-                Paragraph::new(format!(" {} ", vol_up_icon))
-                    .style(Style::default().fg(focus_border_color(app.effective_accent())).bg(btn_bg_color(app.effective_accent()))),
+                Paragraph::new(format!(" {} ", vol_up_icon)).style(
+                    Style::default()
+                        .fg(focus_border_color(app.effective_accent()))
+                        .bg(btn_bg_color(app.effective_accent())),
+                ),
                 Rect::new(vol_up_x, ctrl.y, btn_w, 1),
             );
         }
@@ -1824,11 +2507,16 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         Span::styled(" ".repeat(pure_unfilled), Style::default().bg(track_color)),
         Span::styled(
             over_filled_text,
-            Style::default().bg(accent).fg(Color::Black).add_modifier(Modifier::BOLD),
+            Style::default()
+                .bg(accent)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             over_unfilled_text,
-            Style::default().bg(track_color).fg(Color::Rgb(210, 215, 225)),
+            Style::default()
+                .bg(track_color)
+                .fg(Color::Rgb(210, 215, 225)),
         ),
         pill_endcap_right(right_cap_color, app.use_nerd_icons),
     ]);
@@ -1925,14 +2613,20 @@ fn draw_full_art_mode(
 
     let mid = mid_accent_color(app.effective_accent());
     let accent = focus_border_color(app.effective_accent());
-    let player_name = app.active_player.as_ref()
+    let player_name = app
+        .active_player
+        .as_ref()
         .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "—".to_string());
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
     let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
     let player_icon = icon_player_dot(app.use_nerd_icons);
-    let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
+    let globe = if app.global_volume_control {
+        icon_globe(app.use_nerd_icons)
+    } else {
+        ""
+    };
     let vol_str = format!("{}%", vol);
     let right_w = art_footer_player_width(app);
 
@@ -1941,10 +2635,17 @@ fn draw_full_art_mode(
         .constraints([Constraint::Min(1), Constraint::Length(right_w)])
         .split(footer_area);
 
-    let footer = hint_line(&[
-        ("`", "exit art"), ("Spc", "play/pause"), ("n/p", "next/prev"),
-        ("+/-", "vol"), ("c", "config"), ("q", "quit"),
-    ], app.effective_accent());
+    let footer = hint_line(
+        &[
+            ("`", "exit art"),
+            ("Spc", "play/pause"),
+            ("n/p", "next/prev"),
+            ("+/-", "vol"),
+            ("c", "config"),
+            ("q", "quit"),
+        ],
+        app.effective_accent(),
+    );
     f.render_widget(Paragraph::new(footer), footer_cols[0]);
 
     let right_line = Line::from(vec![
@@ -1967,7 +2668,12 @@ fn draw_disconnected_overlay(f: &mut Frame, area: Rect, state: &ConnectionState)
     let popup_area = centered_rect(40, 3, area);
     f.render_widget(Clear, popup_area);
     let p = Paragraph::new(msg)
-        .block(Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(Style::default().fg(Color::Red)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Red)),
+        )
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD));
     f.render_widget(p, popup_area);
@@ -1977,7 +2683,6 @@ fn breadcrumb_str<'a>(stack: impl Iterator<Item = &'a str>, current: &'a str) ->
     let parts: Vec<&str> = stack.chain(std::iter::once(current)).collect();
     parts.join(" › ")
 }
-
 
 #[allow(clippy::too_many_arguments)]
 fn draw_two_row_list(
@@ -2006,9 +2711,15 @@ fn draw_two_row_list(
 
     if items.is_empty() {
         state.select(None);
-        let msg = if is_loading { "  Loading..." } else { "(empty)" };
+        let msg = if is_loading {
+            "  Loading..."
+        } else {
+            "(empty)"
+        };
         f.render_widget(
-            Paragraph::new(msg).block(block).style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new(msg)
+                .block(block)
+                .style(Style::default().fg(Color::DarkGray)),
             area,
         );
         return;
@@ -2026,18 +2737,32 @@ fn draw_two_row_list(
     let text_w = inner.width.saturating_sub(THUMB_W + THUMB_SEP);
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
-        if vis_i >= items.len() { break; }
+        if vis_i >= items.len() {
+            break;
+        }
         let y = inner.y + (item_i as u16) * 2;
-        if y + 1 >= inner.y + inner.height { break; }
+        if y + 1 >= inner.y + inner.height {
+            break;
+        }
 
         let item = &items[vis_i];
         let is_sel = vis_i == selected;
 
-        let (s1, s2) = if is_sel { cursor_styles(focused) } else { (Style::default(), Style::default()) };
+        let (s1, s2) = if is_sel {
+            cursor_styles(focused)
+        } else {
+            (Style::default(), Style::default())
+        };
 
         let thumb_rect = Rect::new(inner.x, y, THUMB_W, 2);
         let thumb_bg = thumbnail_bg_color(is_sel, focused);
-        render_thumbnail(f, thumbnails, item.thumb_url.as_deref(), thumb_rect, thumb_bg);
+        render_thumbnail(
+            f,
+            thumbnails,
+            item.thumb_url.as_deref(),
+            thumb_rect,
+            thumb_bg,
+        );
 
         if let Some(dur) = item.duration.as_deref().filter(|d| !d.is_empty()) {
             let dur_w = dur.len() as u16;
@@ -2077,8 +2802,7 @@ fn draw_two_row_list(
             1,
             area.height.saturating_sub(2),
         );
-        let mut ss = ScrollbarState::new(items.len().saturating_sub(visible))
-            .position(offset);
+        let mut ss = ScrollbarState::new(items.len().saturating_sub(visible)).position(offset);
         let (track_style, thumb_style) = scrollbar_accent_styles(accent, focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
@@ -2094,16 +2818,13 @@ fn draw_two_row_list(
 /// Returns (track_style, thumb_style) for a scrollbar tinted from the accent color.
 /// Uses focus/unfocus border color to match the surrounding panel border.
 fn scrollbar_accent_styles(accent: Option<[u8; 3]>, focused: bool) -> (Style, Style) {
-    let color = if focused { focus_border_color(accent) } else { unfocus_border_color(accent) };
+    let color = if focused {
+        focus_border_color(accent)
+    } else {
+        unfocus_border_color(accent)
+    };
     let style = Style::default().fg(color);
     (style, style)
-}
-
-fn value_id_str(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
 }
 
 fn format_duration(secs: f64) -> String {
@@ -2190,7 +2911,12 @@ pub fn compute_full_art_control_rects(area: Rect, app: &App) -> [Rect; 8] {
             ctrl.x + 4 * (btn_w + gap) + sep + ((i - 4) as u16) * (btn_w + gap)
         } else {
             // volume down (6) and volume up (7) after a second sep gap
-            ctrl.x + 4 * (btn_w + gap) + sep + 2 * (btn_w + gap) + sep + ((i - 6) as u16) * (btn_w + gap)
+            ctrl.x
+                + 4 * (btn_w + gap)
+                + sep
+                + 2 * (btn_w + gap)
+                + sep
+                + ((i - 6) as u16) * (btn_w + gap)
         };
         Rect::new(x, ctrl.y, btn_w, 1)
     })
@@ -2204,18 +2930,27 @@ pub fn compute_full_art_footer_exit_rect(area: Rect) -> Rect {
 }
 
 fn art_footer_player_width(app: &App) -> u16 {
-    let player_name = app.active_player.as_ref()
+    let player_name = app
+        .active_player
+        .as_ref()
         .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "—".to_string());
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
     let vol_icon = icon_vol(app.use_nerd_icons);
     let player_icon = icon_player_dot(app.use_nerd_icons);
-    let globe = if app.global_volume_control { icon_globe(app.use_nerd_icons) } else { "" };
+    let globe = if app.global_volume_control {
+        icon_globe(app.use_nerd_icons)
+    } else {
+        ""
+    };
     let vol_str = format!("{}%", vol);
-    (1 + player_icon.chars().count() + 1
+    (1 + player_icon.chars().count()
+        + 1
         + player_name.chars().count()
-        + 2 + vol_icon.chars().count() + 1
+        + 2
+        + vol_icon.chars().count()
+        + 1
         + vol_str.chars().count()
         + globe.chars().count()
         + 1) as u16
@@ -2242,7 +2977,9 @@ pub fn compute_full_art_footer_vol_icon_rect(area: Rect, app: &App) -> Option<Re
     app.now_playing.as_ref()?;
     let player_rect = compute_full_art_footer_player_rect(area, app);
     let player_icon = icon_player_dot(app.use_nerd_icons);
-    let player_name = app.active_player.as_ref()
+    let player_name = app
+        .active_player
+        .as_ref()
         .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "—".to_string());
@@ -2253,7 +2990,9 @@ pub fn compute_full_art_footer_vol_icon_rect(area: Rect, app: &App) -> Option<Re
     let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
     let w = (vol_icon.chars().count() + 1) as u16; // icon + trailing space
     let x = player_rect.x + offset as u16;
-    if x + w > player_rect.x + player_rect.width { return None; }
+    if x + w > player_rect.x + player_rect.width {
+        return None;
+    }
     Some(Rect::new(x, player_rect.y, w, 1))
 }
 
@@ -2263,7 +3002,9 @@ pub fn compute_statusbar_vol_icon_rect(area: Rect, status_height: u16, app: &App
     app.now_playing.as_ref()?;
     let title_rect = compute_statusbar_title_area(area, status_height);
     let player_icon = icon_player_dot(app.use_nerd_icons);
-    let player_name = app.active_player.as_ref()
+    let player_name = app
+        .active_player
+        .as_ref()
         .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "Now Playing".to_string());
@@ -2274,7 +3015,9 @@ pub fn compute_statusbar_vol_icon_rect(area: Rect, status_height: u16, app: &App
     let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
     let w = (vol_icon.chars().count() + 1) as u16; // icon + trailing space
     let x = title_rect.x + 1 + offset as u16;
-    if x + w > title_rect.x + title_rect.width { return None; }
+    if x + w > title_rect.x + title_rect.width {
+        return None;
+    }
     Some(Rect::new(x, title_rect.y, w, 1))
 }
 
@@ -2297,7 +3040,11 @@ pub fn compute_full_art_image_rect(area: Rect, app: &App) -> Rect {
 pub fn compute_statusbar_title_area(area: Rect, status_height: u16) -> Rect {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(status_height),
+            Constraint::Length(1),
+        ])
         .split(area);
     Rect::new(outer[1].x, outer[1].y, outer[1].width, 1)
 }
@@ -2306,7 +3053,11 @@ pub fn compute_statusbar_title_area(area: Rect, status_height: u16) -> Rect {
 pub fn compute_statusbar_art_rect(area: Rect, status_height: u16, art_col_w: u16) -> Rect {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(status_height),
+            Constraint::Length(1),
+        ])
         .split(area);
     let status_inner = Rect::new(
         outer[1].x + 1,
@@ -2314,14 +3065,23 @@ pub fn compute_statusbar_art_rect(area: Rect, status_height: u16, art_col_w: u16
         outer[1].width.saturating_sub(2),
         outer[1].height.saturating_sub(2),
     );
-    Rect::new(status_inner.x, status_inner.y, art_col_w.min(status_inner.width), status_inner.height)
+    Rect::new(
+        status_inner.x,
+        status_inner.y,
+        art_col_w.min(status_inner.width),
+        status_inner.height,
+    )
 }
 
 /// Returns the rect for the song title row in the Now Playing status bar info column.
 pub fn compute_statusbar_np_title_rect(area: Rect, status_height: u16, art_col_w: u16) -> Rect {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(status_height), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(status_height),
+            Constraint::Length(1),
+        ])
         .split(area);
     let status_inner = Rect::new(
         outer[1].x + 1,
@@ -2331,7 +3091,11 @@ pub fn compute_statusbar_np_title_rect(area: Rect, status_height: u16, art_col_w
     );
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(art_col_w), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(art_col_w),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
         .split(status_inner);
     Rect::new(cols[2].x, cols[2].y, cols[2].width, 1)
 }
@@ -2341,7 +3105,9 @@ pub fn compute_context_menu_rect(area: Rect, option_count: usize) -> Rect {
 }
 
 fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
-    let Some(menu) = &app.context_menu else { return };
+    let Some(menu) = &app.context_menu else {
+        return;
+    };
 
     let popup = compute_context_menu_rect(area, menu.option_count());
     f.render_widget(Clear, popup);
@@ -2360,19 +3126,32 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
 
     let options = menu.options();
     let last = options.len() - 1;
-    let items: Vec<ListItem> = options.iter().enumerate().map(|(i, o)| {
-        if i == menu.selected {
-            ListItem::new(Line::from(vec![
-                pill_endcap_left(pill_bg, app.use_nerd_icons),
-                Span::styled(format!(" {} ", o), Style::default().fg(pill_fg).add_modifier(Modifier::BOLD).bg(pill_bg)),
-                pill_endcap_right(pill_bg, app.use_nerd_icons),
-            ]))
-        } else if i == last {
-            ListItem::new(Line::from(Span::styled(format!("  {}", o), Style::default().fg(Color::DarkGray))))
-        } else {
-            ListItem::new(Line::from(Span::raw(format!("  {}", o))))
-        }
-    }).collect();
+    let items: Vec<ListItem> = options
+        .iter()
+        .enumerate()
+        .map(|(i, o)| {
+            if i == menu.selected {
+                ListItem::new(Line::from(vec![
+                    pill_endcap_left(pill_bg, app.use_nerd_icons),
+                    Span::styled(
+                        format!(" {} ", o),
+                        Style::default()
+                            .fg(pill_fg)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(pill_bg),
+                    ),
+                    pill_endcap_right(pill_bg, app.use_nerd_icons),
+                ]))
+            } else if i == last {
+                ListItem::new(Line::from(Span::styled(
+                    format!("  {}", o),
+                    Style::default().fg(Color::DarkGray),
+                )))
+            } else {
+                ListItem::new(Line::from(Span::raw(format!("  {}", o))))
+            }
+        })
+        .collect();
 
     let mut state = ListState::default();
     state.select(Some(menu.selected));
@@ -2397,19 +3176,37 @@ pub fn compute_config_modal_rects(area: Rect) -> (Rect, [Rect; 9]) {
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
     // row layout: [pad, host, port, username, password, divider, nerd, auto_discover, broadcast_mask, disable_auto_colors, image_protocol, error, spacer, help]
-    let host_rect          = Rect::new(inner_x, inner_y + 1, inner_w, 1);
-    let port_rect          = Rect::new(inner_x, inner_y + 2, inner_w, 1);
-    let user_rect          = Rect::new(inner_x, inner_y + 3, inner_w, 1);
-    let pass_rect          = Rect::new(inner_x, inner_y + 4, inner_w, 1);
-    let nerd_rect          = Rect::new(inner_x, inner_y + 6, inner_w, 1);
-    let auto_rect          = Rect::new(inner_x, inner_y + 7, inner_w, 1);
-    let mask_rect          = Rect::new(inner_x, inner_y + 8, inner_w, 1);
-    let no_colors_rect     = Rect::new(inner_x, inner_y + 9, inner_w, 1);
-    let img_proto_rect     = Rect::new(inner_x, inner_y + 10, inner_w, 1);
-    (popup, [host_rect, port_rect, user_rect, pass_rect, nerd_rect, auto_rect, mask_rect, no_colors_rect, img_proto_rect])
+    let host_rect = Rect::new(inner_x, inner_y + 1, inner_w, 1);
+    let port_rect = Rect::new(inner_x, inner_y + 2, inner_w, 1);
+    let user_rect = Rect::new(inner_x, inner_y + 3, inner_w, 1);
+    let pass_rect = Rect::new(inner_x, inner_y + 4, inner_w, 1);
+    let nerd_rect = Rect::new(inner_x, inner_y + 6, inner_w, 1);
+    let auto_rect = Rect::new(inner_x, inner_y + 7, inner_w, 1);
+    let mask_rect = Rect::new(inner_x, inner_y + 8, inner_w, 1);
+    let no_colors_rect = Rect::new(inner_x, inner_y + 9, inner_w, 1);
+    let img_proto_rect = Rect::new(inner_x, inner_y + 10, inner_w, 1);
+    (
+        popup,
+        [
+            host_rect,
+            port_rect,
+            user_rect,
+            pass_rect,
+            nerd_rect,
+            auto_rect,
+            mask_rect,
+            no_colors_rect,
+            img_proto_rect,
+        ],
+    )
 }
 
-fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize, selected_button: u8, accent: Option<[u8; 3]>) {
+fn draw_confirm_clear_queue(
+    f: &mut Frame,
+    queue_len: usize,
+    selected_button: u8,
+    accent: Option<[u8; 3]>,
+) {
     let area = f.area();
     let popup = centered_rect_abs(44, 7, area);
 
@@ -2440,9 +3237,12 @@ fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize, selected_button: u8
         .split(inner);
 
     let song_word = if queue_len == 1 { "song" } else { "songs" };
-    let msg = Paragraph::new(format!("Remove {} {} from the queue?", queue_len, song_word))
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::White));
+    let msg = Paragraph::new(format!(
+        "Remove {} {} from the queue?",
+        queue_len, song_word
+    ))
+    .alignment(Alignment::Center)
+    .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
     let btn_cols = Layout::default()
@@ -2462,11 +3262,15 @@ fn draw_confirm_clear_queue(f: &mut Frame, queue_len: usize, selected_button: u8
     };
 
     f.render_widget(
-        Paragraph::new("[ OK ]").alignment(Alignment::Center).style(ok_style),
+        Paragraph::new("[ OK ]")
+            .alignment(Alignment::Center)
+            .style(ok_style),
         btn_cols[0],
     );
     f.render_widget(
-        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        Paragraph::new("[ Cancel ]")
+            .alignment(Alignment::Center)
+            .style(cancel_style),
         btn_cols[1],
     );
 }
@@ -2533,9 +3337,21 @@ fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, ar
         let is_sel = !modal.focus_buttons && modal.list_selected == i;
 
         let checkbox = if checked { "[x]" } else { "[ ]" };
-        let check_fg = if checked { accent_color } else { Color::DarkGray };
-        let row_bg = if is_sel { Color::Rgb(45, 100, 170) } else { Color::Reset };
-        let name_fg = if is_sel { Color::Rgb(220, 235, 255) } else { Color::White };
+        let check_fg = if checked {
+            accent_color
+        } else {
+            Color::DarkGray
+        };
+        let row_bg = if is_sel {
+            Color::Rgb(45, 100, 170)
+        } else {
+            Color::Reset
+        };
+        let name_fg = if is_sel {
+            Color::Rgb(220, 235, 255)
+        } else {
+            Color::White
+        };
 
         let row_line = Line::from(vec![
             Span::styled(" ", Style::default().bg(row_bg)),
@@ -2565,11 +3381,15 @@ fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, ar
     };
 
     f.render_widget(
-        Paragraph::new("[ Synchronize ]").alignment(Alignment::Center).style(sync_style),
+        Paragraph::new("[ Synchronize ]")
+            .alignment(Alignment::Center)
+            .style(sync_style),
         btn_cols[0],
     );
     f.render_widget(
-        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        Paragraph::new("[ Cancel ]")
+            .alignment(Alignment::Center)
+            .style(cancel_style),
         btn_cols[1],
     );
 
@@ -2603,7 +3423,12 @@ pub fn compute_sync_modal_rects(area: Rect, n_players: usize) -> (Rect, Vec<Rect
     (popup, player_rects, [sync_rect, cancel_rect])
 }
 
-fn draw_confirm_delete_queue_item(f: &mut Frame, title: &str, selected_button: u8, accent: Option<[u8; 3]>) {
+fn draw_confirm_delete_queue_item(
+    f: &mut Frame,
+    title: &str,
+    selected_button: u8,
+    accent: Option<[u8; 3]>,
+) {
     let area = f.area();
     let popup = centered_rect_abs(54, 7, area);
 
@@ -2660,11 +3485,15 @@ fn draw_confirm_delete_queue_item(f: &mut Frame, title: &str, selected_button: u
     };
 
     f.render_widget(
-        Paragraph::new("[ OK ]").alignment(Alignment::Center).style(ok_style),
+        Paragraph::new("[ OK ]")
+            .alignment(Alignment::Center)
+            .style(ok_style),
         btn_cols[0],
     );
     f.render_widget(
-        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        Paragraph::new("[ Cancel ]")
+            .alignment(Alignment::Center)
+            .style(cancel_style),
         btn_cols[1],
     );
 }
@@ -2694,8 +3523,8 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     f.render_widget(Clear, popup);
 
     let accent_bright = focus_border_color(accent);
-    let accent_mid    = mid_accent_color(accent);
-    let accent_dim    = unfocus_border_color(accent);
+    let accent_mid = mid_accent_color(accent);
+    let accent_dim = unfocus_border_color(accent);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -2731,7 +3560,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     constraints.push(Constraint::Length(1)); // disable-auto-colors
     constraints.push(Constraint::Length(1)); // image-protocol
     constraints.push(Constraint::Length(1)); // error
-    constraints.push(Constraint::Min(0));    // spacer
+    constraints.push(Constraint::Min(0)); // spacer
     constraints.push(Constraint::Length(1)); // buttons
 
     let rows = Layout::default()
@@ -2740,19 +3569,19 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         .split(inner);
 
     // Row indices (static part)
-    let row_scan    = 9usize;
-    let row_colors  = 10 + n_servers;
-    let row_proto   = 11 + n_servers;
-    let row_error   = 12 + n_servers;
+    let row_scan = 9usize;
+    let row_colors = 10 + n_servers;
+    let row_proto = 11 + n_servers;
+    let row_error = 12 + n_servers;
     let row_buttons = 14 + n_servers;
 
     // Text input fields: (label, value, field_index)
     let pass_masked = "*".repeat(modal.password.len());
     let text_fields: &[(&str, &str, usize)] = &[
-        ("Host",     &modal.host,     0),
-        ("Port",     &modal.port,     1),
+        ("Host", &modal.host, 0),
+        ("Port", &modal.port, 1),
         ("Username", &modal.username, 2),
-        ("Password", &pass_masked,    3),
+        ("Password", &pass_masked, 3),
     ];
     for (i, (label, value, idx)) in text_fields.iter().enumerate() {
         let is_selected = modal.selected_field == *idx;
@@ -2761,7 +3590,9 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         let val_style = if is_editing {
             Style::default().fg(Color::Black).bg(accent_bright)
         } else if is_selected {
-            Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(accent_bright)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
@@ -2792,7 +3623,9 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     let render_toggle = |f: &mut Frame, row: Rect, label: &str, checked: bool, selected: bool| {
         let checkbox = if checked { "[x]" } else { "[ ]" };
         let val_style = if selected {
-            Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(accent_bright)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
@@ -2808,8 +3641,20 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         f.render_widget(Paragraph::new(line), row);
     };
 
-    render_toggle(f, rows[6], "Nerd icons",    modal.use_nerd_icons, modal.selected_field == 4);
-    render_toggle(f, rows[7], "Auto discover", modal.auto_discover,   modal.selected_field == 5);
+    render_toggle(
+        f,
+        rows[6],
+        "Nerd icons",
+        modal.use_nerd_icons,
+        modal.selected_field == 4,
+    );
+    render_toggle(
+        f,
+        rows[7],
+        "Auto discover",
+        modal.auto_discover,
+        modal.selected_field == 5,
+    );
 
     // Broadcast mask text field (field 6)
     {
@@ -2818,7 +3663,9 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         let val_style = if is_editing {
             Style::default().fg(Color::Black).bg(accent_bright)
         } else if is_selected {
-            Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(accent_bright)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
@@ -2837,18 +3684,27 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     // Scan button (field 7)
     {
         let is_selected = modal.selected_field == 7;
-        let no_results = modal.scan_attempted && !modal.is_scanning && modal.discovered_servers.is_empty();
+        let no_results =
+            modal.scan_attempted && !modal.is_scanning && modal.discovered_servers.is_empty();
         let (btn_text, btn_style) = if modal.is_scanning {
-            ("[ Scanning... ]", Style::default().fg(accent_dim).add_modifier(Modifier::DIM))
+            (
+                "[ Scanning... ]",
+                Style::default().fg(accent_dim).add_modifier(Modifier::DIM),
+            )
         } else if no_results {
             ("[ No servers found ]", Style::default().fg(accent_dim))
         } else if is_selected {
-            ("[ Scan Servers ]", Style::default().fg(Color::Black).bg(accent_bright).bold())
+            (
+                "[ Scan Servers ]",
+                Style::default().fg(Color::Black).bg(accent_bright).bold(),
+            )
         } else {
             ("[ Scan Servers ]", Style::default().fg(Color::White))
         };
         f.render_widget(
-            Paragraph::new(btn_text).alignment(Alignment::Center).style(btn_style),
+            Paragraph::new(btn_text)
+                .alignment(Alignment::Center)
+                .style(btn_style),
             rows[row_scan],
         );
     }
@@ -2860,7 +3716,9 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         let (prefix, ip_style, hint) = if is_selected {
             (
                 "  ▶ ",
-                Style::default().fg(accent_bright).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(accent_bright)
+                    .add_modifier(Modifier::BOLD),
                 "  (Enter to use)",
             )
         } else {
@@ -2879,16 +3737,22 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         f.render_widget(Paragraph::new(line), rows[10 + i]);
     }
 
-
-    render_toggle(f, rows[row_colors], "Disable auto colors", modal.disable_auto_colors,
-                  modal.field_kind(modal.selected_field) == FieldKind::ToggleColors);
+    render_toggle(
+        f,
+        rows[row_colors],
+        "Disable auto colors",
+        modal.disable_auto_colors,
+        modal.field_kind(modal.selected_field) == FieldKind::ToggleColors,
+    );
 
     // Image protocol selector: < protocol >
     {
         let is_selected = modal.field_kind(modal.selected_field) == FieldKind::SelectorProtocol;
         let proto_name = IMAGE_PROTOCOLS[modal.image_protocol_idx];
         let val_style = if is_selected {
-            Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(accent_bright)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
@@ -2930,11 +3794,15 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     };
 
     f.render_widget(
-        Paragraph::new("[ OK ]").alignment(Alignment::Center).style(ok_style),
+        Paragraph::new("[ OK ]")
+            .alignment(Alignment::Center)
+            .style(ok_style),
         btn_cols[0],
     );
     f.render_widget(
-        Paragraph::new("[ Cancel ]").alignment(Alignment::Center).style(cancel_style),
+        Paragraph::new("[ Cancel ]")
+            .alignment(Alignment::Center)
+            .style(cancel_style),
         btn_cols[1],
     );
 
@@ -2943,8 +3811,8 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     if modal.editing {
         let (label_width, row_y) = match modal.selected_field {
             f @ 0..=3 => (12u16, rows[f + 1].y),
-            6          => (14u16, rows[8].y),
-            _          => (0, 0),
+            6 => (14u16, rows[8].y),
+            _ => (0, 0),
         };
         if label_width > 0 {
             f.set_cursor_position((inner.x + label_width + modal.cursor_pos as u16, row_y));

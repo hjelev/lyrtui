@@ -45,7 +45,10 @@ pub enum MainView {
     /// In-app search within a specific plugin (e.g. Spotty).
     /// `item_id` is the opaque ID of the "New Search" entry — used to
     /// build the correct LMS XMLBrowser request (item_id:X search:query).
-    AppSearch { cmd: String, item_id: Option<String> },
+    AppSearch {
+        cmd: String,
+        item_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -234,12 +237,16 @@ pub struct SyncModal {
 
 impl ContextMenu {
     pub fn new(parent_add_label: Option<String>, parent_replace_label: Option<String>) -> Self {
-        Self { selected: 0, parent_add_label, parent_replace_label }
+        Self {
+            selected: 0,
+            parent_add_label,
+            parent_replace_label,
+        }
     }
 
     pub fn option_count(&self) -> usize {
-        let parent_count = self.parent_add_label.is_some() as usize
-            + self.parent_replace_label.is_some() as usize;
+        let parent_count =
+            self.parent_add_label.is_some() as usize + self.parent_replace_label.is_some() as usize;
         6 + parent_count
     }
 
@@ -282,7 +289,7 @@ pub struct App {
     pub radio_title: String,
 
     // Apps data
-    pub app_services: Vec<RadioItem>,  // top-level app list, never mutated during navigation
+    pub app_services: Vec<RadioItem>, // top-level app list, never mutated during navigation
     pub app_items: Vec<RadioItem>,
     pub app_nav_stack: Vec<RadioNav>,
     pub app_title: String,
@@ -352,7 +359,10 @@ pub struct App {
     pub is_loading: bool,
 
     pub help_scroll: u16,
-    /// Updated each frame by draw_help; used by handlers to clamp scrolling.
+    /// Visible line count of the Help panel, written by `draw_help` each frame and read by
+    /// handlers to clamp scrolling. This is a deliberate, isolated exception to the "ui.rs is
+    /// pure" rule: an interior-mutable measurement feedback (not state mutation), kept in a
+    /// `Cell` so `draw` can keep taking `&App`.
     pub help_visible_lines: Cell<u16>,
 
     /// Pixel dimensions of the current album art image (width, height).
@@ -457,11 +467,18 @@ impl App {
     }
 
     pub fn is_playing(&self) -> bool {
-        self.now_playing.as_ref().map(|n| n.is_playing).unwrap_or(false)
+        self.now_playing
+            .as_ref()
+            .map(|n| n.is_playing)
+            .unwrap_or(false)
     }
 
     pub fn effective_accent(&self) -> Option<[u8; 3]> {
-        if self.disable_auto_colors { None } else { self.accent_color }
+        if self.disable_auto_colors {
+            None
+        } else {
+            self.accent_color
+        }
     }
 }
 
@@ -483,7 +500,7 @@ pub enum AppMsg {
     PlaylistsLoaded(Vec<Playlist>),
     ArtworkLoaded(Vec<u8>),
     ThumbnailLoaded(String, image::DynamicImage), // url, decoded image
-    ThumbnailFailed(String),          // url
+    ThumbnailFailed(String),                      // url
     PlayerVolumesLoaded(HashMap<String, u8>),
     PlayerSyncGroupsLoaded(HashMap<String, Vec<String>>),
     StatusMsg(String),

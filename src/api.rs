@@ -1,17 +1,13 @@
-#![allow(dead_code)]
-
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::RwLock;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Player {
     pub playerid: String,
     pub name: String,
-    #[serde(rename = "isplaying")]
-    pub is_playing: u8,
     #[serde(default)]
     pub power: u8,
 }
@@ -30,8 +26,6 @@ pub struct PlayerDetail {
     #[serde(rename = "isplaying", default)]
     pub is_playing: u8,
     pub firmware: Option<String>,
-    #[serde(rename = "canpoweroff", default)]
-    pub can_power_off: u8,
     pub uuid: Option<String>,
 }
 
@@ -192,12 +186,14 @@ impl LmsClient {
     }
 
     pub async fn get_players(&self) -> Result<Vec<Player>> {
-        let result = self.rpc("", &[json!("players"), json!(0), json!(100)]).await?;
+        let mut result = self
+            .rpc("", &[json!("players"), json!(0), json!(100)])
+            .await?;
         let count = result["count"].as_u64().unwrap_or(0);
         if count == 0 {
             return Ok(vec![]);
         }
-        let players: Vec<Player> = serde_json::from_value(result["players_loop"].clone())?;
+        let players: Vec<Player> = serde_json::from_value(result["players_loop"].take())?;
         Ok(players)
     }
 
@@ -205,12 +201,7 @@ impl LmsClient {
         let result = self
             .rpc(
                 player_id,
-                &[
-                    json!("status"),
-                    json!("-"),
-                    json!(1),
-                    json!("tags:adltuKy"),
-                ],
+                &[json!("status"), json!("-"), json!(1), json!("tags:adltuKy")],
             )
             .await?;
 
@@ -221,27 +212,13 @@ impl LmsClient {
             .unwrap_or(json!({}));
 
         let base = self.server_base_url();
-        let artwork_url = if let Some(url) = track["artwork_url"].as_str().filter(|s| !s.is_empty()) {
-            // Relative URLs (e.g. /imageproxy/...) need the server base prepended.
-            if url.starts_with('/') {
-                Some(format!("{}{}", base, url))
-            } else {
-                Some(url.to_string())
-            }
-        } else {
-            // artwork_track_id (from K tag) may differ from the track's own id when LMS
-            // picks a representative cover from the album.
-            let cover_id = extract_id_str(&track["artwork_track_id"])
-                .or_else(|| extract_id_str(&track["id"]));
-            cover_id.map(|id| format!("{}/music/{}/cover.jpg", base, id))
-        };
+        let artwork_url = cover_url(&track, &base);
 
         Ok(NowPlaying {
             title: track["title"].as_str().unwrap_or("").to_string(),
             artist: track["artist"].as_str().unwrap_or("").to_string(),
             album: track["album"].as_str().unwrap_or("").to_string(),
-            year: track["year"].as_u64()
-                .or_else(|| track["year"].as_str().and_then(|s| s.parse().ok()))
+            year: as_u64_loose(&track["year"])
                 .filter(|&y| y > 0)
                 .map(|y| y as u32),
             duration: track["duration"].as_f64().unwrap_or(0.0),
@@ -251,42 +228,33 @@ impl LmsClient {
             shuffle: result["playlist shuffle"].as_u64().unwrap_or(0) as u8,
             repeat: result["playlist repeat"].as_u64().unwrap_or(0) as u8,
             artwork_url,
-            playlist_cur_index: result["playlist_cur_index"]
-                .as_u64()
-                .or_else(|| result["playlist_cur_index"].as_str().and_then(|s| s.parse().ok()))
-                .map(|i| i as usize),
-            playlist_tracks: result["playlist_tracks"]
-                .as_u64()
-                .or_else(|| result["playlist_tracks"].as_str().and_then(|s| s.parse().ok()))
-                .map(|i| i as usize),
+            playlist_cur_index: as_u64_loose(&result["playlist_cur_index"]).map(|i| i as usize),
+            playlist_tracks: as_u64_loose(&result["playlist_tracks"]).map(|i| i as usize),
             playlist_timestamp: result["playlist_timestamp"].as_f64().unwrap_or(0.0),
         })
     }
 
     pub async fn get_queue(&self, player_id: &str) -> Result<Vec<Track>> {
-        let result = self
-            .rpc(player_id, &[json!("status"), json!(0), json!(500), json!("tags:adltK")])
+        let mut result = self
+            .rpc(
+                player_id,
+                &[json!("status"), json!(0), json!(500), json!("tags:adltK")],
+            )
             .await?;
         let tracks = result["playlist_loop"]
-            .as_array()
-            .cloned()
+            .as_array_mut()
+            .map(std::mem::take)
             .unwrap_or_default();
         let base = self.server_base_url();
         Ok(tracks
             .into_iter()
             .map(|v| {
-                let id: Option<Value> = if v["id"].is_null() { None } else { Some(v["id"].clone()) };
-                let artwork_url = if let Some(url) = v["artwork_url"].as_str().filter(|s| !s.is_empty()) {
-                    if url.starts_with('/') {
-                        Some(format!("{}{}", base, url))
-                    } else {
-                        Some(url.to_string())
-                    }
+                let id: Option<Value> = if v["id"].is_null() {
+                    None
                 } else {
-                    let cover_id = extract_id_str(&v["artwork_track_id"])
-                        .or_else(|| id.as_ref().and_then(extract_id_str));
-                    cover_id.map(|id| format!("{}/music/{}/cover.jpg", base, id))
+                    Some(v["id"].clone())
                 };
+                let artwork_url = cover_url(&v, &base);
                 Track {
                     id,
                     title: v["title"].as_str().unwrap_or("Unknown").to_string(),
@@ -300,10 +268,12 @@ impl LmsClient {
     }
 
     pub async fn get_playlists(&self) -> Result<Vec<Playlist>> {
-        let result = self.rpc("", &[json!("playlists"), json!(0), json!(10000)]).await?;
+        let mut result = self
+            .rpc("", &[json!("playlists"), json!(0), json!(10000)])
+            .await?;
         let playlists: Vec<Playlist> = result["playlists_loop"]
-            .as_array()
-            .cloned()
+            .as_array_mut()
+            .map(std::mem::take)
             .unwrap_or_default()
             .into_iter()
             .filter_map(|v| {
@@ -316,20 +286,28 @@ impl LmsClient {
     }
 
     pub async fn get_artists(&self) -> Result<Vec<Artist>> {
-        let result = self.rpc("", &[json!("artists"), json!(0), json!(10000)]).await?;
-        let artists: Vec<Artist> = serde_json::from_value(
-            result["artists_loop"].clone(),
-        )
-        .unwrap_or_default();
+        let mut result = self
+            .rpc("", &[json!("artists"), json!(0), json!(10000)])
+            .await?;
+        let artists: Vec<Artist> =
+            serde_json::from_value(result["artists_loop"].take()).unwrap_or_default();
         Ok(artists)
     }
 
     pub async fn get_album_artists(&self) -> Result<Vec<Artist>> {
-        let result = self.rpc("", &[json!("artists"), json!(0), json!(10000), json!("role_id:ALBUMARTIST")]).await?;
-        let artists: Vec<Artist> = serde_json::from_value(
-            result["artists_loop"].clone(),
-        )
-        .unwrap_or_default();
+        let mut result = self
+            .rpc(
+                "",
+                &[
+                    json!("artists"),
+                    json!(0),
+                    json!(10000),
+                    json!("role_id:ALBUMARTIST"),
+                ],
+            )
+            .await?;
+        let artists: Vec<Artist> =
+            serde_json::from_value(result["artists_loop"].take()).unwrap_or_default();
         Ok(artists)
     }
 
@@ -338,25 +316,26 @@ impl LmsClient {
         if let Some(id) = artist_id {
             params.push(json!(format!("artist_id:{}", id)));
         }
-        let result = self.rpc("", &params).await?;
-        let albums: Vec<Album> = serde_json::from_value(
-            result["albums_loop"].clone(),
-        )
-        .unwrap_or_default();
+        let mut result = self.rpc("", &params).await?;
+        let albums: Vec<Album> =
+            serde_json::from_value(result["albums_loop"].take()).unwrap_or_default();
         Ok(albums)
     }
 
     pub async fn get_all_tracks(&self) -> Result<Vec<Track>> {
-        let result = self
-            .rpc("", &[json!("tracks"), json!(0), json!(10000), json!("tags:adlt")])
+        let mut result = self
+            .rpc(
+                "",
+                &[json!("tracks"), json!(0), json!(10000), json!("tags:adlt")],
+            )
             .await?;
         let tracks: Vec<Track> =
-            serde_json::from_value(result["titles_loop"].clone()).unwrap_or_default();
+            serde_json::from_value(result["titles_loop"].take()).unwrap_or_default();
         Ok(tracks)
     }
 
     pub async fn get_tracks(&self, album_id: &str) -> Result<Vec<Track>> {
-        let result = self
+        let mut result = self
             .rpc(
                 "",
                 &[
@@ -368,10 +347,8 @@ impl LmsClient {
                 ],
             )
             .await?;
-        let tracks: Vec<Track> = serde_json::from_value(
-            result["titles_loop"].clone(),
-        )
-        .unwrap_or_default();
+        let tracks: Vec<Track> =
+            serde_json::from_value(result["titles_loop"].take()).unwrap_or_default();
         Ok(tracks)
     }
 
@@ -392,49 +369,43 @@ impl LmsClient {
     }
 
     pub async fn next(&self, player_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("index"), json!("+1")]).await?;
+        self.rpc(player_id, &[json!("playlist"), json!("index"), json!("+1")])
+            .await?;
         Ok(())
     }
 
     pub async fn prev(&self, player_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("index"), json!("-1")]).await?;
+        self.rpc(player_id, &[json!("playlist"), json!("index"), json!("-1")])
+            .await?;
         Ok(())
     }
 
     pub async fn set_volume(&self, player_id: &str, volume: u8) -> Result<()> {
-        self.rpc(player_id, &[json!("mixer"), json!("volume"), json!(volume)]).await?;
+        self.rpc(player_id, &[json!("mixer"), json!("volume"), json!(volume)])
+            .await?;
         Ok(())
-    }
-
-    pub async fn get_player_volume(&self, player_id: &str) -> Result<u8> {
-        let result = self.rpc(player_id, &[json!("status"), json!("-"), json!(0)]).await?;
-        Ok(result["mixer volume"].as_f64().unwrap_or(0.0) as u8)
-    }
-
-    pub async fn get_synced_players(&self, player_id: &str) -> Result<Vec<String>> {
-        let result = self.rpc(player_id, &[json!("status"), json!("-"), json!(0)]).await?;
-        let mut ids = vec![];
-        if let Some(master) = result["sync_master"].as_str().filter(|s| !s.is_empty() && *s != player_id) {
-            ids.push(master.to_string());
-        }
-        if let Some(slaves) = result["sync_slaves"].as_str().filter(|s| !s.is_empty()) {
-            ids.extend(slaves.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != player_id));
-        }
-        ids.sort();
-        ids.dedup();
-        Ok(ids)
     }
 
     /// Fetch volume and sync-group info for a player in a single RPC call.
     pub async fn get_player_status_info(&self, player_id: &str) -> Result<(u8, Vec<String>)> {
-        let result = self.rpc(player_id, &[json!("status"), json!("-"), json!(0)]).await?;
+        let result = self
+            .rpc(player_id, &[json!("status"), json!("-"), json!(0)])
+            .await?;
         let volume = result["mixer volume"].as_f64().unwrap_or(0.0) as u8;
         let mut ids = vec![];
-        if let Some(master) = result["sync_master"].as_str().filter(|s| !s.is_empty() && *s != player_id) {
+        if let Some(master) = result["sync_master"]
+            .as_str()
+            .filter(|s| !s.is_empty() && *s != player_id)
+        {
             ids.push(master.to_string());
         }
         if let Some(slaves) = result["sync_slaves"].as_str().filter(|s| !s.is_empty()) {
-            ids.extend(slaves.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != player_id));
+            ids.extend(
+                slaves
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty() && s != player_id),
+            );
         }
         ids.sort();
         ids.dedup();
@@ -442,7 +413,8 @@ impl LmsClient {
     }
 
     pub async fn sync_with(&self, player_id: &str, target_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("sync"), json!(target_id)]).await?;
+        self.rpc(player_id, &[json!("sync"), json!(target_id)])
+            .await?;
         Ok(())
     }
 
@@ -452,47 +424,74 @@ impl LmsClient {
     }
 
     pub async fn set_power(&self, player_id: &str, on: bool) -> Result<()> {
-        self.rpc(player_id, &[json!("power"), json!(if on { 1 } else { 0 })]).await?;
+        self.rpc(player_id, &[json!("power"), json!(if on { 1 } else { 0 })])
+            .await?;
         Ok(())
     }
 
     pub async fn set_shuffle(&self, player_id: &str, value: u8) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("shuffle"), json!(value)]).await?;
+        self.rpc(
+            player_id,
+            &[json!("playlist"), json!("shuffle"), json!(value)],
+        )
+        .await?;
         Ok(())
     }
 
     pub async fn set_repeat(&self, player_id: &str, value: u8) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("repeat"), json!(value)]).await?;
+        self.rpc(
+            player_id,
+            &[json!("playlist"), json!("repeat"), json!(value)],
+        )
+        .await?;
         Ok(())
     }
 
-    async fn playlistcontrol(&self, player_id: &str, cmd: &str, item_type: &str, id: &str) -> Result<()> {
+    async fn playlistcontrol(
+        &self,
+        player_id: &str,
+        cmd: &str,
+        item_type: &str,
+        id: &str,
+    ) -> Result<()> {
         self.rpc(
             player_id,
-            &[json!("playlistcontrol"), json!(format!("cmd:{}", cmd)), json!(format!("{}:{}", item_type, id))],
+            &[
+                json!("playlistcontrol"),
+                json!(format!("cmd:{}", cmd)),
+                json!(format!("{}:{}", item_type, id)),
+            ],
         )
         .await?;
         Ok(())
     }
 
     pub async fn play_track(&self, player_id: &str, track_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "load", "track_id", track_id).await
+        self.playlistcontrol(player_id, "load", "track_id", track_id)
+            .await
     }
 
     pub async fn play_album(&self, player_id: &str, album_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "load", "album_id", album_id).await
+        self.playlistcontrol(player_id, "load", "album_id", album_id)
+            .await
     }
 
     pub async fn play_artist(&self, player_id: &str, artist_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "load", "artist_id", artist_id).await
+        self.playlistcontrol(player_id, "load", "artist_id", artist_id)
+            .await
     }
 
     pub async fn play_folder(&self, player_id: &str, folder_id: u32) -> Result<()> {
-        self.playlistcontrol(player_id, "load", "folder_id", &folder_id.to_string()).await
+        self.playlistcontrol(player_id, "load", "folder_id", &folder_id.to_string())
+            .await
     }
 
     pub async fn play_track_index(&self, player_id: &str, index: usize) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("index"), json!(index)]).await?;
+        self.rpc(
+            player_id,
+            &[json!("playlist"), json!("index"), json!(index)],
+        )
+        .await?;
         Ok(())
     }
 
@@ -518,7 +517,9 @@ impl LmsClient {
 
     /// Returns the list of available radio services/plugins (TuneIn, etc.).
     pub async fn get_radio_services(&self) -> Result<Vec<RadioItem>> {
-        let result = self.rpc("", &[json!("radios"), json!(0), json!(100)]).await?;
+        let result = self
+            .rpc("", &[json!("radios"), json!(0), json!(100)])
+            .await?;
         let items = result["radioss_loop"]
             .as_array()
             .cloned()
@@ -559,69 +560,87 @@ impl LmsClient {
             params.push(json!(format!("item_id:{}", id)));
         }
         let result = self.rpc(player_id, &params).await?;
-        let items = result["loop_loop"]
-            .as_array()
-            .or_else(|| result["item_loop"].as_array())
-            .cloned()
-            .unwrap_or_default();
+        let items = browse_loop(&result);
         let base = self.server_base_url();
-        Ok(items.into_iter().map(|v| parse_browse_item(&v, &base, cmd)).collect())
-    }
-
-    /// Play a raw stream URL immediately on the given player.
-    pub async fn play_url(&self, player_id: &str, url: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("play"), json!(url)]).await?;
-        Ok(())
+        Ok(items
+            .into_iter()
+            .map(|v| parse_browse_item(&v, &base, cmd))
+            .collect())
     }
 
     pub async fn play_url_with_title(&self, player_id: &str, url: &str, title: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("play"), json!(url), json!(title)]).await?;
+        self.rpc(
+            player_id,
+            &[json!("playlist"), json!("play"), json!(url), json!(title)],
+        )
+        .await?;
         Ok(())
     }
 
     pub async fn add_track_to_queue(&self, player_id: &str, track_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "add", "track_id", track_id).await
+        self.playlistcontrol(player_id, "add", "track_id", track_id)
+            .await
     }
 
     pub async fn add_album_to_queue(&self, player_id: &str, album_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "add", "album_id", album_id).await
+        self.playlistcontrol(player_id, "add", "album_id", album_id)
+            .await
     }
 
     pub async fn add_artist_to_queue(&self, player_id: &str, artist_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "add", "artist_id", artist_id).await
+        self.playlistcontrol(player_id, "add", "artist_id", artist_id)
+            .await
     }
 
     pub async fn add_folder_to_queue(&self, player_id: &str, folder_id: u32) -> Result<()> {
-        self.playlistcontrol(player_id, "add", "folder_id", &folder_id.to_string()).await
+        self.playlistcontrol(player_id, "add", "folder_id", &folder_id.to_string())
+            .await
     }
 
     pub async fn clear_queue(&self, player_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("clear")]).await?;
+        self.rpc(player_id, &[json!("playlist"), json!("clear")])
+            .await?;
         Ok(())
     }
 
     pub async fn delete_queue_item(&self, player_id: &str, index: usize) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("delete"), json!(index)]).await?;
+        self.rpc(
+            player_id,
+            &[json!("playlist"), json!("delete"), json!(index)],
+        )
+        .await?;
         Ok(())
     }
 
-    pub async fn add_url_to_queue(&self, player_id: &str, url: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("add"), json!(url)]).await?;
-        Ok(())
-    }
-
-    pub async fn add_url_with_title_to_queue(&self, player_id: &str, url: &str, title: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("add"), json!(url), json!(title)]).await?;
+    pub async fn add_url_with_title_to_queue(
+        &self,
+        player_id: &str,
+        url: &str,
+        title: &str,
+    ) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlist"), json!("add"), json!(url), json!(title)],
+        )
+        .await?;
         Ok(())
     }
 
     pub async fn browse_music_folder(&self, folder_id: Option<u32>) -> Result<Vec<FolderItem>> {
-        let mut params = vec![json!("musicfolder"), json!(0), json!(10000), json!("tags:dlt")];
+        let mut params = vec![
+            json!("musicfolder"),
+            json!(0),
+            json!(10000),
+            json!("tags:dlt"),
+        ];
         if let Some(id) = folder_id {
             params.push(json!(format!("folder_id:{}", id)));
         }
         let result = self.rpc("", &params).await?;
-        let items = result["folder_loop"].as_array().cloned().unwrap_or_default();
+        let items = result["folder_loop"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         Ok(items
             .into_iter()
             .filter_map(|v| {
@@ -632,54 +651,57 @@ impl LmsClient {
                     _ => FolderItemType::Folder,
                 };
                 let duration = v["duration"].as_f64().filter(|&d| d > 0.0);
-                Some(FolderItem { id, filename, item_type, duration })
+                Some(FolderItem {
+                    id,
+                    filename,
+                    item_type,
+                    duration,
+                })
             })
             .collect())
     }
 
     pub async fn insert_track_next(&self, player_id: &str, track_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "insert", "track_id", track_id).await
+        self.playlistcontrol(player_id, "insert", "track_id", track_id)
+            .await
     }
 
-    pub async fn insert_url_next(&self, player_id: &str, url: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("insert"), json!(url)]).await?;
-        Ok(())
-    }
-
-    pub async fn insert_url_next_with_title(&self, player_id: &str, url: &str, title: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("insert"), json!(url), json!(title)]).await?;
+    pub async fn insert_url_next_with_title(
+        &self,
+        player_id: &str,
+        url: &str,
+        title: &str,
+    ) -> Result<()> {
+        self.rpc(
+            player_id,
+            &[json!("playlist"), json!("insert"), json!(url), json!(title)],
+        )
+        .await?;
         Ok(())
     }
 
     pub async fn add_to_favorites(&self, player_id: &str, url: &str, title: &str) -> Result<()> {
         self.rpc(
             player_id,
-            &[json!("favorites"), json!("add"), json!(format!("url:{}", url)), json!(format!("title:{}", title))],
-        ).await?;
+            &[
+                json!("favorites"),
+                json!("add"),
+                json!(format!("url:{}", url)),
+                json!(format!("title:{}", title)),
+            ],
+        )
+        .await?;
         Ok(())
     }
 
     /// Search within a single LMS app/plugin using the XMLBrowser items API with a search filter.
-    pub async fn search_app(&self, player_id: &str, cmd: &str, query: &str) -> Result<Vec<RadioItem>> {
-        let result = self.rpc(player_id, &[
-            json!(cmd),
-            json!("items"),
-            json!(0),
-            json!(50),
-            json!(format!("search:{}", query)),
-            json!("want_url:1"),
-        ]).await?;
-        let items = result["loop_loop"]
-            .as_array()
-            .or_else(|| result["item_loop"].as_array())
-            .cloned()
-            .unwrap_or_default();
-        let base = self.server_base_url();
-        Ok(items
-            .into_iter()
-            .map(|v| parse_browse_item(&v, &base, cmd))
-            .filter(|item| !item.name.is_empty())
-            .collect())
+    pub async fn search_app(
+        &self,
+        player_id: &str,
+        cmd: &str,
+        query: &str,
+    ) -> Result<Vec<RadioItem>> {
+        self.search_app_via_item(player_id, cmd, None, query).await
     }
 
     /// Search via a plugin's dedicated "New Search" item.
@@ -704,47 +726,80 @@ impl LmsClient {
             params.push(json!(format!("item_id:{}", id)));
         }
         let result = self.rpc(player_id, &params).await?;
-        let items = result["loop_loop"]
-            .as_array()
-            .or_else(|| result["item_loop"].as_array())
-            .cloned()
-            .unwrap_or_default();
         let base = self.server_base_url();
-        Ok(items
+        Ok(browse_loop(&result)
             .into_iter()
             .map(|v| parse_browse_item(&v, &base, cmd))
             .filter(|item| !item.name.is_empty())
             .collect())
     }
 
-    pub async fn search_library(&self, query: &str) -> Result<(Vec<Artist>, Vec<Album>, Vec<Track>, Vec<Playlist>)> {
+    pub async fn search_library(
+        &self,
+        query: &str,
+    ) -> Result<(Vec<Artist>, Vec<Album>, Vec<Track>, Vec<Playlist>)> {
         // Try FTS (full-text search) command first — fast when the index exists.
-        if let Ok(result) = self.rpc("", &[
-            json!("search"), json!(0), json!(200), json!(format!("term:{}", query))
-        ]).await
+        if let Ok(result) = self
+            .rpc(
+                "",
+                &[
+                    json!("search"),
+                    json!(0),
+                    json!(200),
+                    json!(format!("term:{}", query)),
+                ],
+            )
+            .await
             && !result.is_null()
         {
-                let raw_artists = result["contributors_loop"].as_array().cloned().unwrap_or_default();
-                let artists: Vec<Artist> = raw_artists.into_iter().filter_map(|v| {
+            let raw_artists = result["contributors_loop"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let artists: Vec<Artist> = raw_artists
+                .into_iter()
+                .filter_map(|v| {
                     let name = v["contributor"].as_str()?.to_string();
                     let id = v["contributor_id"].clone();
-                    if id.is_null() { return None; }
+                    if id.is_null() {
+                        return None;
+                    }
                     Some(Artist { id, artist: name })
-                }).collect();
+                })
+                .collect();
 
-                let raw_albums = result["albums_loop"].as_array().cloned().unwrap_or_default();
-                let albums: Vec<Album> = raw_albums.into_iter().filter_map(|v| {
+            let raw_albums = result["albums_loop"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let albums: Vec<Album> = raw_albums
+                .into_iter()
+                .filter_map(|v| {
                     let name = v["album"].as_str()?.to_string();
                     let id = v["album_id"].clone();
-                    if id.is_null() { return None; }
-                    Some(Album { id, album: name, artist: v["artist"].as_str().map(String::from) })
-                }).collect();
+                    if id.is_null() {
+                        return None;
+                    }
+                    Some(Album {
+                        id,
+                        album: name,
+                        artist: v["artist"].as_str().map(String::from),
+                    })
+                })
+                .collect();
 
-                let raw_tracks = result["tracks_loop"].as_array().cloned().unwrap_or_default();
-                let tracks: Vec<Track> = raw_tracks.into_iter().filter_map(|v| {
+            let raw_tracks = result["tracks_loop"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let tracks: Vec<Track> = raw_tracks
+                .into_iter()
+                .filter_map(|v| {
                     let title = v["track"].as_str()?.to_string();
                     let id = v["track_id"].clone();
-                    if id.is_null() { return None; }
+                    if id.is_null() {
+                        return None;
+                    }
                     Some(Track {
                         id: Some(id),
                         title,
@@ -753,17 +808,26 @@ impl LmsClient {
                         duration: v["duration"].as_f64(),
                         artwork_url: None,
                     })
-                }).collect();
+                })
+                .collect();
 
-                let raw_playlists = result["playlists_loop"].as_array().cloned().unwrap_or_default();
-                let playlists: Vec<Playlist> = raw_playlists.into_iter().filter_map(|v| {
+            let raw_playlists = result["playlists_loop"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let playlists: Vec<Playlist> = raw_playlists
+                .into_iter()
+                .filter_map(|v| {
                     let name = v["playlist"].as_str()?.to_string();
                     let id = v["playlist_id"].clone();
-                    if id.is_null() { return None; }
+                    if id.is_null() {
+                        return None;
+                    }
                     Some(Playlist { id, name })
-                }).collect();
+                })
+                .collect();
 
-                return Ok((artists, albums, tracks, playlists));
+            return Ok((artists, albums, tracks, playlists));
         }
 
         // FTS unavailable or returned null — fall back to fetching all items and
@@ -778,25 +842,43 @@ impl LmsClient {
 
         const LIMIT: usize = 200;
 
-        let artists: Vec<Artist> = art_res.unwrap_or_default().into_iter()
+        let artists: Vec<Artist> = art_res
+            .unwrap_or_default()
+            .into_iter()
             .filter(|a| a.artist.to_lowercase().contains(&lower))
             .take(LIMIT)
             .collect();
 
-        let albums: Vec<Album> = alb_res.unwrap_or_default().into_iter()
-            .filter(|a| a.album.to_lowercase().contains(&lower)
-                || a.artist.as_deref().is_some_and(|ar| ar.to_lowercase().contains(&lower)))
+        let albums: Vec<Album> = alb_res
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| {
+                a.album.to_lowercase().contains(&lower)
+                    || a.artist
+                        .as_deref()
+                        .is_some_and(|ar| ar.to_lowercase().contains(&lower))
+            })
             .take(LIMIT)
             .collect();
 
-        let tracks: Vec<Track> = trk_res.unwrap_or_default().into_iter()
-            .filter(|t| t.title.to_lowercase().contains(&lower)
-                || t.artist.as_deref().is_some_and(|ar| ar.to_lowercase().contains(&lower))
-                || t.album.as_deref().is_some_and(|al| al.to_lowercase().contains(&lower)))
+        let tracks: Vec<Track> = trk_res
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| {
+                t.title.to_lowercase().contains(&lower)
+                    || t.artist
+                        .as_deref()
+                        .is_some_and(|ar| ar.to_lowercase().contains(&lower))
+                    || t.album
+                        .as_deref()
+                        .is_some_and(|al| al.to_lowercase().contains(&lower))
+            })
             .take(LIMIT)
             .collect();
 
-        let playlists: Vec<Playlist> = pls_res.unwrap_or_default().into_iter()
+        let playlists: Vec<Playlist> = pls_res
+            .unwrap_or_default()
+            .into_iter()
             .filter(|p| p.name.to_lowercase().contains(&lower))
             .take(LIMIT)
             .collect();
@@ -805,15 +887,18 @@ impl LmsClient {
     }
 
     pub async fn play_playlist(&self, player_id: &str, playlist_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "load", "playlist_id", playlist_id).await
+        self.playlistcontrol(player_id, "load", "playlist_id", playlist_id)
+            .await
     }
 
     pub async fn add_playlist_to_queue(&self, player_id: &str, playlist_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "add", "playlist_id", playlist_id).await
+        self.playlistcontrol(player_id, "add", "playlist_id", playlist_id)
+            .await
     }
 
     pub async fn insert_playlist_next(&self, player_id: &str, playlist_id: &str) -> Result<()> {
-        self.playlistcontrol(player_id, "insert", "playlist_id", playlist_id).await
+        self.playlistcontrol(player_id, "insert", "playlist_id", playlist_id)
+            .await
     }
 
     pub async fn fetch_image_bytes(&self, url: &str) -> Result<Vec<u8>> {
@@ -827,7 +912,9 @@ impl LmsClient {
     }
 
     pub async fn server_status(&self) -> Result<()> {
-        let result = self.rpc("", &[json!("serverstatus"), json!(0), json!(0)]).await?;
+        let result = self
+            .rpc("", &[json!("serverstatus"), json!(0), json!(0)])
+            .await?;
         if result.is_null() {
             return Err(anyhow!("no response from server"));
         }
@@ -835,7 +922,9 @@ impl LmsClient {
     }
 
     pub async fn get_server_info(&self) -> Result<ServerInfo> {
-        let result = self.rpc("", &[json!("serverstatus"), json!(0), json!(0)]).await?;
+        let result = self
+            .rpc("", &[json!("serverstatus"), json!(0), json!(0)])
+            .await?;
         if result.is_null() {
             return Err(anyhow!("no response from server"));
         }
@@ -843,19 +932,24 @@ impl LmsClient {
     }
 
     pub async fn get_players_detailed(&self) -> Result<Vec<PlayerDetail>> {
-        let result = self.rpc("", &[json!("players"), json!(0), json!(100)]).await?;
+        let mut result = self
+            .rpc("", &[json!("players"), json!(0), json!(100)])
+            .await?;
         let count = result["count"].as_u64().unwrap_or(0);
         if count == 0 {
             return Ok(vec![]);
         }
-        let players: Vec<PlayerDetail> = serde_json::from_value(result["players_loop"].clone())?;
+        let players: Vec<PlayerDetail> = serde_json::from_value(result["players_loop"].take())?;
         Ok(players)
     }
 
     /// Fetch the currently-playing cover art URL for a Radio Paradise channel.
     /// `chan`: 0=Main Mix, 1=Mellow Mix, 2=Rock Mix, 3=World Mix.
     pub async fn fetch_radio_paradise_art_url(&self, chan: u8) -> Result<String> {
-        let url = format!("https://api.radioparadise.com/api/now_playing?chan={}", chan);
+        let url = format!(
+            "https://api.radioparadise.com/api/now_playing?chan={}",
+            chan
+        );
         let resp: Value = self.client.get(&url).send().await?.json().await?;
         resp["cover"]
             .as_str()
@@ -872,26 +966,53 @@ fn parse_browse_item(v: &Value, base: &str, default_cmd: &str) -> RadioItem {
         name: v["name"].as_str().unwrap_or("").to_string(),
         item_type: v["type"].as_str().unwrap_or("link").to_string(),
         url: v["url"].as_str().map(String::from),
-        cmd: v["cmd"].as_str().map(String::from).or_else(|| Some(default_cmd.to_string())),
-        item_id: extract_id_str(&v["id"]),
+        cmd: v["cmd"]
+            .as_str()
+            .map(String::from)
+            .or_else(|| Some(default_cmd.to_string())),
+        item_id: crate::utils::json_id_to_opt_string(&v["id"]),
         artwork_url: resolve_image_url(v, base),
         has_items: v["hasitems"].as_u64().unwrap_or(0) > 0,
         is_audio: v["isaudio"].as_u64().unwrap_or(0) > 0,
     }
 }
 
-/// Extract a numeric LMS ID from a JSON value that may be a string, integer, or float.
-fn extract_id_str(v: &Value) -> Option<String> {
-    v.as_str()
-        .map(String::from)
-        .or_else(|| v.as_u64().map(|n| n.to_string()))
-        .or_else(|| v.as_i64().map(|n| n.to_string()))
-        .or_else(|| v.as_f64().map(|f| (f as i64).to_string()))
+/// Coerce a JSON value that may be a number or a numeric string into `u64`.
+fn as_u64_loose(v: &Value) -> Option<u64> {
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+}
+
+/// Extract the item array from an XMLBrowser response, returned by the server under either
+/// `loop_loop` or `item_loop` depending on the plugin.
+fn browse_loop(result: &Value) -> Vec<Value> {
+    result["loop_loop"]
+        .as_array()
+        .or_else(|| result["item_loop"].as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Resolve a track/cover artwork URL from an LMS item JSON object: prefer an explicit
+/// `artwork_url` (resolving a leading-`/` relative path against `base`), otherwise fall
+/// back to `artwork_track_id`/`id` as `{base}/music/{id}/cover.jpg`.
+fn cover_url(v: &Value, base: &str) -> Option<String> {
+    if let Some(url) = v["artwork_url"].as_str().filter(|s| !s.is_empty()) {
+        return Some(if url.starts_with('/') {
+            format!("{}{}", base, url)
+        } else {
+            url.to_string()
+        });
+    }
+    let cover_id = crate::utils::json_id_to_opt_string(&v["artwork_track_id"])
+        .or_else(|| crate::utils::json_id_to_opt_string(&v["id"]));
+    cover_id.map(|id| crate::utils::music_image_url(base, id, "cover.jpg"))
 }
 
 /// Extract an image URL from a JSON item value, resolving relative paths against `base`.
 fn resolve_image_url(v: &Value, base: &str) -> Option<String> {
-    let raw = v["image"].as_str()
+    let raw = v["image"]
+        .as_str()
         .or_else(|| v["icon"].as_str())
         .or_else(|| v["artwork_url"].as_str())?;
     if raw.is_empty() {

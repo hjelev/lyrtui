@@ -1,6 +1,6 @@
+use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use std::time::Duration;
-use anyhow::Result;
 
 pub enum InputEvent {
     Key(KeyEvent),
@@ -15,8 +15,9 @@ pub fn poll_event(tick_rate: Duration) -> Result<InputEvent> {
             // Filter Release events: on Windows, crossterm emits both Press and Release for each
             // keystroke. Processing Release would cause each key to fire twice (e.g., 'c' opens
             // the config modal on Press, then immediately closes it on Release).
-            Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release
-                => return Ok(InputEvent::Key(key)),
+            Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release => {
+                return Ok(InputEvent::Key(key));
+            }
             Event::Mouse(m) => return Ok(InputEvent::Mouse(m)),
             Event::Resize(_, _) => return Ok(InputEvent::Resize),
             _ => {}
@@ -61,6 +62,10 @@ pub enum Action {
     None,
 }
 
+/// Maps a key event to a context-free `Action`. Note: some keys are intercepted upstream in
+/// `main.rs` before this runs and never reach here in that context — most notably `'s'`, which
+/// opens the sync modal in the Players view but maps to `ToggleShuffle` everywhere else. Keep
+/// that interception in mind when changing `'s'`/`ToggleShuffle`.
 pub fn key_to_action(key: KeyEvent) -> Action {
     match (key.code, key.modifiers) {
         (KeyCode::Char('q'), _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => Action::Quit,

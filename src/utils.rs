@@ -13,6 +13,23 @@ pub fn json_id_to_string(v: &serde_json::Value) -> String {
     }
 }
 
+/// Extract a numeric/string LMS id as `Some(String)`, returning `None` for null/absent
+/// values. Numbers (including floats) are normalized to integer strings.
+pub fn json_id_to_opt_string(v: &serde_json::Value) -> Option<String> {
+    v.as_str()
+        .map(String::from)
+        .or_else(|| v.as_u64().map(|n| n.to_string()))
+        .or_else(|| v.as_i64().map(|n| n.to_string()))
+        .or_else(|| v.as_f64().map(|f| (f as i64).to_string()))
+}
+
+/// Build an LMS artwork URL of the form `{base}/music/{id}/{file}`, e.g.
+/// `music_image_url(base, id, "cover.jpg")` or `music_image_url(base, id, "artist.jpg")`.
+/// `id` accepts anything `Display` (a stringified JSON id, a `u32`, etc.).
+pub fn music_image_url(base: &str, id: impl std::fmt::Display, file: &str) -> String {
+    format!("{}/music/{}/{}", base, id, file)
+}
+
 pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
     if app.full_art_mode {
         return app.queue.get(idx).and_then(|t| t.artwork_url.clone());
@@ -21,27 +38,27 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
         MainView::Library(LibraryView::Artists) => app
             .artists
             .get(idx)
-            .map(|a| format!("{}/music/{}/artist.jpg", base, json_id_to_string(&a.id))),
+            .map(|a| music_image_url(base, json_id_to_string(&a.id), "artist.jpg")),
         MainView::Library(LibraryView::AlbumArtists) => app
             .album_artists
             .get(idx)
-            .map(|a| format!("{}/music/{}/artist.jpg", base, json_id_to_string(&a.id))),
+            .map(|a| music_image_url(base, json_id_to_string(&a.id), "artist.jpg")),
         MainView::Library(LibraryView::Albums { .. }) => app
             .albums
             .get(idx)
-            .map(|a| format!("{}/music/{}/cover.jpg", base, json_id_to_string(&a.id))),
+            .map(|a| music_image_url(base, json_id_to_string(&a.id), "cover.jpg")),
         MainView::Library(LibraryView::Tracks { .. }) => app.tracks.get(idx).and_then(|t| {
             t.id.as_ref()
-                .map(|id| format!("{}/music/{}/cover.jpg", base, json_id_to_string(id)))
+                .map(|id| music_image_url(base, json_id_to_string(id), "cover.jpg"))
         }),
         MainView::Library(LibraryView::Playlists) => app
             .playlists
             .get(idx)
-            .map(|p| format!("{}/music/{}/cover.jpg", base, json_id_to_string(&p.id))),
+            .map(|p| music_image_url(base, json_id_to_string(&p.id), "cover.jpg")),
         MainView::Library(LibraryView::Folder { .. }) => {
             app.folder_items.get(idx).and_then(|item| {
                 if item.item_type == FolderItemType::Track {
-                    Some(format!("{}/music/{}/cover.jpg", base, item.id))
+                    Some(music_image_url(base, item.id, "cover.jpg"))
                 } else {
                     None
                 }
@@ -50,23 +67,26 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
         MainView::Queue => app.queue.get(idx).and_then(|t| t.artwork_url.clone()),
         MainView::Radio => app.radio_items.get(idx).and_then(|i| i.artwork_url.clone()),
         MainView::Apps => app.app_items.get(idx).and_then(|i| i.artwork_url.clone()),
-        MainView::AppSearch { .. } => app.app_search_results.get(idx).and_then(|i| i.artwork_url.clone()),
+        MainView::AppSearch { .. } => app
+            .app_search_results
+            .get(idx)
+            .and_then(|i| i.artwork_url.clone()),
         MainView::Favourites => app.fav_items.get(idx).and_then(|i| i.artwork_url.clone()),
         MainView::Search => match app.search_results.get(idx) {
-            Some(SearchResultItem::Artist(a)) => Some(format!(
-                "{}/music/{}/artist.jpg",
+            Some(SearchResultItem::Artist(a)) => Some(music_image_url(
                 base,
-                json_id_to_string(&a.id)
+                json_id_to_string(&a.id),
+                "artist.jpg",
             )),
-            Some(SearchResultItem::Album(alb)) => Some(format!(
-                "{}/music/{}/cover.jpg",
+            Some(SearchResultItem::Album(alb)) => Some(music_image_url(
                 base,
-                json_id_to_string(&alb.id)
+                json_id_to_string(&alb.id),
+                "cover.jpg",
             )),
-            Some(SearchResultItem::Track(t)) => t
-                .id
-                .as_ref()
-                .map(|id| format!("{}/music/{}/cover.jpg", base, json_id_to_string(id))),
+            Some(SearchResultItem::Track(t)) => {
+                t.id.as_ref()
+                    .map(|id| music_image_url(base, json_id_to_string(id), "cover.jpg"))
+            }
             Some(SearchResultItem::AppItem(item)) => item.artwork_url.clone(),
             _ => None,
         },
@@ -110,7 +130,10 @@ pub fn compute_parent_labels(app: &App) -> (Option<String>, Option<String>) {
 }
 
 pub fn uses_two_row_layout(view: &MainView) -> bool {
-    !matches!(view, MainView::Players | MainView::Help | MainView::MyMusic | MainView::AppSearch { .. })
+    !matches!(
+        view,
+        MainView::Players | MainView::Help | MainView::MyMusic | MainView::AppSearch { .. }
+    )
 }
 
 pub fn is_main_item_playable(app: &App) -> bool {
@@ -139,7 +162,12 @@ pub fn is_main_item_playable(app: &App) -> bool {
         MainView::Search => app
             .search_results
             .get(app.main_selected)
-            .map(|r| matches!(r, SearchResultItem::Track(_) | SearchResultItem::Playlist(_)))
+            .map(|r| {
+                matches!(
+                    r,
+                    SearchResultItem::Track(_) | SearchResultItem::Playlist(_)
+                )
+            })
             .unwrap_or(false),
         MainView::AppSearch { .. } => app
             .app_search_results

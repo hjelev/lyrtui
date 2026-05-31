@@ -5,8 +5,12 @@ use std::time::{Duration, Instant};
 /// Broadcasts a UDP discovery packet to `broadcast_addr:3483` and collects
 /// the IPs of all responding LMS servers within the timeout window.
 pub fn discover_lms_all(broadcast_addr: &str, timeout: Duration) -> Vec<String> {
-    let Ok(socket) = UdpSocket::bind("0.0.0.0:0") else { return vec![] };
-    if socket.set_broadcast(true).is_err() { return vec![] }
+    let Ok(socket) = UdpSocket::bind("0.0.0.0:0") else {
+        return vec![];
+    };
+    if socket.set_broadcast(true).is_err() {
+        return vec![];
+    }
     // Short per-read timeout so we can loop and re-probe for late responders.
     let _ = socket.set_read_timeout(Some(timeout / 5));
 

@@ -73,8 +73,8 @@ impl Config {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let text = fs::read_to_string(&path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let text =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
         toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
     }
 
@@ -84,15 +84,21 @@ impl Config {
             fs::create_dir_all(parent)
                 .with_context(|| format!("creating config dir {}", parent.display()))?;
         }
-        let text = toml::to_string_pretty(self)
-            .with_context(|| "serializing config")?;
-        fs::write(&path, text)
-            .with_context(|| format!("writing {}", path.display()))?;
+        let text = toml::to_string_pretty(self).with_context(|| "serializing config")?;
+        fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
         Ok(())
     }
 
     pub fn base_url(&self) -> String {
         format!("http://{}:{}/jsonrpc.js", self.host, self.port)
+    }
+
+    /// Owned `(username, password)` pair when both are set, for `LmsClient` basic auth.
+    pub fn credentials(&self) -> Option<(String, String)> {
+        self.username
+            .as_ref()
+            .zip(self.password.as_ref())
+            .map(|(u, p)| (u.clone(), p.clone()))
     }
 }
 

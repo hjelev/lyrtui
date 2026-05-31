@@ -79,6 +79,19 @@ lyrtui
 
 On first launch, lyrtui broadcasts a UDP discovery packet to find a Lyrion server on the local network. If discovery fails or the server is on a different subnet, press `c` to open the configuration menu and set the correct host and port. Settings are saved to `~/.config/lyrtui/config.toml`.
 
+### Command-line options
+
+| Flag | Description |
+|------|-------------|
+| `-h`, `--help` | Print help and exit |
+| `-v`, `--version` | Print version and exit |
+| `-i`, `--info` | Print saved config and live server/player info, then exit |
+| `-p`, `--play-pause` | Toggle play/pause on the default player |
+| `--next` | Skip to the next track |
+| `--prev` | Go to the previous track |
+
+The playback flags (`-p`, `--next`, `--prev`) target the `default_player` from config, or the first available player if none is set. They print the affected track name and exit without opening the TUI — useful for binding to media keys or shell aliases.
+
 ### Mouse support
 
 - **Left click** on a sidebar item — navigate to that section
