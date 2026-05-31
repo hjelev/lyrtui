@@ -8,9 +8,10 @@ use ratatui::widgets::ListState;
 
 use crate::api::{FolderItemType, LmsClient};
 use crate::app::{
-    App, AppMsg, ConnectionState, ContextMenu, FolderNav, LibraryView, MainView,
+    App, AppMsg, ConnectionState, ContextMenu, FieldKind, FolderNav, LibraryView, MainView,
     RadioNav, SearchResultItem, SearchScope, SidebarItem, SyncModal, IMAGE_PROTOCOLS,
 };
+use crate::discovery;
 use crate::events::Action;
 use crate::{background, config, ui, utils};
 
@@ -1758,6 +1759,7 @@ pub fn handle_config_key(
     key: KeyEvent,
     cfg: &mut config::Config,
     client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
 ) {
     let editing = app.config_modal.as_ref().map(|m| m.editing).unwrap_or(false);
     let selected = app.config_modal.as_ref().map(|m| m.selected_field);
@@ -1788,7 +1790,7 @@ pub fn handle_config_key(
             }
             KeyCode::Char(c) => {
                 if let Some(modal) = app.config_modal.as_mut() {
-                    if modal.selected_field == 1 && !c.is_ascii_digit() {
+                    if modal.field_kind(modal.selected_field) == FieldKind::TextPort && !c.is_ascii_digit() {
                         // port field: digits only
                     } else {
                         let cp = modal.cursor_pos;
@@ -1836,26 +1838,63 @@ pub fn handle_config_key(
                     && modal.selected_field > 0 { modal.selected_field -= 1; }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if let Some(modal) = app.config_modal.as_mut()
-                    && modal.selected_field < CONFIG_FIELD_COUNT - 1 { modal.selected_field += 1; }
+                if let Some(modal) = app.config_modal.as_mut() {
+                    let max = modal.field_count() - 1;
+                    if modal.selected_field < max { modal.selected_field += 1; }
+                }
             }
             KeyCode::Tab => {
                 if let Some(modal) = app.config_modal.as_mut() {
-                    modal.selected_field = (modal.selected_field + 1) % CONFIG_FIELD_COUNT;
+                    let count = modal.field_count();
+                    modal.selected_field = (modal.selected_field + 1) % count;
                 }
             }
             KeyCode::Enter | KeyCode::Char('i') => {
-                match selected {
-                    4 => { if let Some(m) = app.config_modal.as_mut() { m.use_nerd_icons ^= true; } }
-                    5 => { if let Some(m) = app.config_modal.as_mut() { m.auto_discover ^= true; } }
-                    7 => { if let Some(m) = app.config_modal.as_mut() { m.disable_auto_colors ^= true; } }
-                    8 => {
+                let kind = app.config_modal.as_ref().map(|m| m.field_kind(selected));
+                match kind {
+                    Some(FieldKind::ToggleNerd) => {
+                        if let Some(m) = app.config_modal.as_mut() { m.use_nerd_icons ^= true; }
+                    }
+                    Some(FieldKind::ToggleDiscover) => {
+                        if let Some(m) = app.config_modal.as_mut() { m.auto_discover ^= true; }
+                    }
+                    Some(FieldKind::ToggleColors) => {
+                        if let Some(m) = app.config_modal.as_mut() { m.disable_auto_colors ^= true; }
+                    }
+                    Some(FieldKind::SelectorProtocol) => {
                         if let Some(m) = app.config_modal.as_mut() {
                             m.image_protocol_idx = (m.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
                         }
                     }
-                    9 => { apply_config_save(app, cfg, client); }
-                    10 => { app.config_modal = None; }
+                    Some(FieldKind::ScanButton) => {
+                        if let Some(modal) = app.config_modal.as_mut()
+                            && !modal.is_scanning
+                        {
+                            modal.is_scanning = true;
+                            modal.scan_attempted = true;
+                            modal.discovered_servers.clear();
+                            let mask = modal.broadcast_mask.clone();
+                            let tx2 = tx.clone();
+                            tokio::spawn(async move {
+                                let servers = tokio::task::spawn_blocking(move || {
+                                    discovery::discover_lms_all(&mask, Duration::from_secs(3))
+                                })
+                                .await
+                                .unwrap_or_default();
+                                let _ = tx2.send(AppMsg::DiscoveredServers(servers)).await;
+                            });
+                        }
+                    }
+                    Some(FieldKind::DiscoveredServer(i)) => {
+                        if let Some(modal) = app.config_modal.as_mut()
+                            && let Some(ip) = modal.discovered_servers.get(i).cloned()
+                        {
+                            modal.host = ip;
+                            modal.selected_field = 0;
+                        }
+                    }
+                    Some(FieldKind::OkButton) => { apply_config_save(app, cfg, client); }
+                    Some(FieldKind::CancelButton) => { app.config_modal = None; }
                     _ => {
                         if let Some(modal) = app.config_modal.as_mut() {
                             modal.editing = true;
@@ -1866,8 +1905,10 @@ pub fn handle_config_key(
                 }
             }
             KeyCode::Left => {
-                if let Some(modal) = app.config_modal.as_mut()
-                    && modal.selected_field == 8 {
+                let kind = app.config_modal.as_ref().map(|m| m.field_kind(selected));
+                if let Some(FieldKind::SelectorProtocol) = kind
+                    && let Some(modal) = app.config_modal.as_mut()
+                {
                     modal.image_protocol_idx = if modal.image_protocol_idx == 0 {
                         IMAGE_PROTOCOLS.len() - 1
                     } else {
@@ -1876,18 +1917,23 @@ pub fn handle_config_key(
                 }
             }
             KeyCode::Right => {
-                if let Some(modal) = app.config_modal.as_mut()
-                    && modal.selected_field == 8 {
+                let kind = app.config_modal.as_ref().map(|m| m.field_kind(selected));
+                if let Some(FieldKind::SelectorProtocol) = kind
+                    && let Some(modal) = app.config_modal.as_mut()
+                {
                     modal.image_protocol_idx = (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
                 }
             }
             KeyCode::Char(' ') => {
+                let kind = app.config_modal.as_ref().map(|m| m.field_kind(selected));
                 if let Some(modal) = app.config_modal.as_mut() {
-                    match modal.selected_field {
-                        4 => modal.use_nerd_icons = !modal.use_nerd_icons,
-                        5 => modal.auto_discover = !modal.auto_discover,
-                        7 => modal.disable_auto_colors = !modal.disable_auto_colors,
-                        8 => modal.image_protocol_idx = (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len(),
+                    match kind {
+                        Some(FieldKind::ToggleNerd) => modal.use_nerd_icons = !modal.use_nerd_icons,
+                        Some(FieldKind::ToggleDiscover) => modal.auto_discover = !modal.auto_discover,
+                        Some(FieldKind::ToggleColors) => modal.disable_auto_colors = !modal.disable_auto_colors,
+                        Some(FieldKind::SelectorProtocol) => {
+                            modal.image_protocol_idx = (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
+                        }
                         _ => {}
                     }
                 }
@@ -1902,8 +1948,6 @@ pub fn handle_config_key(
         }
     }
 }
-
-const CONFIG_FIELD_COUNT: usize = 11; // fields 0-8 + OK(9) + Cancel(10)
 
 pub async fn handle_main_select(
     app: &mut App,

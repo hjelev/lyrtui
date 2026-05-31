@@ -68,6 +68,25 @@ pub enum SearchScope {
 
 pub const IMAGE_PROTOCOLS: &[&str] = &["auto", "halfblocks", "sixel", "kitty", "iterm2"];
 
+/// Semantic identity of a config modal field, decoupled from the raw index
+/// (which shifts when discovered servers are inserted into the list).
+#[derive(Debug, Clone, PartialEq)]
+pub enum FieldKind {
+    TextHost,
+    TextPort,
+    TextUser,
+    TextPass,
+    ToggleNerd,
+    ToggleDiscover,
+    TextMask,
+    ScanButton,
+    DiscoveredServer(usize), // index into discovered_servers
+    ToggleColors,
+    SelectorProtocol,
+    OkButton,
+    CancelButton,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConfigModal {
     pub host: String,
@@ -79,7 +98,12 @@ pub struct ConfigModal {
     pub broadcast_mask: String,
     pub disable_auto_colors: bool,
     pub image_protocol_idx: usize, // index into IMAGE_PROTOCOLS
-    // 0=host, 1=port, 2=username, 3=password, 4=nerd_icons, 5=auto_discover, 6=broadcast_mask, 7=disable_auto_colors, 8=image_protocol, 9=OK, 10=Cancel
+    pub discovered_servers: Vec<String>,
+    pub is_scanning: bool,
+    pub scan_attempted: bool,
+    // Field layout: 0=host 1=port 2=username 3=password 4=nerd_icons 5=auto_discover
+    //   6=broadcast_mask 7=scan_button 8..=7+N=discovered_servers
+    //   7+N+1=disable_auto_colors 7+N+2=image_protocol 7+N+3=OK 7+N+4=Cancel
     pub selected_field: usize,
     pub editing: bool,
     pub cursor_pos: usize,
@@ -113,6 +137,9 @@ impl ConfigModal {
             broadcast_mask: broadcast_mask.to_string(),
             disable_auto_colors,
             image_protocol_idx,
+            discovered_servers: Vec::new(),
+            is_scanning: false,
+            scan_attempted: false,
             selected_field: 0,
             editing: false,
             cursor_pos: 0,
@@ -120,24 +147,48 @@ impl ConfigModal {
         }
     }
 
+    pub fn field_count(&self) -> usize {
+        12 + self.discovered_servers.len()
+    }
+
+    pub fn field_kind(&self, idx: usize) -> FieldKind {
+        let n = self.discovered_servers.len();
+        match idx {
+            0 => FieldKind::TextHost,
+            1 => FieldKind::TextPort,
+            2 => FieldKind::TextUser,
+            3 => FieldKind::TextPass,
+            4 => FieldKind::ToggleNerd,
+            5 => FieldKind::ToggleDiscover,
+            6 => FieldKind::TextMask,
+            7 => FieldKind::ScanButton,
+            i if i >= 8 && i <= 7 + n => FieldKind::DiscoveredServer(i - 8),
+            i if i == 8 + n => FieldKind::ToggleColors,
+            i if i == 9 + n => FieldKind::SelectorProtocol,
+            i if i == 10 + n => FieldKind::OkButton,
+            _ => FieldKind::CancelButton,
+        }
+    }
+
     pub fn current_field_char_count(&self) -> usize {
-        match self.selected_field {
-            0 => self.host.chars().count(),
-            1 => self.port.chars().count(),
-            2 => self.username.chars().count(),
-            3 => self.password.chars().count(),
-            6 => self.broadcast_mask.chars().count(),
+        match self.field_kind(self.selected_field) {
+            FieldKind::TextHost => self.host.chars().count(),
+            FieldKind::TextPort => self.port.chars().count(),
+            FieldKind::TextUser => self.username.chars().count(),
+            FieldKind::TextPass => self.password.chars().count(),
+            FieldKind::TextMask => self.broadcast_mask.chars().count(),
             _ => 0,
         }
     }
 
     pub fn current_field_str_mut(&mut self) -> Option<&mut String> {
-        match self.selected_field {
-            0 => Some(&mut self.host),
-            1 => Some(&mut self.port),
-            2 => Some(&mut self.username),
-            3 => Some(&mut self.password),
-            6 => Some(&mut self.broadcast_mask),
+        let kind = self.field_kind(self.selected_field);
+        match kind {
+            FieldKind::TextHost => Some(&mut self.host),
+            FieldKind::TextPort => Some(&mut self.port),
+            FieldKind::TextUser => Some(&mut self.username),
+            FieldKind::TextPass => Some(&mut self.password),
+            FieldKind::TextMask => Some(&mut self.broadcast_mask),
             _ => None,
         }
     }
@@ -441,4 +492,5 @@ pub enum AppMsg {
     AppSearchResultsLoaded(Vec<RadioItem>),
     #[allow(dead_code)]
     Error(String),
+    DiscoveredServers(Vec<String>),
 }

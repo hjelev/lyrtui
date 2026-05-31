@@ -368,7 +368,7 @@ async fn run(
             InputEvent::Key(key) => {
                 if app.config_modal.is_some() {
                     let prev_protocol = cfg.image_protocol.clone();
-                    handlers::handle_config_key(&mut app, key, &mut cfg, &client);
+                    handlers::handle_config_key(&mut app, key, &mut cfg, &client, &tx);
                     if cfg.image_protocol != prev_protocol {
                         apply_image_protocol(&mut picker, &cfg.image_protocol);
                         if let Some(img) = &last_artwork_image {
@@ -622,6 +622,14 @@ async fn handle_msg(
         }
         AppMsg::Error(e) => {
             set_timed_status(app, e, tx);
+        }
+        AppMsg::DiscoveredServers(servers) => {
+            if let Some(modal) = app.config_modal.as_mut() {
+                modal.is_scanning = false;
+                modal.discovered_servers = servers;
+                // Move focus to first discovered server (or back to scan button if none found).
+                modal.selected_field = 7;
+            }
         }
         AppMsg::ArtworkLoaded(_) | AppMsg::ThumbnailLoaded(..) | AppMsg::ThumbnailFailed(_) => {
             // handled inline in the event loop

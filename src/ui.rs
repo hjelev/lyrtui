@@ -2683,8 +2683,13 @@ pub fn compute_delete_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
 }
 
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>) {
+    use crate::app::FieldKind;
+
     let area = f.area();
-    let popup = centered_rect_abs(54, 19, area);
+    let n_servers = modal.discovered_servers.len();
+    // +1 for scan button row, +n_servers for server entries, +1 base for header growth
+    let popup_height = 20u16 + n_servers as u16;
+    let popup = centered_rect_abs(54, popup_height, area);
 
     f.render_widget(Clear, popup);
 
@@ -2702,26 +2707,44 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    // rows: pad | host | port | username | password | divider | nerd-icons | auto-discover | broadcast-mask | disable-auto-colors | image-protocol | error | spacer | help
+    // Build constraints dynamically:
+    // [0] pad | [1] host | [2] port | [3] username | [4] password | [5] divider
+    // [6] nerd-icons | [7] auto-discover | [8] broadcast-mask
+    // [9] scan-button | [10..9+N] discovered servers
+    // [10+N] disable-auto-colors | [11+N] image-protocol
+    // [12+N] error | [13+N] spacer | [14+N] help/buttons
+    let mut constraints = vec![
+        Constraint::Length(1), // [0] top pad
+        Constraint::Length(1), // [1] host
+        Constraint::Length(1), // [2] port
+        Constraint::Length(1), // [3] username
+        Constraint::Length(1), // [4] password
+        Constraint::Length(1), // [5] divider
+        Constraint::Length(1), // [6] nerd-icons
+        Constraint::Length(1), // [7] auto-discover
+        Constraint::Length(1), // [8] broadcast-mask
+        Constraint::Length(1), // [9] scan-button
+    ];
+    for _ in 0..n_servers {
+        constraints.push(Constraint::Length(1)); // discovered server entry
+    }
+    constraints.push(Constraint::Length(1)); // disable-auto-colors
+    constraints.push(Constraint::Length(1)); // image-protocol
+    constraints.push(Constraint::Length(1)); // error
+    constraints.push(Constraint::Min(0));    // spacer
+    constraints.push(Constraint::Length(1)); // buttons
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // [0] top pad
-            Constraint::Length(1), // [1] host
-            Constraint::Length(1), // [2] port
-            Constraint::Length(1), // [3] username
-            Constraint::Length(1), // [4] password
-            Constraint::Length(1), // [5] divider
-            Constraint::Length(1), // [6] nerd-icons
-            Constraint::Length(1), // [7] auto-discover
-            Constraint::Length(1), // [8] broadcast-mask
-            Constraint::Length(1), // [9] disable-auto-colors
-            Constraint::Length(1), // [10] image-protocol
-            Constraint::Length(1), // [11] error
-            Constraint::Min(0),    // [12] spacer
-            Constraint::Length(1), // [13] help
-        ])
+        .constraints(constraints)
         .split(inner);
+
+    // Row indices (static part)
+    let row_scan    = 9usize;
+    let row_colors  = 10 + n_servers;
+    let row_proto   = 11 + n_servers;
+    let row_error   = 12 + n_servers;
+    let row_buttons = 14 + n_servers;
 
     // Text input fields: (label, value, field_index)
     let pass_masked = "*".repeat(modal.password.len());
@@ -2811,11 +2834,58 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         f.render_widget(Paragraph::new(line), rows[8]);
     }
 
-    render_toggle(f, rows[9], "Disable auto colors", modal.disable_auto_colors, modal.selected_field == 7);
-
-    // Image protocol selector (field 8): < protocol >
+    // Scan button (field 7)
     {
-        let is_selected = modal.selected_field == 8;
+        let is_selected = modal.selected_field == 7;
+        let no_results = modal.scan_attempted && !modal.is_scanning && modal.discovered_servers.is_empty();
+        let (btn_text, btn_style) = if modal.is_scanning {
+            ("[ Scanning... ]", Style::default().fg(accent_dim).add_modifier(Modifier::DIM))
+        } else if no_results {
+            ("[ No servers found ]", Style::default().fg(accent_dim))
+        } else if is_selected {
+            ("[ Scan Servers ]", Style::default().fg(Color::Black).bg(accent_bright).bold())
+        } else {
+            ("[ Scan Servers ]", Style::default().fg(Color::White))
+        };
+        f.render_widget(
+            Paragraph::new(btn_text).alignment(Alignment::Center).style(btn_style),
+            rows[row_scan],
+        );
+    }
+
+    // Discovered server entries (fields 8..7+N)
+    for (i, ip) in modal.discovered_servers.iter().enumerate() {
+        let field_idx = 8 + i;
+        let is_selected = modal.selected_field == field_idx;
+        let (prefix, ip_style, hint) = if is_selected {
+            (
+                "  ▶ ",
+                Style::default().fg(accent_bright).add_modifier(Modifier::BOLD),
+                "  (Enter to use)",
+            )
+        } else {
+            ("    ", Style::default().fg(Color::White), "")
+        };
+        let lbl_style = if is_selected {
+            Style::default().fg(accent_bright)
+        } else {
+            Style::default().fg(accent_mid)
+        };
+        let line = Line::from(vec![
+            Span::styled(prefix, lbl_style),
+            Span::styled(ip.clone(), ip_style),
+            Span::styled(hint, Style::default().fg(accent_dim)),
+        ]);
+        f.render_widget(Paragraph::new(line), rows[10 + i]);
+    }
+
+
+    render_toggle(f, rows[row_colors], "Disable auto colors", modal.disable_auto_colors,
+                  modal.field_kind(modal.selected_field) == FieldKind::ToggleColors);
+
+    // Image protocol selector: < protocol >
+    {
+        let is_selected = modal.field_kind(modal.selected_field) == FieldKind::SelectorProtocol;
         let proto_name = IMAGE_PROTOCOLS[modal.image_protocol_idx];
         let val_style = if is_selected {
             Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
@@ -2833,27 +2903,27 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
             Span::styled(proto_name, val_style),
             Span::styled(if is_selected { " >" } else { "  " }, lbl_style),
         ]);
-        f.render_widget(Paragraph::new(line), rows[10]);
+        f.render_widget(Paragraph::new(line), rows[row_proto]);
     }
 
     if let Some(err) = &modal.error {
         let p = Paragraph::new(err.as_str())
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Red));
-        f.render_widget(p, rows[11]);
+        f.render_widget(p, rows[row_error]);
     }
 
     let btn_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[13]);
+        .split(rows[row_buttons]);
 
-    let ok_style = if modal.selected_field == 9 {
+    let ok_style = if modal.field_kind(modal.selected_field) == FieldKind::OkButton {
         Style::default().fg(Color::Black).bg(accent_bright).bold()
     } else {
         Style::default().fg(Color::White)
     };
-    let cancel_style = if modal.selected_field == 10 {
+    let cancel_style = if modal.field_kind(modal.selected_field) == FieldKind::CancelButton {
         Style::default().fg(Color::Black).bg(accent_bright).bold()
     } else {
         Style::default().fg(Color::White)

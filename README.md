@@ -34,7 +34,7 @@ A keyboard-driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (fo
 - Live now-playing bar with progress and volume display
 - Scrollbar in the navigation panel for long lists
 - In-app server configuration with full mouse support — changes apply immediately without restart
-- **Auto-discovery** — automatically finds a Lyrion server on the local network via UDP broadcast on startup
+- **Auto-discovery** — automatically finds a Lyrion server on the local network via UDP broadcast on startup; open config (`c`) and press **[ Scan Servers ]** to discover all available servers and pick one from the list
 - Optional **Nerd Font icons** throughout the UI (toggle in config)
 - Add any selected track, album, artist, or radio stream to the queue with `a` (non-destructive append)
 - In-app help screen listing all keyboard shortcuts
