@@ -132,6 +132,68 @@ fn yn(b: bool) -> &'static str {
     if b { "yes" } else { "no" }
 }
 
+async fn resolve_player(client: &LmsClient, cfg: &config::Config) -> Result<String> {
+    if let Some(id) = &cfg.default_player {
+        return Ok(id.clone());
+    }
+    let players = client.get_players().await?;
+    players.into_iter().next()
+        .map(|p| p.playerid)
+        .ok_or_else(|| anyhow::anyhow!("no players found on server"))
+}
+
+fn format_track(title: &str, artist: &str) -> String {
+    match (title.is_empty(), artist.is_empty()) {
+        (true, _)      => "(unknown)".to_string(),
+        (false, true)  => format!("\"{}\"", title),
+        (false, false) => format!("\"{}\" — {}", title, artist),
+    }
+}
+
+async fn cmd_play_pause() -> Result<()> {
+    let cfg = config::Config::load()?;
+    let credentials = cfg.username.as_ref().zip(cfg.password.as_ref())
+        .map(|(u, p)| (u.clone(), p.clone()));
+    let client = LmsClient::new(cfg.base_url(), credentials);
+    let pid = resolve_player(&client, &cfg).await?;
+    let np = client.get_now_playing(&pid).await?;
+    let track = format_track(&np.title, &np.artist);
+    if np.is_playing {
+        client.pause(&pid).await?;
+        println!("paused  {}", track);
+    } else {
+        client.play(&pid).await?;
+        println!("playing {}", track);
+    }
+    Ok(())
+}
+
+async fn cmd_next() -> Result<()> {
+    let cfg = config::Config::load()?;
+    let credentials = cfg.username.as_ref().zip(cfg.password.as_ref())
+        .map(|(u, p)| (u.clone(), p.clone()));
+    let client = LmsClient::new(cfg.base_url(), credentials);
+    let pid = resolve_player(&client, &cfg).await?;
+    client.next(&pid).await?;
+    if let Ok(np) = client.get_now_playing(&pid).await {
+        println!("next  {}", format_track(&np.title, &np.artist));
+    }
+    Ok(())
+}
+
+async fn cmd_prev() -> Result<()> {
+    let cfg = config::Config::load()?;
+    let credentials = cfg.username.as_ref().zip(cfg.password.as_ref())
+        .map(|(u, p)| (u.clone(), p.clone()));
+    let client = LmsClient::new(cfg.base_url(), credentials);
+    let pid = resolve_player(&client, &cfg).await?;
+    client.prev(&pid).await?;
+    if let Ok(np) = client.get_now_playing(&pid).await {
+        println!("prev  {}", format_track(&np.title, &np.artist));
+    }
+    Ok(())
+}
+
 const TICK_RATE: Duration = Duration::from_millis(250);
 const ART_RADIUS_NORMAL: u32 = 6;
 const ART_RADIUS_FULL:   u32 = 2;
@@ -147,6 +209,18 @@ async fn main() -> Result<()> {
         return print_info().await;
     }
 
+    if std::env::args().any(|a| a == "-p" || a == "--play-pause") {
+        return cmd_play_pause().await;
+    }
+
+    if std::env::args().any(|a| a == "--next") {
+        return cmd_next().await;
+    }
+
+    if std::env::args().any(|a| a == "--prev") {
+        return cmd_prev().await;
+    }
+
     if std::env::args().any(|a| a == "-h" || a == "--help") {
         print!(
             "\
@@ -158,6 +232,9 @@ USAGE:
 OPTIONS:
   -h, --help       Print this help message and exit
   -i, --info       Print saved config and live server/player info, then exit
+  -p, --play-pause Toggle play/pause on the default player
+      --next       Skip to the next track
+      --prev       Go to the previous track
 
 NAVIGATION:
   ↑/↓ / j/k       Move up/down in lists
