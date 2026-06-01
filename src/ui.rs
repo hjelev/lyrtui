@@ -555,12 +555,15 @@ pub fn draw(
     }
 
     if let Some(idx) = app.confirm_delete_queue_item {
-        let title = app.queue.get(idx).map(|t| t.title.as_str()).unwrap_or("");
+        let queue_len = app.queue.len();
+        let track = app.queue.get(idx);
+        let title = track.map(|t| t.title.as_str()).unwrap_or("");
+        let artist = track.and_then(|t| t.artist.as_deref()).unwrap_or("");
+        let album = track.and_then(|t| t.album.as_deref()).unwrap_or("");
+        let accent = app.effective_accent();
         draw_confirm_delete_queue_item(
-            f,
-            title,
-            app.delete_queue_selected_button,
-            app.effective_accent(),
+            f, title, artist, album, idx, queue_len,
+            app.delete_queue_selected_button, accent,
         );
     }
 
@@ -3519,14 +3522,19 @@ pub fn compute_sync_modal_rects(area: Rect, n_players: usize) -> (Rect, Vec<Rect
     (popup, player_rects, [sync_rect, cancel_rect])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_confirm_delete_queue_item(
     f: &mut Frame,
     title: &str,
-    selected_button: u8,
+    artist: &str,
+    album: &str,
+    idx: usize,
+    queue_len: usize,
+    selected: u8,
     accent: Option<[u8; 3]>,
 ) {
     let area = f.area();
-    let popup = centered_rect_abs(54, 7, area);
+    let popup = centered_rect_abs(54, 12, area);
 
     f.render_widget(Clear, popup);
 
@@ -3546,37 +3554,91 @@ fn draw_confirm_delete_queue_item(
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Length(1), // padding
+            Constraint::Length(1), // song title
+            Constraint::Length(1), // artist · album
+            Constraint::Length(1), // padding
+            Constraint::Length(1), // option 0
+            Constraint::Length(1), // option 1
+            Constraint::Length(1), // option 2
+            Constraint::Length(1), // option 3
+            Constraint::Length(1), // option 4 (cancel)
             Constraint::Min(0),
-            Constraint::Length(1),
         ])
         .split(inner);
 
-    let display_title = if title.len() > 46 {
-        format!("{}…", &title[..45])
-    } else {
-        title.to_string()
-    };
-    let msg = Paragraph::new(format!("Remove \"{}\"?", display_title))
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::White));
-    f.render_widget(msg, rows[1]);
+    let max_w = inner.width.saturating_sub(2) as usize;
 
-    render_two_button_dialog(f, rows[3], selected_button, accent_color, "[ OK ]", "[ Cancel ]");
+    let display_title = truncate_ellipsis(title, max_w);
+    f.render_widget(
+        Paragraph::new(display_title)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        rows[1],
+    );
+
+    let meta = match (artist, album) {
+        ("", "") => String::new(),
+        (a, "") => a.to_string(),
+        ("", al) => al.to_string(),
+        (a, al) => format!("{} · {}", a, al),
+    };
+    if !meta.is_empty() {
+        let display_meta = truncate_ellipsis(&meta, max_w);
+        f.render_widget(
+            Paragraph::new(display_meta)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::DarkGray)),
+            rows[2],
+        );
+    }
+
+    let options = [
+        ("Remove this song", true),
+        ("Remove songs before this", idx > 0),
+        ("Remove songs after this", idx + 1 < queue_len),
+        ("Clear entire queue", true),
+        ("Cancel", true),
+    ];
+
+    for (i, (label, enabled)) in options.iter().enumerate() {
+        let is_selected = selected as usize == i;
+        let prefix = if is_selected { "▶ " } else { "  " };
+        let style = if !enabled {
+            Style::default().fg(Color::DarkGray)
+        } else if is_selected {
+            Style::default().fg(accent_color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        f.render_widget(Paragraph::new(format!("{}{}", prefix, label)).style(style), rows[4 + i]);
+    }
 }
 
-/// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
-pub fn compute_delete_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
-    let popup = centered_rect_abs(54, 7, area);
+fn truncate_ellipsis(s: &str, max_chars: usize) -> String {
+    if s.chars().count() > max_chars {
+        let cut: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+        format!("{}…", cut)
+    } else {
+        s.to_string()
+    }
+}
+
+/// Returns (popup_rect, [option_rects; 5]) for click-hit-testing the 5 menu rows.
+pub fn compute_delete_queue_button_rects(area: Rect) -> (Rect, [Rect; 5]) {
+    let popup = centered_rect_abs(54, 12, area);
     let inner_x = popup.x + 1;
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
-    let btn_y = inner_y + 4;
-    let half_w = inner_w / 2;
-    let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
-    let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
-    (popup, [ok_rect, cancel_rect])
+    // rows: padding(0), title(1), meta(2), padding(3), opt0(4), opt1(5), opt2(6), opt3(7), opt4(8)
+    let rects = [
+        Rect::new(inner_x, inner_y + 4, inner_w, 1),
+        Rect::new(inner_x, inner_y + 5, inner_w, 1),
+        Rect::new(inner_x, inner_y + 6, inner_w, 1),
+        Rect::new(inner_x, inner_y + 7, inner_w, 1),
+        Rect::new(inner_x, inner_y + 8, inner_w, 1),
+    ];
+    (popup, rects)
 }
 
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>) {

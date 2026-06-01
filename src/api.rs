@@ -608,6 +608,27 @@ impl LmsClient {
         Ok(())
     }
 
+    /// Remove all items before `idx` by repeatedly deleting index 0.
+    pub async fn delete_queue_items_before(&self, player_id: &str, idx: usize) -> Result<()> {
+        for _ in 0..idx {
+            self.delete_queue_item(player_id, 0).await?;
+        }
+        Ok(())
+    }
+
+    /// Remove all items after `idx` by repeatedly deleting index `idx + 1`.
+    pub async fn delete_queue_items_after(
+        &self,
+        player_id: &str,
+        idx: usize,
+        total: usize,
+    ) -> Result<()> {
+        for _ in (idx + 1)..total {
+            self.delete_queue_item(player_id, idx + 1).await?;
+        }
+        Ok(())
+    }
+
     pub async fn add_url_with_title_to_queue(
         &self,
         player_id: &str,

@@ -1,10 +1,8 @@
 # lyrtui
 
-A fast, keyboard and mouse driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (formerly Logitech Media Server / Squeezebox Server), written in Rust.
-
-Browse and search your music library, internet radio, and installed streaming apps (Spotify, Deezer ...). Control playback across multiple players with sync and global-volume support; and enjoy a now-playing panel with inline album art that adapts the UI's accent color to the current cover. Full mouse support throughout — click to navigate, play, seek the progress bar, adjust volume, manage queues, sync players, and edit server settings — while every action also has a keyboard shortcut. It auto-discovers your server on the local network and reconnects gracefully when it goes away.
-
-## Screenshot
+<p align="center">
+  <a href="https://github.com/hjelev/lyrtui/actions"><img src="https://github.com/hjelev/lyrtui/actions/workflows/release.yml/badge.svg" alt="Build Status"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/v/lyrtui.svg" alt="Crates.io Version"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/d/lyrtui.svg" alt="Crates.io Downloads"></a>&nbsp;<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+</p>
 
 ![Shell Buddy screenshot](screenshots/screenshot.png)
 
@@ -18,6 +16,11 @@ Browse and search your music library, internet radio, and installed streaming ap
   <img src="screenshots/screenshot-6.png" alt="Screenshot" width="1024"/>
   <img src="screenshots/screenshot-7.png" alt="Screenshot" width="1024"/>
 </details>
+
+
+A fast, keyboard and mouse driven terminal UI for [Lyrion Music Server](https://lyrion.org/) (formerly Logitech Media Server / Squeezebox Server), written in Rust.
+
+Browse and search your music library, internet radio, and installed streaming apps (Spotify, Deezer ...). Control playback across multiple players with sync and global-volume support; and enjoy a now-playing panel with inline album art that adapts the UI's accent color to the current cover. Full mouse support throughout — click to navigate, play, seek the progress bar, adjust volume, manage queues, sync players, and edit server settings — while every action also has a keyboard shortcut. It auto-discovers your server on the local network and reconnects gracefully when it goes away.
 
 ## Features
 

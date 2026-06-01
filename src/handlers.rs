@@ -244,32 +244,21 @@ pub async fn handle_mouse_event(
     // Delete queue item dialog intercepts all mouse events when open
     if let Some(idx) = app.confirm_delete_queue_item {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let (popup, [ok_rect, cancel_rect]) =
-                ui::compute_delete_queue_button_rects(terminal_area);
-            if point_in(col, row, ok_rect) {
-                app.confirm_delete_queue_item = None;
-                if let Some(pid) = app.active_pid()
-                    && idx < app.queue.len()
-                {
-                    let name = app.queue[idx].title.clone();
-                    let c = client.clone();
-                    let t = tx.clone();
-                    tokio::spawn(async move {
-                        if c.delete_queue_item(&pid, idx).await.is_ok() {
-                            let _ = t
-                                .send(AppMsg::StatusMsg(format!(
-                                    "Removed \"{}\" from queue",
-                                    name
-                                )))
-                                .await;
-                        }
-                    });
-                    app.queue.remove(idx);
-                    if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
-                        app.main_selected = app.queue.len() - 1;
+            let queue_len = app.queue.len();
+            let (popup, opt_rects) = ui::compute_delete_queue_button_rects(terminal_area);
+            let clicked = opt_rects.iter().enumerate().find_map(|(i, r)| {
+                if point_in(col, row, *r) { Some(i as u8) } else { None }
+            });
+            if let Some(choice) = clicked {
+                let enabled = [true, idx > 0, idx + 1 < queue_len, true, true];
+                if enabled[choice as usize] {
+                    app.confirm_delete_queue_item = None;
+                    app.delete_queue_selected_button = 0;
+                    if choice < 4 {
+                        execute_delete_queue_choice(app, client, tx, idx, choice, queue_len);
                     }
                 }
-            } else if point_in(col, row, cancel_rect) || !point_in(col, row, popup) {
+            } else if !point_in(col, row, popup) {
                 app.confirm_delete_queue_item = None;
             }
         }
@@ -928,28 +917,61 @@ pub async fn handle_confirm_quit_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Delete queue item `idx`: fire the removal (surfacing a status message), drop it from the
-/// local queue, and clamp the selection. Shared by the `y` and `Enter` confirm branches.
-fn execute_delete_queue_item(
+fn next_enabled_delete_option(sel: u8, dir: i8, enabled: &[bool; 5]) -> u8 {
+    let mut s = sel as i8;
+    for _ in 0..5 {
+        s = (s + dir).rem_euclid(5);
+        if enabled[s as usize] { return s as u8; }
+    }
+    sel
+}
+
+/// Execute one of the four queue-removal choices (0=this, 1=before, 2=after, 3=all).
+fn execute_delete_queue_choice(
     app: &mut App,
     client: &Arc<LmsClient>,
     tx: &mpsc::Sender<AppMsg>,
     idx: usize,
+    choice: u8,
+    queue_len: usize,
 ) {
-    if let Some(pid) = app.active_pid()
-        && idx < app.queue.len()
-    {
-        let name = app.queue[idx].title.clone();
-        spawn_status(
-            client,
-            tx,
-            format!("Removed \"{}\" from queue", name),
-            move |c| async move { c.delete_queue_item(&pid, idx).await },
-        );
-        app.queue.remove(idx);
-        if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
-            app.main_selected = app.queue.len() - 1;
+    let Some(pid) = app.active_pid() else { return };
+    match choice {
+        0 => {
+            if idx < app.queue.len() {
+                let name = app.queue[idx].title.clone();
+                spawn_status(client, tx, format!("Removed \"{}\" from queue", name),
+                    move |c| async move { c.delete_queue_item(&pid, idx).await });
+                app.queue.remove(idx);
+                if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
+                    app.main_selected = app.queue.len() - 1;
+                }
+            }
         }
+        1 => {
+            if idx > 0 {
+                spawn_status(client, tx, format!("Removed {} songs before this", idx),
+                    move |c| async move { c.delete_queue_items_before(&pid, idx).await });
+                app.queue.drain(0..idx);
+                app.main_selected = 0;
+            }
+        }
+        2 => {
+            let after = queue_len.saturating_sub(idx + 1);
+            if after > 0 {
+                spawn_status(client, tx, format!("Removed {} songs after this", after),
+                    move |c| async move { c.delete_queue_items_after(&pid, idx, queue_len).await });
+                app.queue.truncate(idx + 1);
+                if app.main_selected > idx { app.main_selected = idx; }
+            }
+        }
+        3 => {
+            spawn_status(client, tx, "Queue cleared".to_string(),
+                move |c| async move { c.clear_queue(&pid).await });
+            app.queue.clear();
+            app.main_selected = 0;
+        }
+        _ => {}
     }
 }
 
@@ -959,26 +981,32 @@ pub async fn handle_confirm_delete_queue_item_key(
     client: &Arc<LmsClient>,
     tx: &mpsc::Sender<AppMsg>,
 ) {
+    let Some(idx) = app.confirm_delete_queue_item else { return };
+    let queue_len = app.queue.len();
+    let enabled = [true, idx > 0, idx + 1 < queue_len, true, true];
     match key.code {
-        KeyCode::Tab | KeyCode::Right | KeyCode::Left => {
-            app.delete_queue_selected_button = 1 - app.delete_queue_selected_button;
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.delete_queue_selected_button =
+                next_enabled_delete_option(app.delete_queue_selected_button, -1, &enabled);
         }
-        KeyCode::Char('y') => {
-            if let Some(idx) = app.confirm_delete_queue_item.take() {
-                app.delete_queue_selected_button = 0;
-                execute_delete_queue_item(app, client, tx, idx);
-            }
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
+            app.delete_queue_selected_button =
+                next_enabled_delete_option(app.delete_queue_selected_button, 1, &enabled);
+        }
+        KeyCode::Char('y') | KeyCode::Char('d') => {
+            app.confirm_delete_queue_item = None;
+            app.delete_queue_selected_button = 0;
+            execute_delete_queue_choice(app, client, tx, idx, 0, queue_len);
         }
         KeyCode::Enter => {
-            let confirmed = app.delete_queue_selected_button == 0;
-            if let Some(idx) = app.confirm_delete_queue_item.take() {
-                app.delete_queue_selected_button = 0;
-                if confirmed {
-                    execute_delete_queue_item(app, client, tx, idx);
-                }
+            let choice = app.delete_queue_selected_button;
+            app.confirm_delete_queue_item = None;
+            app.delete_queue_selected_button = 0;
+            if choice < 4 {
+                execute_delete_queue_choice(app, client, tx, idx, choice, queue_len);
             }
         }
-        KeyCode::Esc => {
+        KeyCode::Esc | KeyCode::Char('q') => {
             app.confirm_delete_queue_item = None;
             app.delete_queue_selected_button = 0;
         }
