@@ -34,7 +34,7 @@ pub fn discover_lms_all(broadcast_addr: &str, timeout: Duration) -> Vec<String> 
                 // Re-broadcast to catch servers that respond late.
                 let _ = socket.send_to(packet, &target);
             }
-            _ => {}
+            _ => break,
         }
     }
     found

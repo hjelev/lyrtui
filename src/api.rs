@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::sync::RwLock;
+use std::{sync::RwLock, time::Duration};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Player {
@@ -147,7 +147,11 @@ pub struct LmsClient {
 impl LmsClient {
     pub fn new(base_url: String, credentials: Option<(String, String)>) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(10))
+                .connect_timeout(Duration::from_secs(5))
+                .build()
+                .expect("failed to build HTTP client"),
             base_url: RwLock::new(base_url),
             credentials: RwLock::new(credentials),
         }
@@ -155,23 +159,23 @@ impl LmsClient {
 
     /// Update the server URL in-place; background tasks pick it up on their next iteration.
     pub fn update_base_url(&self, url: String) {
-        *self.base_url.write().unwrap() = url;
+        *self.base_url.write().unwrap_or_else(|e| e.into_inner()) = url;
     }
 
     /// Update credentials in-place; background tasks pick them up on their next iteration.
     pub fn update_credentials(&self, credentials: Option<(String, String)>) {
-        *self.credentials.write().unwrap() = credentials;
+        *self.credentials.write().unwrap_or_else(|e| e.into_inner()) = credentials;
     }
 
     pub fn server_base_url(&self) -> String {
-        let url = self.base_url.read().unwrap().clone();
+        let url = self.base_url.read().unwrap_or_else(|e| e.into_inner()).clone();
         url.trim_end_matches("/jsonrpc.js").to_string()
     }
 
     async fn rpc(&self, player_id: &str, params: &[Value]) -> Result<Value> {
         // Clone URL and credentials before any await so we don't hold locks across await points.
-        let url = self.base_url.read().unwrap().clone();
-        let creds = self.credentials.read().unwrap().clone();
+        let url = self.base_url.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let creds = self.credentials.read().unwrap_or_else(|e| e.into_inner()).clone();
         let body = json!({
             "id": 1,
             "method": "slim.request",
@@ -894,7 +898,7 @@ impl LmsClient {
     }
 
     pub async fn fetch_image_bytes(&self, url: &str) -> Result<Vec<u8>> {
-        let creds = self.credentials.read().unwrap().clone();
+        let creds = self.credentials.read().unwrap_or_else(|e| e.into_inner()).clone();
         let mut req = self.client.get(url);
         if let Some((user, pass)) = creds {
             req = req.basic_auth(user, Some(pass));
