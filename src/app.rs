@@ -472,6 +472,12 @@ impl App {
         }
     }
 
+    /// The active player id, cloned. Most action handlers no-op without one; this names the
+    /// repeated `self.active_player.clone()` access used throughout the handlers.
+    pub fn active_pid(&self) -> Option<String> {
+        self.active_player.clone()
+    }
+
     pub fn is_playing(&self) -> bool {
         self.now_playing
             .as_ref()

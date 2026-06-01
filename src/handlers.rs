@@ -81,7 +81,7 @@ where
 /// column `col` within the progress-bar fill rect `bar`. Updates the elapsed
 /// time optimistically so the bar moves immediately, then fires the seek.
 fn seek_to_click(app: &mut App, client: &Arc<LmsClient>, col: u16, bar: Rect) {
-    let Some(pid) = app.active_player.clone() else {
+    let Some(pid) = app.active_pid() else {
         return;
     };
     let Some(np) = app.now_playing.as_ref() else {
@@ -117,7 +117,7 @@ fn cycle_search_scope(
     if !app.search_query.is_empty() {
         app.search_results = vec![];
         app.main_selected = 0;
-        let player_id = app.active_player.clone().unwrap_or_default();
+        let player_id = app.active_pid().unwrap_or_default();
         background::trigger_search(
             app.search_query.clone(),
             app.search_scope.clone(),
@@ -187,7 +187,7 @@ pub async fn handle_mouse_event(
                 ui::compute_clear_queue_button_rects(terminal_area);
             if point_in(col, row, ok_rect) {
                 app.confirm_clear_queue = false;
-                if let Some(pid) = app.active_player.clone() {
+                if let Some(pid) = app.active_pid() {
                     let c = client.clone();
                     let t = tx.clone();
                     tokio::spawn(async move {
@@ -225,7 +225,7 @@ pub async fn handle_mouse_event(
                 ui::compute_delete_queue_button_rects(terminal_area);
             if point_in(col, row, ok_rect) {
                 app.confirm_delete_queue_item = None;
-                if let Some(pid) = app.active_player.clone()
+                if let Some(pid) = app.active_pid()
                     && idx < app.queue.len()
                 {
                     let name = app.queue[idx].title.clone();
@@ -359,7 +359,7 @@ pub async fn handle_mouse_event(
                         let idx = main_state.offset() + rel / 2;
                         if idx < app.queue.len() {
                             app.main_selected = idx;
-                            if let Some(pid) = app.active_player.clone() {
+                            if let Some(pid) = app.active_pid() {
                                 spawn_fire(client, move |c| async move {
                                     c.play_track_index(&pid, idx).await
                                 });
@@ -371,7 +371,7 @@ pub async fn handle_mouse_event(
                     ui::compute_full_art_footer_vol_icon_rect(terminal_area, app)
                     && point_in(col, row, vol_rect)
                 {
-                    if let Some(pid) = app.active_player.clone() {
+                    if let Some(pid) = app.active_pid() {
                         toggle_mute_player(app, vol_sync_tx, &pid);
                     }
                     return;
@@ -455,7 +455,7 @@ pub async fn handle_mouse_event(
                 ui::compute_statusbar_vol_icon_rect(terminal_area, app.status_height, app)
                 && point_in(col, row, vol_rect)
             {
-                if let Some(pid) = app.active_player.clone() {
+                if let Some(pid) = app.active_pid() {
                     toggle_mute_player(app, vol_sync_tx, &pid);
                 }
                 return;
@@ -856,7 +856,7 @@ pub async fn handle_confirm_clear_queue_key(
         KeyCode::Char('y') => {
             app.confirm_clear_queue = false;
             app.clear_queue_selected_button = 0;
-            if let Some(pid) = app.active_player.clone() {
+            if let Some(pid) = app.active_pid() {
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {
@@ -870,7 +870,7 @@ pub async fn handle_confirm_clear_queue_key(
             let confirmed = app.clear_queue_selected_button == 0;
             app.confirm_clear_queue = false;
             app.clear_queue_selected_button = 0;
-            if confirmed && let Some(pid) = app.active_player.clone() {
+            if confirmed && let Some(pid) = app.active_pid() {
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {
@@ -926,7 +926,7 @@ pub async fn handle_confirm_delete_queue_item_key(
         KeyCode::Char('y') => {
             if let Some(idx) = app.confirm_delete_queue_item.take() {
                 app.delete_queue_selected_button = 0;
-                if let Some(pid) = app.active_player.clone()
+                if let Some(pid) = app.active_pid()
                     && idx < app.queue.len()
                 {
                     let name = app.queue[idx].title.clone();
@@ -954,7 +954,7 @@ pub async fn handle_confirm_delete_queue_item_key(
             if let Some(idx) = app.confirm_delete_queue_item.take() {
                 app.delete_queue_selected_button = 0;
                 if confirmed
-                    && let Some(pid) = app.active_player.clone()
+                    && let Some(pid) = app.active_pid()
                     && idx < app.queue.len()
                 {
                     let name = app.queue[idx].title.clone();
@@ -1006,7 +1006,7 @@ async fn execute_context_menu_action(
 }
 
 async fn handle_insert_next(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
-    let Some(pid) = app.active_player.clone() else {
+    let Some(pid) = app.active_pid() else {
         app.status_message = Some("No active player".to_string());
         return;
     };
@@ -1119,7 +1119,7 @@ async fn handle_add_to_favorites(
     client: &Arc<LmsClient>,
     tx: &mpsc::Sender<AppMsg>,
 ) {
-    let Some(pid) = app.active_player.clone() else {
+    let Some(pid) = app.active_pid() else {
         app.status_message = Some("No active player".to_string());
         return;
     };
@@ -1261,7 +1261,7 @@ fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta:
             app.volume_pending.insert(pid.clone(), now);
             let _ = vol_sync_tx.try_send((pid.clone(), nv));
         }
-        if let Some(active_pid) = app.active_player.clone()
+        if let Some(active_pid) = app.active_pid()
             && let Some(nv) = app.player_volumes.get(&active_pid).copied()
             && let Some(np) = app.now_playing.as_mut()
         {
@@ -1288,7 +1288,7 @@ fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta:
             }
             let _ = vol_sync_tx.try_send((pid, nv));
         }
-    } else if let Some(pid) = app.active_player.clone() {
+    } else if let Some(pid) = app.active_pid() {
         let nv = new_vol(app.now_playing.as_ref().map(|n| n.volume).unwrap_or(50));
         if let Some(np) = app.now_playing.as_mut() {
             np.volume = nv;
@@ -1441,7 +1441,7 @@ pub async fn handle_action(
 
         Action::Select => {
             if app.full_art_mode {
-                if let Some(pid) = app.active_player.clone() {
+                if let Some(pid) = app.active_pid() {
                     let idx = app.main_selected;
                     spawn_fire(client, move |c| async move {
                         c.play_track_index(&pid, idx).await
@@ -1559,7 +1559,7 @@ pub async fn handle_action(
         }
 
         Action::PlayPause => {
-            if let Some(pid) = app.active_player.clone() {
+            if let Some(pid) = app.active_pid() {
                 let c = client.clone();
                 let playing = app.is_playing();
                 tokio::spawn(async move {
@@ -1573,19 +1573,19 @@ pub async fn handle_action(
         }
 
         Action::Next => {
-            if let Some(pid) = app.active_player.clone() {
+            if let Some(pid) = app.active_pid() {
                 spawn_fire(client, move |c| async move { c.next(&pid).await });
             }
         }
 
         Action::Stop => {
-            if let Some(pid) = app.active_player.clone() {
+            if let Some(pid) = app.active_pid() {
                 spawn_fire(client, move |c| async move { c.stop(&pid).await });
             }
         }
 
         Action::Prev => {
-            if let Some(pid) = app.active_player.clone() {
+            if let Some(pid) = app.active_pid() {
                 spawn_fire(client, move |c| async move { c.prev(&pid).await });
             }
         }
@@ -1611,7 +1611,7 @@ pub async fn handle_action(
                     let pid = player.playerid.clone();
                     toggle_mute_player(app, vol_sync_tx, &pid);
                 }
-            } else if let Some(pid) = app.active_player.clone() {
+            } else if let Some(pid) = app.active_pid() {
                 toggle_mute_player(app, vol_sync_tx, &pid);
             }
         }
@@ -1654,7 +1654,7 @@ pub async fn handle_action(
         }
 
         Action::ToggleShuffle => {
-            if let (Some(pid), Some(np)) = (app.active_player.clone(), app.now_playing.as_ref()) {
+            if let (Some(pid), Some(np)) = (app.active_pid(), app.now_playing.as_ref()) {
                 let new_val = if np.shuffle > 0 { 0u8 } else { 1 };
                 spawn_fire(client, move |c| async move {
                     c.set_shuffle(&pid, new_val).await
@@ -1663,7 +1663,7 @@ pub async fn handle_action(
         }
 
         Action::ToggleRepeat => {
-            if let (Some(pid), Some(np)) = (app.active_player.clone(), app.now_playing.as_ref()) {
+            if let (Some(pid), Some(np)) = (app.active_pid(), app.now_playing.as_ref()) {
                 let new_val = match np.repeat {
                     0 => 1u8, // off → repeat single track
                     1 => 2u8, // repeat single → repeat queue
@@ -1758,7 +1758,7 @@ async fn activate_sidebar_item(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc
             app.focus_sidebar = false;
             app.is_loading = true;
             background::load_fav_items(
-                app.active_player.clone().unwrap_or_default(),
+                app.active_pid().unwrap_or_default(),
                 None,
                 client.clone(),
                 tx.clone(),
@@ -2223,7 +2223,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                         background::load_folder_items(Some(item.id), client.clone(), tx.clone());
                     }
                     FolderItemType::Track => {
-                        if let Some(pid) = app.active_player.clone() {
+                        if let Some(pid) = app.active_pid() {
                             let track_id = item.id.to_string();
                             spawn_fire(client, move |c| async move {
                                 c.play_track(&pid, &track_id).await
@@ -2234,7 +2234,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
             }
         }
         MainView::Library(LibraryView::Playlists) => {
-            if let Some(pid) = app.active_player.clone()
+            if let Some(pid) = app.active_pid()
                 && let Some(playlist) = app.playlists.get(app.main_selected)
             {
                 let id = utils::json_id_to_string(&playlist.id);
@@ -2248,7 +2248,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
             }
         }
         MainView::Library(LibraryView::Tracks { album_id }) => {
-            if let Some(pid) = app.active_player.clone() {
+            if let Some(pid) = app.active_pid() {
                 let idx = app.main_selected;
                 let c = client.clone();
                 match album_id {
@@ -2271,7 +2271,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
             }
         }
         MainView::Queue => {
-            if let Some(pid) = app.active_player.clone() {
+            if let Some(pid) = app.active_pid() {
                 let idx = app.main_selected;
                 spawn_fire(client, move |c| async move {
                     c.play_track_index(&pid, idx).await
@@ -2300,7 +2300,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     && let Some(cmd) = item.cmd
                 {
                     let item_id = item.item_id;
-                    let pid = app.active_player.clone().unwrap_or_default();
+                    let pid = app.active_pid().unwrap_or_default();
                     let nav = RadioNav {
                         title: app.radio_title.clone(),
                         items: std::mem::take(&mut app.radio_items),
@@ -2312,7 +2312,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     app.is_loading = true;
                     background::load_radio_items(pid, cmd, item_id, client.clone(), tx.clone());
                 } else if item.is_playable()
-                    && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
+                    && let (Some(pid), Some(url)) = (app.active_pid(), item.url)
                 {
                     let name = item.name.clone();
                     spawn_fire(client, move |c| async move {
@@ -2337,7 +2337,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     && let Some(cmd) = item.cmd
                 {
                     let item_id = item.item_id;
-                    let pid = app.active_player.clone().unwrap_or_default();
+                    let pid = app.active_pid().unwrap_or_default();
                     let nav = RadioNav {
                         title: app.app_title.clone(),
                         items: std::mem::take(&mut app.app_items),
@@ -2349,7 +2349,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     app.is_loading = true;
                     background::load_app_items(pid, cmd, item_id, client.clone(), tx.clone());
                 } else if item.is_playable()
-                    && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
+                    && let (Some(pid), Some(url)) = (app.active_pid(), item.url)
                 {
                     let name = item.name.clone();
                     spawn_fire(client, move |c| async move {
@@ -2364,7 +2364,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     && let Some(item_cmd) = item.cmd.clone()
                     && item.item_id.is_some()
                 {
-                    let pid = app.active_player.clone().unwrap_or_default();
+                    let pid = app.active_pid().unwrap_or_default();
                     let nav = RadioNav {
                         title: app.app_title.clone(),
                         items: std::mem::take(&mut app.app_items),
@@ -2383,7 +2383,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                         tx.clone(),
                     );
                 } else if item.is_playable()
-                    && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
+                    && let (Some(pid), Some(url)) = (app.active_pid(), item.url)
                 {
                     let name = item.name.clone();
                     spawn_fire(client, move |c| async move {
@@ -2400,7 +2400,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                 if item.is_navigable()
                     && let Some(item_id) = item.item_id.clone()
                 {
-                    let pid = app.active_player.clone().unwrap_or_default();
+                    let pid = app.active_pid().unwrap_or_default();
                     let nav = RadioNav {
                         title: app.fav_title.clone(),
                         items: std::mem::take(&mut app.fav_items),
@@ -2412,7 +2412,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     app.is_loading = true;
                     background::load_fav_items(pid, Some(item_id), client.clone(), tx.clone());
                 } else if item.is_playable()
-                    && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
+                    && let (Some(pid), Some(url)) = (app.active_pid(), item.url)
                 {
                     let name = item.name.clone();
                     spawn_fire(client, move |c| async move {
@@ -2444,7 +2444,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     app.main_selected = 0;
                 }
                 SearchResultItem::Track(t) => {
-                    if let Some(pid) = app.active_player.clone() {
+                    if let Some(pid) = app.active_pid() {
                         let track_id = utils::extract_id(t.id.as_ref());
                         spawn_fire(client, move |c| async move {
                             c.play_track(&pid, &track_id).await
@@ -2452,7 +2452,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     }
                 }
                 SearchResultItem::Playlist(pl) => {
-                    if let Some(pid) = app.active_player.clone() {
+                    if let Some(pid) = app.active_pid() {
                         let playlist_id = utils::json_id_to_string(&pl.id);
                         spawn_fire(client, move |c| async move {
                             c.play_playlist(&pid, &playlist_id).await
@@ -2462,7 +2462,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                 SearchResultItem::AppItem(item) => {
                     if let Some(cmd) = item.cmd {
                         let item_id = item.item_id.clone();
-                        let pid = app.active_player.clone().unwrap_or_default();
+                        let pid = app.active_pid().unwrap_or_default();
                         app.app_items = vec![];
                         app.app_nav_stack = vec![];
                         app.app_title = item.name.clone();
@@ -2477,7 +2477,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                         && let Some(cmd) = item.cmd
                     {
                         let item_id = item.item_id.clone();
-                        let pid = app.active_player.clone().unwrap_or_default();
+                        let pid = app.active_pid().unwrap_or_default();
                         app.radio_items = vec![];
                         app.radio_nav_stack = vec![];
                         app.radio_title = item.name.clone();
@@ -2487,7 +2487,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                         app.is_loading = true;
                         background::load_radio_items(pid, cmd, item_id, client.clone(), tx.clone());
                     } else if item.is_playable()
-                        && let (Some(pid), Some(url)) = (app.active_player.clone(), item.url)
+                        && let (Some(pid), Some(url)) = (app.active_pid(), item.url)
                     {
                         let name = item.name.clone();
                         spawn_fire(client, move |c| async move {
@@ -2574,7 +2574,7 @@ async fn handle_add_parent_to_queue(
     client: &Arc<LmsClient>,
     tx: &mpsc::Sender<AppMsg>,
 ) {
-    let Some(pid) = app.active_player.clone() else {
+    let Some(pid) = app.active_pid() else {
         app.status_message = Some("No active player".to_string());
         return;
     };
@@ -2699,7 +2699,7 @@ fn spawn_replace_with_url(
 }
 
 async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
-    let Some(pid) = app.active_player.clone() else {
+    let Some(pid) = app.active_pid() else {
         app.status_message = Some("No active player".to_string());
         return;
     };
@@ -2948,7 +2948,7 @@ async fn handle_add_to_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::
 }
 
 async fn handle_replace_queue(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
-    let Some(pid) = app.active_player.clone() else {
+    let Some(pid) = app.active_pid() else {
         app.status_message = Some("No active player".to_string());
         return;
     };
@@ -3110,7 +3110,7 @@ async fn handle_replace_queue_with_parent(
     client: &Arc<LmsClient>,
     tx: &mpsc::Sender<AppMsg>,
 ) {
-    let Some(pid) = app.active_player.clone() else {
+    let Some(pid) = app.active_pid() else {
         app.status_message = Some("No active player".to_string());
         return;
     };
@@ -3189,7 +3189,7 @@ pub async fn handle_search_input_key(
             if !app.search_query.is_empty() {
                 app.search_results = vec![];
                 app.main_selected = 0;
-                let player_id = app.active_player.clone().unwrap_or_default();
+                let player_id = app.active_pid().unwrap_or_default();
                 background::trigger_search(
                     app.search_query.clone(),
                     app.search_scope.clone(),
@@ -3238,7 +3238,7 @@ pub async fn handle_app_search_input_key(
                 app.app_search_results = vec![];
                 app.main_selected = 0;
                 app.is_loading = true;
-                let player_id = app.active_player.clone().unwrap_or_default();
+                let player_id = app.active_pid().unwrap_or_default();
                 background::trigger_app_specific_search(
                     app.app_search_query.clone(),
                     cmd,

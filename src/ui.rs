@@ -831,6 +831,51 @@ fn track_row_item(
     }
 }
 
+/// Primary list line `<icon> <name>`: the icon is tinted with the focus accent when nerd
+/// icons are enabled, otherwise just the name is shown. Collapses the identical
+/// `if app.use_nerd_icons { ... } else { ... }` blocks repeated across the library views.
+fn nerd_line(app: &App, icon: &'static str, name: String) -> Line<'static> {
+    if app.use_nerd_icons {
+        Line::from(vec![
+            Span::styled(
+                icon,
+                Style::default().fg(focus_border_color(app.effective_accent())),
+            ),
+            Span::raw(name),
+        ])
+    } else {
+        Line::from(Span::raw(name))
+    }
+}
+
+/// Shared tail for the library views: renders a collected `RowItem` list with the common
+/// arguments (selection, focus, accent) so each arm only supplies its title, items and
+/// loading flag.
+#[allow(clippy::too_many_arguments)]
+fn render_two_row_view(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    title: &str,
+    items: Vec<RowItem>,
+    is_loading: bool,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+) {
+    draw_two_row_list(
+        f,
+        area,
+        title,
+        items,
+        app.main_selected,
+        !app.focus_sidebar,
+        is_loading,
+        state,
+        thumbnails,
+        app.effective_accent(),
+    );
+}
+
 fn draw_library(
     f: &mut Frame,
     app: &App,
@@ -840,7 +885,6 @@ fn draw_library(
     thumbnails: &mut HashMap<String, StatefulProtocol>,
     base: &str,
 ) {
-    let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
     match view {
         LibraryView::Artists => {
@@ -853,33 +897,12 @@ fn draw_library(
                         crate::utils::json_id_to_string(&a.id),
                         "artist.jpg",
                     )),
-                    line1: if app.use_nerd_icons {
-                        Line::from(vec![
-                            Span::styled(
-                                "\u{F007} ",
-                                Style::default().fg(focus_border_color(app.effective_accent())),
-                            ), // nf-fa-user
-                            Span::raw(a.artist.clone()),
-                        ])
-                    } else {
-                        Line::from(Span::raw(a.artist.clone()))
-                    },
+                    line1: nerd_line(app, "\u{F007} ", a.artist.clone()), // nf-fa-user
                     line2: Line::from(Span::styled("artist", Style::default().fg(mid))),
                     duration: None,
                 })
                 .collect();
-            draw_two_row_list(
-                f,
-                area,
-                " Artists ",
-                items,
-                app.main_selected,
-                focused,
-                false,
-                state,
-                thumbnails,
-                app.effective_accent(),
-            );
+            render_two_row_view(f, app, area, " Artists ", items, false, state, thumbnails);
         }
         LibraryView::AlbumArtists => {
             let items = app
@@ -891,33 +914,12 @@ fn draw_library(
                         crate::utils::json_id_to_string(&a.id),
                         "artist.jpg",
                     )),
-                    line1: if app.use_nerd_icons {
-                        Line::from(vec![
-                            Span::styled(
-                                "\u{F007} ",
-                                Style::default().fg(focus_border_color(app.effective_accent())),
-                            ), // nf-fa-user
-                            Span::raw(a.artist.clone()),
-                        ])
-                    } else {
-                        Line::from(Span::raw(a.artist.clone()))
-                    },
+                    line1: nerd_line(app, "\u{F007} ", a.artist.clone()), // nf-fa-user
                     line2: Line::from(Span::styled("album artist", Style::default().fg(mid))),
                     duration: None,
                 })
                 .collect();
-            draw_two_row_list(
-                f,
-                area,
-                " Album Artists ",
-                items,
-                app.main_selected,
-                focused,
-                false,
-                state,
-                thumbnails,
-                app.effective_accent(),
-            );
+            render_two_row_view(f, app, area, " Album Artists ", items, false, state, thumbnails);
         }
         LibraryView::Albums { .. } => {
             let items = app
@@ -931,34 +933,13 @@ fn draw_library(
                             crate::utils::json_id_to_string(&a.id),
                             "cover.jpg",
                         )),
-                        line1: if app.use_nerd_icons {
-                            Line::from(vec![
-                                Span::styled(
-                                    "\u{F025} ",
-                                    Style::default().fg(focus_border_color(app.effective_accent())),
-                                ), // nf-fa-headphones
-                                Span::raw(a.album.clone()),
-                            ])
-                        } else {
-                            Line::from(Span::raw(a.album.clone()))
-                        },
+                        line1: nerd_line(app, "\u{F025} ", a.album.clone()), // nf-fa-headphones
                         line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
                         duration: None,
                     }
                 })
                 .collect();
-            draw_two_row_list(
-                f,
-                area,
-                " Albums ",
-                items,
-                app.main_selected,
-                focused,
-                app.is_loading,
-                state,
-                thumbnails,
-                app.effective_accent(),
-            );
+            render_two_row_view(f, app, area, " Albums ", items, app.is_loading, state, thumbnails);
         }
         LibraryView::Tracks { album_id } => {
             let title = if album_id.is_some() {
@@ -989,18 +970,7 @@ fn draw_library(
                     track_row_item(t, i, is_current, thumb_url, mid, app.use_nerd_icons)
                 })
                 .collect();
-            draw_two_row_list(
-                f,
-                area,
-                title,
-                items,
-                app.main_selected,
-                focused,
-                app.is_loading,
-                state,
-                thumbnails,
-                app.effective_accent(),
-            );
+            render_two_row_view(f, app, area, title, items, app.is_loading, state, thumbnails);
         }
         LibraryView::Folder { .. } => {
             let breadcrumb = breadcrumb_str(
@@ -1044,18 +1014,7 @@ fn draw_library(
                     }
                 })
                 .collect();
-            draw_two_row_list(
-                f,
-                area,
-                &title,
-                items,
-                app.main_selected,
-                focused,
-                app.is_loading,
-                state,
-                thumbnails,
-                app.effective_accent(),
-            );
+            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
         }
         LibraryView::Playlists => {
             let items = app
@@ -1067,33 +1026,12 @@ fn draw_library(
                         crate::utils::json_id_to_string(&p.id),
                         "cover.jpg",
                     )),
-                    line1: if app.use_nerd_icons {
-                        Line::from(vec![
-                            Span::styled(
-                                "\u{F0C9} ",
-                                Style::default().fg(focus_border_color(app.effective_accent())),
-                            ), // nf-fa-list
-                            Span::raw(p.name.clone()),
-                        ])
-                    } else {
-                        Line::from(Span::raw(p.name.clone()))
-                    },
+                    line1: nerd_line(app, "\u{F0C9} ", p.name.clone()), // nf-fa-list
                     line2: Line::from(Span::styled("playlist", Style::default().fg(mid))),
                     duration: None,
                 })
                 .collect();
-            draw_two_row_list(
-                f,
-                area,
-                " Playlists ",
-                items,
-                app.main_selected,
-                focused,
-                app.is_loading,
-                state,
-                thumbnails,
-                app.effective_accent(),
-            );
+            render_two_row_view(f, app, area, " Playlists ", items, app.is_loading, state, thumbnails);
         }
     }
 }
@@ -1501,6 +1439,16 @@ fn draw_browse_list(
     );
 }
 
+/// Title bar for a browse view (` Radio `, ` Apps `, ` Favourites `, and their sub-levels):
+/// the current level name preceded by the breadcrumb of parent levels. Shared by the three
+/// browse wrappers below.
+fn browse_title(nav_stack: &[crate::app::RadioNav], current: &str) -> String {
+    format!(
+        " {} ",
+        breadcrumb_str(nav_stack.iter().map(|n| n.title.as_str()), current)
+    )
+}
+
 fn draw_radio(
     f: &mut Frame,
     app: &App,
@@ -1508,13 +1456,7 @@ fn draw_radio(
     state: &mut ListState,
     thumbnails: &mut HashMap<String, StatefulProtocol>,
 ) {
-    let title = format!(
-        " {} ",
-        breadcrumb_str(
-            app.radio_nav_stack.iter().map(|n| n.title.as_str()),
-            &app.radio_title
-        )
-    );
+    let title = browse_title(&app.radio_nav_stack, &app.radio_title);
     draw_browse_list(
         f,
         app,
@@ -1534,13 +1476,7 @@ fn draw_apps(
     state: &mut ListState,
     thumbnails: &mut HashMap<String, StatefulProtocol>,
 ) {
-    let title = format!(
-        " {} ",
-        breadcrumb_str(
-            app.app_nav_stack.iter().map(|n| n.title.as_str()),
-            &app.app_title
-        )
-    );
+    let title = browse_title(&app.app_nav_stack, &app.app_title);
     draw_browse_list(
         f,
         app,
@@ -1560,13 +1496,7 @@ fn draw_favourites(
     state: &mut ListState,
     thumbnails: &mut HashMap<String, StatefulProtocol>,
 ) {
-    let title = format!(
-        " {} ",
-        breadcrumb_str(
-            app.fav_nav_stack.iter().map(|n| n.title.as_str()),
-            &app.fav_title
-        )
-    );
+    let title = browse_title(&app.fav_nav_stack, &app.fav_title);
     draw_browse_list(
         f,
         app,
