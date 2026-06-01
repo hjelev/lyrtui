@@ -662,6 +662,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             scroll_area,
             total.saturating_sub(visible),
             offset,
+            visible,
             app.effective_accent(),
             app.focus_sidebar,
         );
@@ -1361,7 +1362,9 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             1,
             list_area.height,
         );
-        let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
+        let mut ss = ScrollbarState::new(total)
+            .position(offset)
+            .viewport_content_length(visible);
         let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
@@ -1787,6 +1790,7 @@ fn draw_search(
             scroll_area,
             total.saturating_sub(visible),
             offset,
+            visible,
             app.effective_accent(),
             results_focused,
         );
@@ -1944,6 +1948,7 @@ fn draw_app_search(
             scroll_area,
             total.saturating_sub(visible),
             offset,
+            visible,
             app.effective_accent(),
             results_focused,
         );
@@ -2038,7 +2043,9 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
             1,
             inner.height,
         );
-        let mut ss = ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+        let mut ss = ScrollbarState::new(content_lines as usize)
+            .position(scroll as usize)
+            .viewport_content_length(visible as usize);
         let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
@@ -2783,6 +2790,7 @@ fn draw_two_row_list(
             scroll_area,
             items.len().saturating_sub(visible),
             offset,
+            visible,
             accent,
             focused,
         );
@@ -2833,16 +2841,20 @@ fn render_bordered_panel(f: &mut Frame, block: Block<'_>, area: Rect) -> Rect {
 }
 
 /// Render a vertical accent-tinted scrollbar into `scroll_area`. `content_len` is the
-/// scrollable span (items beyond the visible window) and `offset` the current top index.
+/// scrollable span (items beyond the visible window), `offset` the current top index, and
+/// `visible` the number of items visible at once (used to size the thumb proportionally).
 fn render_scrollbar(
     f: &mut Frame,
     scroll_area: Rect,
     content_len: usize,
     offset: usize,
+    visible: usize,
     accent: Option<[u8; 3]>,
     focused: bool,
 ) {
-    let mut ss = ScrollbarState::new(content_len).position(offset);
+    let mut ss = ScrollbarState::new(content_len + visible)
+        .position(offset)
+        .viewport_content_length(visible);
     let (track_style, thumb_style) = scrollbar_accent_styles(accent, focused);
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .thumb_symbol("║")

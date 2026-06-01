@@ -1,20 +1,22 @@
-# lyrtui
+<p align="center">
+  <img src="screenshots/logo_tr.png" alt="lyrtui - lyrion music server in your terminal" width="500">
+</p>
 
 <p align="center">
   <a href="https://github.com/hjelev/lyrtui/actions"><img src="https://github.com/hjelev/lyrtui/actions/workflows/release.yml/badge.svg" alt="Build Status"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/v/lyrtui.svg" alt="Crates.io Version"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/d/lyrtui.svg" alt="Crates.io Downloads"></a>&nbsp;<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 </p>
 
-![Shell Buddy screenshot](screenshots/screenshot.png)
+![lyrtui screenshot](screenshots/screenshot.png)
 
 <details>
   <summary>Show more screenshots</summary>
-  <img src="screenshots/screenshot-1.png" alt="Screenshot" width="1024"/>
-  <img src="screenshots/screenshot-2.png" alt="Screenshot" width="1024"/>
-  <img src="screenshots/screenshot-3.png" alt="Screenshot" width="1024"/>
-  <img src="screenshots/screenshot-4.png" alt="Screenshot" width="1024"/>
-  <img src="screenshots/screenshot-5.png" alt="Screenshot" width="1024"/>
-  <img src="screenshots/screenshot-6.png" alt="Screenshot" width="1024"/>
-  <img src="screenshots/screenshot-7.png" alt="Screenshot" width="1024"/>
+  <img src="screenshots/screenshot-1.png" alt="lyrtui screenshot 2" width="1024"/>
+  <img src="screenshots/screenshot-2.png" alt="lyrtui screenshot 3" width="1024"/>
+  <img src="screenshots/screenshot-3.png" alt="lyrtui screenshot 4" width="1024"/>
+  <img src="screenshots/screenshot-4.png" alt="lyrtui screenshot 5" width="1024"/>
+  <img src="screenshots/screenshot-5.png" alt="lyrtui screenshot 6" width="1024"/>
+  <img src="screenshots/screenshot-6.png" alt="lyrtui screenshot 7" width="1024"/>
+  <img src="screenshots/screenshot-7.png" alt="lyrtui screenshot 8" width="1024"/>
 </details>
 
 
