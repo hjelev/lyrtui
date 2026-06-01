@@ -94,6 +94,22 @@ pub struct Album {
     pub id: Value,
     pub album: String,
     pub artist: Option<String>,
+    /// LMS "coverid" (the artwork-bearing track id). The album's own `id` only yields the
+    /// generic placeholder when fetched as `/music/{id}/cover.jpg`; real art needs this.
+    #[serde(default)]
+    pub artwork_track_id: Option<String>,
+}
+
+impl Album {
+    /// Cover-art URL, preferring the real coverid over the album id (which serves only the
+    /// generic placeholder when no art is attached to the album row itself).
+    pub fn cover_url(&self, base: &str) -> String {
+        let id = self
+            .artwork_track_id
+            .clone()
+            .unwrap_or_else(|| crate::utils::json_id_to_string(&self.id));
+        crate::utils::music_image_url(base, id, "cover.jpg")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -313,7 +329,7 @@ impl LmsClient {
     }
 
     pub async fn get_albums(&self, artist_id: Option<&str>) -> Result<Vec<Album>> {
-        let mut params = vec![json!("albums"), json!(0), json!(10000), json!("tags:al")];
+        let mut params = vec![json!("albums"), json!(0), json!(10000), json!("tags:alj")];
         if let Some(id) = artist_id {
             params.push(json!(format!("artist_id:{}", id)));
         }
@@ -374,13 +390,40 @@ impl LmsClient {
                     json!(0),
                     json!(limit),
                     json!("sort:new"),
-                    json!("tags:al"),
+                    json!("tags:alj"),
                 ],
             )
             .await?;
         let albums: Vec<Album> =
             serde_json::from_value(result["albums_loop"].take()).unwrap_or_default();
         Ok(albums)
+    }
+
+    /// Resolve a representative cover-art URL for an artist by looking up the coverid of their
+    /// first album. Works for primary album artists and featured contributors alike (LMS returns
+    /// an album the artist appears on). Returns `None` when the artist has no resolvable art.
+    pub async fn get_artist_artwork(&self, artist_id: &str) -> Option<String> {
+        let mut result = self
+            .rpc(
+                "",
+                &[
+                    json!("albums"),
+                    json!(0),
+                    json!(1),
+                    json!(format!("artist_id:{}", artist_id)),
+                    json!("tags:j"),
+                ],
+            )
+            .await
+            .ok()?;
+        let albums = take_array(&mut result, "albums_loop");
+        let cover_id =
+            crate::utils::json_id_to_opt_string(&albums.first()?["artwork_track_id"])?;
+        Some(crate::utils::music_image_url(
+            &self.server_base_url(),
+            cover_id,
+            "cover.jpg",
+        ))
     }
 
     pub async fn get_tracks(&self, album_id: &str) -> Result<Vec<Track>> {
@@ -733,6 +776,48 @@ impl LmsClient {
             .collect())
     }
 
+    /// Resolve a representative cover URL for a music folder by finding the first track inside it
+    /// (descending through up to a few levels of leading subfolders for album-of-discs layouts).
+    /// Folder rows carry no coverid of their own, so this is the "use the first track's art"
+    /// fallback. Returns `None` when no track with art is found.
+    pub async fn get_folder_artwork(&self, folder_id: u32) -> Option<String> {
+        let base = self.server_base_url();
+        let mut current = folder_id;
+        for _ in 0..4 {
+            let mut result = self
+                .rpc(
+                    "",
+                    &[
+                        json!("musicfolder"),
+                        json!(0),
+                        json!(100),
+                        json!(format!("folder_id:{}", current)),
+                        json!("tags:dltc"),
+                    ],
+                )
+                .await
+                .ok()?;
+            let items = take_array(&mut result, "folder_loop");
+            // First track wins — prefer its coverid, falling back to the track id (which LMS also
+            // resolves to the same art).
+            if let Some(cover) = items.iter().find_map(|v| {
+                (v["type"].as_str() == Some("track")).then(|| {
+                    crate::utils::json_id_to_opt_string(&v["coverid"])
+                        .or_else(|| crate::utils::json_id_to_opt_string(&v["id"]))
+                })?
+            }) {
+                return Some(crate::utils::music_image_url(&base, cover, "cover.jpg"));
+            }
+            // No direct tracks: descend into the first subfolder and try again.
+            current = items.iter().find_map(|v| {
+                (v["type"].as_str() != Some("track"))
+                    .then(|| v["id"].as_u64())
+                    .flatten()
+            })? as u32;
+        }
+        None
+    }
+
     pub async fn insert_track_next(&self, player_id: &str, track_id: &str) -> Result<()> {
         self.playlistcontrol(player_id, "insert", "track_id", track_id)
             .await
@@ -856,6 +941,7 @@ impl LmsClient {
                         id,
                         album: name,
                         artist: v["artist"].as_str().map(String::from),
+                        artwork_track_id: v["artwork_track_id"].as_str().map(String::from),
                     })
                 })
                 .collect();

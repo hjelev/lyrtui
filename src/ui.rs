@@ -706,9 +706,9 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let entries: [(&str, &str, &str); 8] = if app.use_nerd_icons {
         [
             ("\u{F0C0}", "Artists", "your music library by artist"),        // nf-fa-users
-            ("\u{F007}", "Album Artists", "artists with full albums"),       // nf-fa-user
+            ("\u{F2BD}", "Album Artists", "artists with full albums"),       // nf-fa-user_circle
             ("\u{F017}", "Recently Played Artists", "artists you played lately"), // nf-fa-clock-o
-            ("\u{F025}", "Albums", "all albums"),                           // nf-fa-headphones
+            ("\u{EDE9}", "Albums", "all albums"),                           // nf-fa-compact_disc
             ("\u{F005}", "Popular Albums", "most recently added albums"),    // nf-fa-star
             ("\u{F001}", "Tracks", "all tracks"),                           // nf-fa-music
             ("\u{F0C9}", "Playlists", "saved playlists"),                   // nf-fa-list
@@ -897,11 +897,7 @@ fn draw_library(
                 .artists
                 .iter()
                 .map(|a| RowItem {
-                    thumb_url: Some(crate::utils::music_image_url(
-                        base,
-                        crate::utils::json_id_to_string(&a.id),
-                        "artist.jpg",
-                    )),
+                    thumb_url: crate::utils::artist_artwork_url(app, &a.id),
                     line1: nerd_line(app, "\u{F007} ", a.artist.clone()), // nf-fa-user
                     line2: Line::from(Span::styled("artist", Style::default().fg(mid))),
                     duration: None,
@@ -914,12 +910,8 @@ fn draw_library(
                 .album_artists
                 .iter()
                 .map(|a| RowItem {
-                    thumb_url: Some(crate::utils::music_image_url(
-                        base,
-                        crate::utils::json_id_to_string(&a.id),
-                        "artist.jpg",
-                    )),
-                    line1: nerd_line(app, "\u{F007} ", a.artist.clone()), // nf-fa-user
+                    thumb_url: crate::utils::artist_artwork_url(app, &a.id),
+                    line1: nerd_line(app, "\u{F2BD} ", a.artist.clone()), // nf-fa-user_circle
                     line2: Line::from(Span::styled("album artist", Style::default().fg(mid))),
                     duration: None,
                 })
@@ -933,12 +925,8 @@ fn draw_library(
                 .map(|a| {
                     let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
                     RowItem {
-                        thumb_url: Some(crate::utils::music_image_url(
-                            base,
-                            crate::utils::json_id_to_string(&a.id),
-                            "cover.jpg",
-                        )),
-                        line1: nerd_line(app, "\u{F025} ", a.album.clone()), // nf-fa-headphones
+                        thumb_url: Some(a.cover_url(base)),
+                        line1: nerd_line(app, "\u{EDE9} ", a.album.clone()), // nf-fa-compact_disc
                         line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
                         duration: None,
                     }
@@ -997,7 +985,7 @@ fn draw_library(
                         thumb_url: if is_track {
                             Some(crate::utils::music_image_url(base, item.id, "cover.jpg"))
                         } else {
-                            None
+                            app.folder_artwork.get(&item.id).cloned().flatten()
                         },
                         line1: Line::from(Span::styled(
                             format!("{}{}", icon, item.filename),
@@ -1043,11 +1031,7 @@ fn draw_library(
                 .recent_artists
                 .iter()
                 .map(|a| RowItem {
-                    thumb_url: Some(crate::utils::music_image_url(
-                        base,
-                        crate::utils::json_id_to_string(&a.id),
-                        "artist.jpg",
-                    )),
+                    thumb_url: crate::utils::artist_artwork_url(app, &a.id),
                     line1: nerd_line(app, "\u{F007} ", a.artist.clone()), // nf-fa-user
                     line2: Line::from(Span::styled(
                         "recently played",
@@ -1074,12 +1058,8 @@ fn draw_library(
                 .map(|a| {
                     let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
                     RowItem {
-                        thumb_url: Some(crate::utils::music_image_url(
-                            base,
-                            crate::utils::json_id_to_string(&a.id),
-                            "cover.jpg",
-                        )),
-                        line1: nerd_line(app, "\u{F025} ", a.album.clone()), // nf-fa-headphones
+                        thumb_url: Some(a.cover_url(base)),
+                        line1: nerd_line(app, "\u{EDE9} ", a.album.clone()), // nf-fa-compact_disc
                         line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
                         duration: None,
                     }
@@ -1710,16 +1690,8 @@ fn draw_search(
         };
 
         let thumb_url = match &app.search_results[vis_i] {
-            SearchResultItem::Artist(a) => Some(crate::utils::music_image_url(
-                base,
-                crate::utils::json_id_to_string(&a.id),
-                "artist.jpg",
-            )),
-            SearchResultItem::Album(alb) => Some(crate::utils::music_image_url(
-                base,
-                crate::utils::json_id_to_string(&alb.id),
-                "cover.jpg",
-            )),
+            SearchResultItem::Artist(a) => crate::utils::artist_artwork_url(app, &a.id),
+            SearchResultItem::Album(alb) => Some(alb.cover_url(base)),
             SearchResultItem::Track(t) => t.id.as_ref().map(|id| {
                 crate::utils::music_image_url(
                     base,
@@ -1756,10 +1728,10 @@ fn draw_search(
                 Line::from(vec![
                     Span::styled(
                         if app.use_nerd_icons {
-                            "\u{F025} "
+                            "\u{EDE9} "
                         } else {
                             "▸ "
-                        }, // nf-fa-headphones
+                        }, // nf-fa-compact_disc
                         Style::default().fg(focus_border_color(app.effective_accent())),
                     ),
                     Span::styled(alb.album.clone(), Style::default().fg(Color::White)),

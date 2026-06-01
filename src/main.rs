@@ -383,6 +383,10 @@ async fn run(
     let mut thumbnail_images: HashMap<String, image::DynamicImage> = HashMap::new();
     let mut pending_thumbs: HashSet<String> = HashSet::new();
     let mut failed_thumbs: HashSet<String> = HashSet::new();
+    // Artist ids whose representative cover art is currently being resolved (see resolution loop).
+    let mut pending_artist_art: HashSet<String> = HashSet::new();
+    // Folder ids whose representative cover art is currently being resolved.
+    let mut pending_folder_art: HashSet<u32> = HashSet::new();
 
     // Background: server health + player list polling
     {
@@ -552,6 +556,15 @@ async fn run(
                     pending_thumbs.remove(&url);
                     failed_thumbs.insert(url);
                 }
+                AppMsg::ArtistArtworkResolved(artist_id, url) => {
+                    pending_artist_art.remove(&artist_id);
+                    // Cache `None` too, so an artist with no resolvable art is not re-queried.
+                    app.artist_artwork.insert(artist_id, url);
+                }
+                AppMsg::FolderArtworkResolved(folder_id, url) => {
+                    pending_folder_art.remove(&folder_id);
+                    app.folder_artwork.insert(folder_id, url);
+                }
                 other => handle_msg(&mut app, other, &client, &tx).await,
             }
         }
@@ -579,6 +592,39 @@ async fn run(
                         let _ = t.send(AppMsg::ArtworkLoaded(bytes)).await;
                     }
                 });
+            }
+        }
+
+        // Resolve representative cover art for visible artists (artists carry no art of their
+        // own; we look up the coverid of an album they appear on). Resolved URLs land in
+        // `app.artist_artwork` and are then fetched by the thumbnail prefetch block below.
+        {
+            let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
+            for idx in thumb_range(term_h, &main_state, &app) {
+                if let Some(artist_id) = utils::artist_id_at(&app, idx)
+                    && !app.artist_artwork.contains_key(&artist_id)
+                    && !pending_artist_art.contains(&artist_id)
+                {
+                    pending_artist_art.insert(artist_id.clone());
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        let url = c.get_artist_artwork(&artist_id).await;
+                        let _ = t.send(AppMsg::ArtistArtworkResolved(artist_id, url)).await;
+                    });
+                }
+                if let Some(folder_id) = utils::folder_id_at(&app, idx)
+                    && !app.folder_artwork.contains_key(&folder_id)
+                    && !pending_folder_art.contains(&folder_id)
+                {
+                    pending_folder_art.insert(folder_id);
+                    let c = client.clone();
+                    let t = tx.clone();
+                    tokio::spawn(async move {
+                        let url = c.get_folder_artwork(folder_id).await;
+                        let _ = t.send(AppMsg::FolderArtworkResolved(folder_id, url)).await;
+                    });
+                }
             }
         }
 
@@ -927,6 +973,13 @@ async fn handle_msg(
                 // Move focus to first discovered server (or back to scan button if none found).
                 modal.selected_field = 7;
             }
+        }
+        AppMsg::ArtistArtworkResolved(artist_id, url) => {
+            // `None` is cached too, so we don't re-query an artist that has no resolvable art.
+            app.artist_artwork.insert(artist_id, url);
+        }
+        AppMsg::FolderArtworkResolved(folder_id, url) => {
+            app.folder_artwork.insert(folder_id, url);
         }
         AppMsg::ArtworkLoaded(_) | AppMsg::ThumbnailLoaded(..) | AppMsg::ThumbnailFailed(_) => {
             // handled inline in the event loop

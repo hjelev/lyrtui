@@ -29,6 +29,7 @@ Browse and search your music library, internet radio, and installed streaming ap
 ## Features
 
 - Browse your music library: Artists → Albums → Tracks, or jump straight to All Tracks
+- **Cover-art thumbnails** in every library list — albums use their real cover art (via the LMS coverid, not the placeholder), artists/album-artists show a representative cover resolved from one of their albums, and folders show the cover of their first track (descending through subfolders for multi-disc/discography layouts)
 - **Recently Played Artists** — quickly jump back to artists you've been listening to, sorted by last played
 - **Popular Albums** — browse recently added albums at a glance
 - **Search** your music library (artists, albums, tracks, playlists) — type a query, press Enter, then drill in or play results directly

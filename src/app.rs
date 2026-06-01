@@ -286,6 +286,14 @@ pub struct App {
     pub playlists: Vec<Playlist>,
     pub recent_artists: Vec<Artist>,
     pub popular_albums: Vec<Album>,
+    /// Lazily resolved per-artist cover art: artist_id → resolved cover URL. A present key with
+    /// `None` means "resolved, but the artist has no art" (so we stop retrying); an absent key
+    /// means "not yet resolved". See [`crate::api::LmsClient::get_artist_artwork`].
+    pub artist_artwork: HashMap<String, Option<String>>,
+    /// Lazily resolved per-folder cover art: folder_id → resolved cover URL (from the folder's
+    /// first track). Same semantics as [`Self::artist_artwork`]. See
+    /// [`crate::api::LmsClient::get_folder_artwork`].
+    pub folder_artwork: HashMap<u32, Option<String>>,
 
     // Radio data
     pub radio_items: Vec<RadioItem>,
@@ -395,6 +403,8 @@ impl App {
             playlists: vec![],
             recent_artists: vec![],
             popular_albums: vec![],
+            artist_artwork: HashMap::new(),
+            folder_artwork: HashMap::new(),
             radio_items: vec![],
             radio_nav_stack: vec![],
             radio_title: "Radio".to_string(),
@@ -521,6 +531,8 @@ pub enum AppMsg {
     ArtworkLoaded(Vec<u8>),
     ThumbnailLoaded(String, image::DynamicImage), // url, decoded image
     ThumbnailFailed(String),                      // url
+    ArtistArtworkResolved(String, Option<String>), // artist_id, resolved cover url (None = no art)
+    FolderArtworkResolved(u32, Option<String>),    // folder_id, resolved cover url (None = no art)
     PlayerVolumesLoaded(HashMap<String, u8>),
     PlayerSyncGroupsLoaded(HashMap<String, Vec<String>>),
     StatusMsg(String),

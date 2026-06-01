@@ -30,6 +30,16 @@ pub fn music_image_url(base: &str, id: impl std::fmt::Display, file: &str) -> St
     format!("{}/music/{}/{}", base, id, file)
 }
 
+/// Resolved cover URL for an artist from the lazy [`App::artist_artwork`] cache. Returns `None`
+/// when the artist is unresolved or known to have no art — the prefetch loop kicks off resolution
+/// (see `resolve_artist_artwork` in main.rs) and a later frame will have the URL.
+pub fn artist_artwork_url(app: &App, artist_id: &serde_json::Value) -> Option<String> {
+    app.artist_artwork
+        .get(&json_id_to_string(artist_id))
+        .cloned()
+        .flatten()
+}
+
 pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
     if app.full_art_mode {
         return app.queue.get(idx).and_then(|t| t.artwork_url.clone());
@@ -38,15 +48,21 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
         MainView::Library(LibraryView::Artists) => app
             .artists
             .get(idx)
-            .map(|a| music_image_url(base, json_id_to_string(&a.id), "artist.jpg")),
+            .and_then(|a| artist_artwork_url(app, &a.id)),
         MainView::Library(LibraryView::AlbumArtists) => app
             .album_artists
             .get(idx)
-            .map(|a| music_image_url(base, json_id_to_string(&a.id), "artist.jpg")),
-        MainView::Library(LibraryView::Albums { .. }) => app
-            .albums
+            .and_then(|a| artist_artwork_url(app, &a.id)),
+        MainView::Library(LibraryView::Albums { .. }) => {
+            app.albums.get(idx).map(|a| a.cover_url(base))
+        }
+        MainView::Library(LibraryView::PopularAlbums) => {
+            app.popular_albums.get(idx).map(|a| a.cover_url(base))
+        }
+        MainView::Library(LibraryView::RecentlyPlayedArtists) => app
+            .recent_artists
             .get(idx)
-            .map(|a| music_image_url(base, json_id_to_string(&a.id), "cover.jpg")),
+            .and_then(|a| artist_artwork_url(app, &a.id)),
         MainView::Library(LibraryView::Tracks { .. }) => app.tracks.get(idx).and_then(|t| {
             t.id.as_ref()
                 .map(|id| music_image_url(base, json_id_to_string(id), "cover.jpg"))
@@ -58,9 +74,11 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
         MainView::Library(LibraryView::Folder { .. }) => {
             app.folder_items.get(idx).and_then(|item| {
                 if item.item_type == FolderItemType::Track {
+                    // A track id resolves directly to its embedded/folder art.
                     Some(music_image_url(base, item.id, "cover.jpg"))
                 } else {
-                    None
+                    // Directory rows have no art of their own; use the lazily resolved cover.
+                    app.folder_artwork.get(&item.id).cloned().flatten()
                 }
             })
         }
@@ -73,16 +91,8 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
             .and_then(|i| i.artwork_url.clone()),
         MainView::Favourites => app.fav_items.get(idx).and_then(|i| i.artwork_url.clone()),
         MainView::Search => match app.search_results.get(idx) {
-            Some(SearchResultItem::Artist(a)) => Some(music_image_url(
-                base,
-                json_id_to_string(&a.id),
-                "artist.jpg",
-            )),
-            Some(SearchResultItem::Album(alb)) => Some(music_image_url(
-                base,
-                json_id_to_string(&alb.id),
-                "cover.jpg",
-            )),
+            Some(SearchResultItem::Artist(a)) => artist_artwork_url(app, &a.id),
+            Some(SearchResultItem::Album(alb)) => Some(alb.cover_url(base)),
             Some(SearchResultItem::Track(t)) => {
                 t.id.as_ref()
                     .map(|id| music_image_url(base, json_id_to_string(id), "cover.jpg"))
@@ -90,6 +100,37 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
             Some(SearchResultItem::AppItem(item)) => item.artwork_url.clone(),
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// The artist id at `idx` for views that list artists (so the prefetch loop can lazily resolve
+/// their cover art). Returns `None` for non-artist views or out-of-range indices.
+pub fn artist_id_at(app: &App, idx: usize) -> Option<String> {
+    let list = match &app.main_view {
+        MainView::Library(LibraryView::Artists) => &app.artists,
+        MainView::Library(LibraryView::AlbumArtists) => &app.album_artists,
+        MainView::Library(LibraryView::RecentlyPlayedArtists) => &app.recent_artists,
+        MainView::Search => {
+            return match app.search_results.get(idx) {
+                Some(SearchResultItem::Artist(a)) => Some(json_id_to_string(&a.id)),
+                _ => None,
+            };
+        }
+        _ => return None,
+    };
+    list.get(idx).map(|a| json_id_to_string(&a.id))
+}
+
+/// The folder id at `idx` for directory (non-track) rows in the Folders view, so the prefetch
+/// loop can lazily resolve their cover art. Returns `None` for tracks and non-folder views.
+pub fn folder_id_at(app: &App, idx: usize) -> Option<u32> {
+    match &app.main_view {
+        MainView::Library(LibraryView::Folder { .. }) => app
+            .folder_items
+            .get(idx)
+            .filter(|item| item.item_type != FolderItemType::Track)
+            .map(|item| item.id),
         _ => None,
     }
 }
