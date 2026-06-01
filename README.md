@@ -2,6 +2,8 @@
   <img src="screenshots/logo_tr.png" alt="lyrtui - lyrion music server in your terminal" width="500">
 </p>
 
+___
+
 <p align="center">
   <a href="https://github.com/hjelev/lyrtui/actions"><img src="https://github.com/hjelev/lyrtui/actions/workflows/release.yml/badge.svg" alt="Build Status"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/v/lyrtui.svg" alt="Crates.io Version"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/d/lyrtui.svg" alt="Crates.io Downloads"></a>&nbsp;<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 </p>
@@ -27,6 +29,8 @@ Browse and search your music library, internet radio, and installed streaming ap
 ## Features
 
 - Browse your music library: Artists → Albums → Tracks, or jump straight to All Tracks
+- **Recently Played Artists** — quickly jump back to artists you've been listening to, sorted by last played
+- **Popular Albums** — browse recently added albums at a glance
 - **Search** your music library (artists, albums, tracks, playlists) — type a query, press Enter, then drill in or play results directly
 - Browse and play internet radio via Lyrion's radio services (TuneIn, etc.) with full hierarchical navigation
 - Browse and play installed Lyrion apps (Spotify, Deezer, Bandcamp, etc.) with the same hierarchical navigation — shows a **Loading...** indicator while fetching remote content so navigation never blocks

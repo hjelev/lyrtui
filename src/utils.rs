@@ -183,13 +183,15 @@ pub fn main_list_len(app: &App) -> usize {
         return app.queue.len();
     }
     match &app.main_view {
-        MainView::MyMusic => 6,
+        MainView::MyMusic => 8,
         MainView::Library(LibraryView::Artists) => app.artists.len(),
         MainView::Library(LibraryView::AlbumArtists) => app.album_artists.len(),
         MainView::Library(LibraryView::Albums { .. }) => app.albums.len(),
         MainView::Library(LibraryView::Tracks { .. }) => app.tracks.len(),
         MainView::Library(LibraryView::Folder { .. }) => app.folder_items.len(),
         MainView::Library(LibraryView::Playlists) => app.playlists.len(),
+        MainView::Library(LibraryView::RecentlyPlayedArtists) => app.recent_artists.len(),
+        MainView::Library(LibraryView::PopularAlbums) => app.popular_albums.len(),
         MainView::Queue => app.queue.len(),
         MainView::Players => app.players.len(),
         MainView::Radio => app.radio_items.len(),

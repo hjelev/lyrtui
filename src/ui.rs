@@ -703,23 +703,27 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" My Music ");
 
-    let entries: [(&str, &str, &str); 6] = if app.use_nerd_icons {
+    let entries: [(&str, &str, &str); 8] = if app.use_nerd_icons {
         [
-            ("\u{F0C0}", "Artists", "your music library by artist"), // nf-fa-users
-            ("\u{F007}", "Album Artists", "artists with full albums"), // nf-fa-user
-            ("\u{F025}", "Albums", "all albums"),                    // nf-fa-headphones
-            ("\u{F001}", "Tracks", "all tracks"),                    // nf-fa-music
-            ("\u{F07B}", "Folders", "browse by folder"),             // nf-fa-folder
-            ("\u{F0C9}", "Playlists", "saved playlists"),            // nf-fa-list
+            ("\u{F0C0}", "Artists", "your music library by artist"),        // nf-fa-users
+            ("\u{F007}", "Album Artists", "artists with full albums"),       // nf-fa-user
+            ("\u{F017}", "Recently Played Artists", "artists you played lately"), // nf-fa-clock-o
+            ("\u{F025}", "Albums", "all albums"),                           // nf-fa-headphones
+            ("\u{F005}", "Popular Albums", "most recently added albums"),    // nf-fa-star
+            ("\u{F001}", "Tracks", "all tracks"),                           // nf-fa-music
+            ("\u{F0C9}", "Playlists", "saved playlists"),                   // nf-fa-list
+            ("\u{F07B}", "Folders", "browse by folder"),                    // nf-fa-folder
         ]
     } else {
         [
             ("▸", "Artists", "your music library by artist"),
             ("▸", "Album Artists", "artists with full albums"),
+            ("▸", "Recently Played Artists", "artists you played lately"),
             ("▸", "Albums", "all albums"),
+            ("▸", "Popular Albums", "most recently added albums"),
             ("▸", "Tracks", "all tracks"),
-            ("▸", "Folders", "browse by folder"),
             ("▸", "Playlists", "saved playlists"),
+            ("▸", "Folders", "browse by folder"),
         ]
     };
 
@@ -1033,6 +1037,64 @@ fn draw_library(
                 })
                 .collect();
             render_two_row_view(f, app, area, " Playlists ", items, app.is_loading, state, thumbnails);
+        }
+        LibraryView::RecentlyPlayedArtists => {
+            let items = app
+                .recent_artists
+                .iter()
+                .map(|a| RowItem {
+                    thumb_url: Some(crate::utils::music_image_url(
+                        base,
+                        crate::utils::json_id_to_string(&a.id),
+                        "artist.jpg",
+                    )),
+                    line1: nerd_line(app, "\u{F007} ", a.artist.clone()), // nf-fa-user
+                    line2: Line::from(Span::styled(
+                        "recently played",
+                        Style::default().fg(mid),
+                    )),
+                    duration: None,
+                })
+                .collect();
+            render_two_row_view(
+                f,
+                app,
+                area,
+                " Recently Played Artists ",
+                items,
+                app.is_loading,
+                state,
+                thumbnails,
+            );
+        }
+        LibraryView::PopularAlbums => {
+            let items = app
+                .popular_albums
+                .iter()
+                .map(|a| {
+                    let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
+                    RowItem {
+                        thumb_url: Some(crate::utils::music_image_url(
+                            base,
+                            crate::utils::json_id_to_string(&a.id),
+                            "cover.jpg",
+                        )),
+                        line1: nerd_line(app, "\u{F025} ", a.album.clone()), // nf-fa-headphones
+                        line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
+                        duration: None,
+                    }
+                })
+                .collect();
+            render_two_row_view(
+                f,
+                app,
+                area,
+                " Popular Albums ",
+                items,
+                app.is_loading,
+                state,
+                thumbnails,
+            );
         }
     }
 }

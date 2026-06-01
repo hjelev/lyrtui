@@ -328,6 +328,61 @@ impl LmsClient {
         .await
     }
 
+    pub async fn get_recently_played_artists(&self, limit: usize) -> Result<Vec<Artist>> {
+        let fetch_count = (limit * 5).max(200);
+        let params = [
+            json!("titles"),
+            json!(0),
+            json!(fetch_count),
+            json!("sort:lastplayed"),
+            json!("tags:a"),
+        ];
+        let (tracks_res, all_artists_res) = tokio::join!(
+            self.rpc("", &params),
+            self.get_artists(),
+        );
+        let mut result = tracks_res?;
+        let all_artists = all_artists_res.unwrap_or_default();
+        // Build name → id map from the authoritative artists list
+        let name_to_id: std::collections::HashMap<String, Value> = all_artists
+            .into_iter()
+            .map(|a| (a.artist.to_lowercase(), a.id))
+            .collect();
+        let tracks = take_array(&mut result, "titles_loop");
+        let mut seen = std::collections::HashSet::new();
+        let mut artists = Vec::new();
+        for v in tracks {
+            if let Some(name) = v["artist"].as_str().filter(|s| !s.is_empty())
+                && seen.insert(name.to_lowercase())
+                && let Some(id) = name_to_id.get(&name.to_lowercase())
+            {
+                artists.push(Artist { id: id.clone(), artist: name.to_string() });
+                if artists.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(artists)
+    }
+
+    pub async fn get_popular_albums(&self, limit: usize) -> Result<Vec<Album>> {
+        let mut result = self
+            .rpc(
+                "",
+                &[
+                    json!("albums"),
+                    json!(0),
+                    json!(limit),
+                    json!("sort:new"),
+                    json!("tags:al"),
+                ],
+            )
+            .await?;
+        let albums: Vec<Album> =
+            serde_json::from_value(result["albums_loop"].take()).unwrap_or_default();
+        Ok(albums)
+    }
+
     pub async fn get_tracks(&self, album_id: &str) -> Result<Vec<Track>> {
         self.fetch_list(
             &[

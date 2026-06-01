@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::api::{LmsClient, RadioItem};
+use crate::api::{Album, Artist, LmsClient, RadioItem};
 use crate::app::{AppMsg, SearchResultItem, SearchScope};
 
 fn spawn_if_ok<F, Fut, T>(
@@ -318,6 +318,24 @@ pub fn load_all_tracks(client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
         tx,
         |c| async move { c.get_all_tracks().await },
         AppMsg::TracksLoaded,
+    );
+}
+
+pub fn load_recent_artists(limit: usize, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
+    spawn_if_ok(
+        client,
+        tx,
+        move |c| async move { c.get_recently_played_artists(limit).await },
+        |v: Vec<Artist>| AppMsg::RecentArtistsLoaded(v),
+    );
+}
+
+pub fn load_popular_albums(limit: usize, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
+    spawn_if_ok(
+        client,
+        tx,
+        move |c| async move { c.get_popular_albums(limit).await },
+        |v: Vec<Album>| AppMsg::PopularAlbumsLoaded(v),
     );
 }
 
