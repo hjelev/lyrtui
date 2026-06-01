@@ -77,6 +77,29 @@ where
     });
 }
 
+/// Spawn an add-to-favourites call for `url`, surfacing a success or failure status message.
+fn spawn_add_to_favorites(
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+    pid: String,
+    url: String,
+    name: String,
+) {
+    let c = client.clone();
+    let t = tx.clone();
+    tokio::spawn(async move {
+        if c.add_to_favorites(&pid, &url, &name).await.is_ok() {
+            let _ = t
+                .send(AppMsg::StatusMsg(format!("Added \"{}\" to favourites", name)))
+                .await;
+        } else {
+            let _ = t
+                .send(AppMsg::StatusMsg("Could not add to favourites".to_string()))
+                .await;
+        }
+    });
+}
+
 /// Seeks the current track to the position corresponding to a left-click at
 /// column `col` within the progress-bar fill rect `bar`. Updates the elapsed
 /// time optimistically so the bar moves immediately, then fires the seek.
@@ -857,12 +880,8 @@ pub async fn handle_confirm_clear_queue_key(
             app.confirm_clear_queue = false;
             app.clear_queue_selected_button = 0;
             if let Some(pid) = app.active_pid() {
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.clear_queue(&pid).await.is_ok() {
-                        let _ = t.send(AppMsg::StatusMsg("Queue cleared".to_string())).await;
-                    }
+                spawn_status(client, tx, "Queue cleared".to_string(), move |c| async move {
+                    c.clear_queue(&pid).await
                 });
             }
         }
@@ -871,12 +890,8 @@ pub async fn handle_confirm_clear_queue_key(
             app.confirm_clear_queue = false;
             app.clear_queue_selected_button = 0;
             if confirmed && let Some(pid) = app.active_pid() {
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.clear_queue(&pid).await.is_ok() {
-                        let _ = t.send(AppMsg::StatusMsg("Queue cleared".to_string())).await;
-                    }
+                spawn_status(client, tx, "Queue cleared".to_string(), move |c| async move {
+                    c.clear_queue(&pid).await
                 });
             }
         }
@@ -913,6 +928,31 @@ pub async fn handle_confirm_quit_key(app: &mut App, key: KeyEvent) {
     }
 }
 
+/// Delete queue item `idx`: fire the removal (surfacing a status message), drop it from the
+/// local queue, and clamp the selection. Shared by the `y` and `Enter` confirm branches.
+fn execute_delete_queue_item(
+    app: &mut App,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+    idx: usize,
+) {
+    if let Some(pid) = app.active_pid()
+        && idx < app.queue.len()
+    {
+        let name = app.queue[idx].title.clone();
+        spawn_status(
+            client,
+            tx,
+            format!("Removed \"{}\" from queue", name),
+            move |c| async move { c.delete_queue_item(&pid, idx).await },
+        );
+        app.queue.remove(idx);
+        if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
+            app.main_selected = app.queue.len() - 1;
+        }
+    }
+}
+
 pub async fn handle_confirm_delete_queue_item_key(
     app: &mut App,
     key: KeyEvent,
@@ -926,54 +966,15 @@ pub async fn handle_confirm_delete_queue_item_key(
         KeyCode::Char('y') => {
             if let Some(idx) = app.confirm_delete_queue_item.take() {
                 app.delete_queue_selected_button = 0;
-                if let Some(pid) = app.active_pid()
-                    && idx < app.queue.len()
-                {
-                    let name = app.queue[idx].title.clone();
-                    let c = client.clone();
-                    let t = tx.clone();
-                    tokio::spawn(async move {
-                        if c.delete_queue_item(&pid, idx).await.is_ok() {
-                            let _ = t
-                                .send(AppMsg::StatusMsg(format!(
-                                    "Removed \"{}\" from queue",
-                                    name
-                                )))
-                                .await;
-                        }
-                    });
-                    app.queue.remove(idx);
-                    if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
-                        app.main_selected = app.queue.len() - 1;
-                    }
-                }
+                execute_delete_queue_item(app, client, tx, idx);
             }
         }
         KeyCode::Enter => {
             let confirmed = app.delete_queue_selected_button == 0;
             if let Some(idx) = app.confirm_delete_queue_item.take() {
                 app.delete_queue_selected_button = 0;
-                if confirmed
-                    && let Some(pid) = app.active_pid()
-                    && idx < app.queue.len()
-                {
-                    let name = app.queue[idx].title.clone();
-                    let c = client.clone();
-                    let t = tx.clone();
-                    tokio::spawn(async move {
-                        if c.delete_queue_item(&pid, idx).await.is_ok() {
-                            let _ = t
-                                .send(AppMsg::StatusMsg(format!(
-                                    "Removed \"{}\" from queue",
-                                    name
-                                )))
-                                .await;
-                        }
-                    });
-                    app.queue.remove(idx);
-                    if !app.queue.is_empty() && app.main_selected >= app.queue.len() {
-                        app.main_selected = app.queue.len() - 1;
-                    }
+                if confirmed {
+                    execute_delete_queue_item(app, client, tx, idx);
                 }
             }
         }
@@ -1129,46 +1130,14 @@ async fn handle_add_to_favorites(
             if let Some(track) = app.tracks.get(app.main_selected) {
                 let id = utils::extract_id(track.id.as_ref());
                 let name = track.title.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    let url = format!("db:track.id={}", id);
-                    if c.add_to_favorites(&pid, &url, &name).await.is_ok() {
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!(
-                                "Added \"{}\" to favourites",
-                                name
-                            )))
-                            .await;
-                    } else {
-                        let _ = t
-                            .send(AppMsg::StatusMsg("Could not add to favourites".to_string()))
-                            .await;
-                    }
-                });
+                spawn_add_to_favorites(client, tx, pid, format!("db:track.id={}", id), name);
             }
         }
         MainView::Radio => {
             if let Some(item) = app.radio_items.get(app.main_selected).cloned()
                 && let Some(url) = item.url
             {
-                let name = item.name.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.add_to_favorites(&pid, &url, &name).await.is_ok() {
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!(
-                                "Added \"{}\" to favourites",
-                                name
-                            )))
-                            .await;
-                    } else {
-                        let _ = t
-                            .send(AppMsg::StatusMsg("Could not add to favourites".to_string()))
-                            .await;
-                    }
-                });
+                spawn_add_to_favorites(client, tx, pid, url, item.name);
             }
         }
         MainView::Apps | MainView::AppSearch { .. } => {
@@ -1180,23 +1149,7 @@ async fn handle_add_to_favorites(
             if let Some(item) = item
                 && let Some(url) = item.url
             {
-                let name = item.name.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    if c.add_to_favorites(&pid, &url, &name).await.is_ok() {
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!(
-                                "Added \"{}\" to favourites",
-                                name
-                            )))
-                            .await;
-                    } else {
-                        let _ = t
-                            .send(AppMsg::StatusMsg("Could not add to favourites".to_string()))
-                            .await;
-                    }
-                });
+                spawn_add_to_favorites(client, tx, pid, url, item.name);
             }
         }
         MainView::Search => {
@@ -1204,24 +1157,7 @@ async fn handle_add_to_favorites(
                 app.search_results.get(app.main_selected).cloned()
             {
                 let id = utils::extract_id(track.id.as_ref());
-                let name = track.title.clone();
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    let url = format!("db:track.id={}", id);
-                    if c.add_to_favorites(&pid, &url, &name).await.is_ok() {
-                        let _ = t
-                            .send(AppMsg::StatusMsg(format!(
-                                "Added \"{}\" to favourites",
-                                name
-                            )))
-                            .await;
-                    } else {
-                        let _ = t
-                            .send(AppMsg::StatusMsg("Could not add to favourites".to_string()))
-                            .await;
-                    }
-                });
+                spawn_add_to_favorites(client, tx, pid, format!("db:track.id={}", id), track.title);
             }
         }
         _ => {

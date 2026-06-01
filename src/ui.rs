@@ -654,17 +654,14 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             1,
             area.height.saturating_sub(2),
         );
-        let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) =
-            scrollbar_accent_styles(app.effective_accent(), app.focus_sidebar);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("║")
-            .track_symbol(Some("│"))
-            .begin_symbol(None)
-            .end_symbol(None)
-            .track_style(track_style)
-            .thumb_style(thumb_style);
-        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+        render_scrollbar(
+            f,
+            scroll_area,
+            total.saturating_sub(visible),
+            offset,
+            app.effective_accent(),
+            app.focus_sidebar,
+        );
     }
 }
 
@@ -1089,8 +1086,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .border_style(border_style)
         .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" Players ");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = render_bordered_panel(f, block, area);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1527,8 +1523,7 @@ fn draw_search(
         .border_style(border_style)
         .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" Search ");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = render_bordered_panel(f, block, area);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1784,17 +1779,14 @@ fn draw_search(
             1,
             results_area.height,
         );
-        let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) =
-            scrollbar_accent_styles(app.effective_accent(), results_focused);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("║")
-            .track_symbol(Some("│"))
-            .begin_symbol(None)
-            .end_symbol(None)
-            .track_style(track_style)
-            .thumb_style(thumb_style);
-        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+        render_scrollbar(
+            f,
+            scroll_area,
+            total.saturating_sub(visible),
+            offset,
+            app.effective_accent(),
+            results_focused,
+        );
     }
 }
 
@@ -1820,8 +1812,7 @@ fn draw_app_search(
         .border_style(border_style)
         .title_style(Style::default().fg(accent))
         .title(" Spotify Search ");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = render_bordered_panel(f, block, area);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1945,17 +1936,14 @@ fn draw_app_search(
             1,
             results_area.height,
         );
-        let mut ss = ScrollbarState::new(total.saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) =
-            scrollbar_accent_styles(app.effective_accent(), results_focused);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("║")
-            .track_symbol(Some("│"))
-            .begin_symbol(None)
-            .end_symbol(None)
-            .track_style(track_style)
-            .thumb_style(thumb_style);
-        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+        render_scrollbar(
+            f,
+            scroll_area,
+            total.saturating_sub(visible),
+            offset,
+            app.effective_accent(),
+            results_focused,
+        );
     }
 }
 
@@ -1975,8 +1963,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         .title_style(Style::default().fg(accent))
         .title(" Keyboard Shortcuts ");
 
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = render_bordered_panel(f, block, area);
 
     let col_w = inner.width / 2;
     let cols = Layout::default()
@@ -2125,8 +2112,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(accent))
         .title(title_line);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = render_bordered_panel(f, block, area);
 
     let Some(np) = &app.now_playing else {
         let msg = Paragraph::new("No player selected — press → then navigate to Players")
@@ -2713,8 +2699,7 @@ fn draw_two_row_list(
         return;
     }
 
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = render_bordered_panel(f, block, area);
 
     let visible = ((inner.height / 2) as usize).max(1);
     let needs_scroll = items.len() > visible;
@@ -2790,17 +2775,80 @@ fn draw_two_row_list(
             1,
             area.height.saturating_sub(2),
         );
-        let mut ss = ScrollbarState::new(items.len().saturating_sub(visible)).position(offset);
-        let (track_style, thumb_style) = scrollbar_accent_styles(accent, focused);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("║")
-            .track_symbol(Some("│"))
-            .begin_symbol(None)
-            .end_symbol(None)
-            .track_style(track_style)
-            .thumb_style(thumb_style);
-        f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
+        render_scrollbar(
+            f,
+            scroll_area,
+            items.len().saturating_sub(visible),
+            offset,
+            accent,
+            focused,
+        );
     }
+}
+
+/// Render a left/right button pair into `row`, highlighting the one matching
+/// `selected_button` (0 = left, 1 = right) with the accent background.
+fn render_two_button_dialog(
+    f: &mut Frame,
+    row: Rect,
+    selected_button: u8,
+    accent_color: Color,
+    left_label: &str,
+    right_label: &str,
+) {
+    let btn_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(row);
+    let btn_style = |selected: bool| {
+        if selected {
+            Style::default().fg(Color::Black).bg(accent_color).bold()
+        } else {
+            Style::default().fg(Color::White)
+        }
+    };
+    f.render_widget(
+        Paragraph::new(left_label)
+            .alignment(Alignment::Center)
+            .style(btn_style(selected_button == 0)),
+        btn_cols[0],
+    );
+    f.render_widget(
+        Paragraph::new(right_label)
+            .alignment(Alignment::Center)
+            .style(btn_style(selected_button == 1)),
+        btn_cols[1],
+    );
+}
+
+/// Render `block` into `area` and return its inner area. Pairs the two-step
+/// "compute inner, then render border" dance used by every bordered panel/modal.
+fn render_bordered_panel(f: &mut Frame, block: Block<'_>, area: Rect) -> Rect {
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    inner
+}
+
+/// Render a vertical accent-tinted scrollbar into `scroll_area`. `content_len` is the
+/// scrollable span (items beyond the visible window) and `offset` the current top index.
+fn render_scrollbar(
+    f: &mut Frame,
+    scroll_area: Rect,
+    content_len: usize,
+    offset: usize,
+    accent: Option<[u8; 3]>,
+    focused: bool,
+) {
+    let mut ss = ScrollbarState::new(content_len).position(offset);
+    let (track_style, thumb_style) = scrollbar_accent_styles(accent, focused);
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .thumb_symbol("║")
+        .track_symbol(Some("│"))
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_style(track_style)
+        .thumb_style(thumb_style);
+    f.render_stateful_widget(scrollbar, scroll_area, &mut ss);
 }
 
 /// Returns (track_style, thumb_style) for a scrollbar tinted from the accent color.
@@ -3147,8 +3195,7 @@ fn draw_context_menu(f: &mut Frame, app: &App, area: Rect) {
         .title_style(Style::default().fg(accent))
         .title(" What do you want to do? ");
 
-    let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    let inner = render_bordered_panel(f, block, popup);
 
     let options = menu.options();
     let last = options.len() - 1;
@@ -3249,8 +3296,7 @@ fn draw_confirm_clear_queue(
         .title_style(Style::default().fg(accent_color))
         .title(" Clear Queue ");
 
-    let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    let inner = render_bordered_panel(f, block, popup);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -3271,34 +3317,7 @@ fn draw_confirm_clear_queue(
     .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    let btn_cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[3]);
-
-    let ok_style = if selected_button == 0 {
-        Style::default().fg(Color::Black).bg(accent_color).bold()
-    } else {
-        Style::default().fg(Color::White)
-    };
-    let cancel_style = if selected_button == 1 {
-        Style::default().fg(Color::Black).bg(accent_color).bold()
-    } else {
-        Style::default().fg(Color::White)
-    };
-
-    f.render_widget(
-        Paragraph::new("[ OK ]")
-            .alignment(Alignment::Center)
-            .style(ok_style),
-        btn_cols[0],
-    );
-    f.render_widget(
-        Paragraph::new("[ Cancel ]")
-            .alignment(Alignment::Center)
-            .style(cancel_style),
-        btn_cols[1],
-    );
+    render_two_button_dialog(f, rows[3], selected_button, accent_color, "[ OK ]", "[ Cancel ]");
 }
 
 /// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
@@ -3332,8 +3351,7 @@ fn draw_confirm_quit(f: &mut Frame, selected_button: u8, accent: Option<[u8; 3]>
         .title_style(Style::default().fg(accent_color))
         .title(" Quit lyrtui ");
 
-    let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    let inner = render_bordered_panel(f, block, popup);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -3350,34 +3368,7 @@ fn draw_confirm_quit(f: &mut Frame, selected_button: u8, accent: Option<[u8; 3]>
         .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    let btn_cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[3]);
-
-    let ok_style = if selected_button == 0 {
-        Style::default().fg(Color::Black).bg(accent_color).bold()
-    } else {
-        Style::default().fg(Color::White)
-    };
-    let cancel_style = if selected_button == 1 {
-        Style::default().fg(Color::Black).bg(accent_color).bold()
-    } else {
-        Style::default().fg(Color::White)
-    };
-
-    f.render_widget(
-        Paragraph::new("[ Quit ]")
-            .alignment(Alignment::Center)
-            .style(ok_style),
-        btn_cols[0],
-    );
-    f.render_widget(
-        Paragraph::new("[ Cancel ]")
-            .alignment(Alignment::Center)
-            .style(cancel_style),
-        btn_cols[1],
-    );
+    render_two_button_dialog(f, rows[3], selected_button, accent_color, "[ Quit ]", "[ Cancel ]");
 }
 
 /// Returns (popup_rect, [quit_button_rect, cancel_button_rect]) for the quit dialog.
@@ -3419,8 +3410,7 @@ fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, ar
         .title_style(Style::default().fg(accent_color))
         .title(title);
 
-    let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    let inner = render_bordered_panel(f, block, popup);
 
     // Layout: pad | player rows (n) | pad | buttons | hint
     let mut constraints = vec![Constraint::Length(1)];
@@ -3551,8 +3541,7 @@ fn draw_confirm_delete_queue_item(
         .title_style(Style::default().fg(accent_color))
         .title(" Remove from Queue ");
 
-    let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    let inner = render_bordered_panel(f, block, popup);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -3574,34 +3563,7 @@ fn draw_confirm_delete_queue_item(
         .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    let btn_cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[3]);
-
-    let ok_style = if selected_button == 0 {
-        Style::default().fg(Color::Black).bg(accent_color).bold()
-    } else {
-        Style::default().fg(Color::White)
-    };
-    let cancel_style = if selected_button == 1 {
-        Style::default().fg(Color::Black).bg(accent_color).bold()
-    } else {
-        Style::default().fg(Color::White)
-    };
-
-    f.render_widget(
-        Paragraph::new("[ OK ]")
-            .alignment(Alignment::Center)
-            .style(ok_style),
-        btn_cols[0],
-    );
-    f.render_widget(
-        Paragraph::new("[ Cancel ]")
-            .alignment(Alignment::Center)
-            .style(cancel_style),
-        btn_cols[1],
-    );
+    render_two_button_dialog(f, rows[3], selected_button, accent_color, "[ OK ]", "[ Cancel ]");
 }
 
 /// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
@@ -3642,8 +3604,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         .title_style(Style::default().fg(accent_bright))
         .title(" Configuration ");
 
-    let inner = block.inner(popup);
-    f.render_widget(block, popup);
+    let inner = render_bordered_panel(f, block, popup);
 
     // Build constraints dynamically:
     // [0] pad | [1] host | [2] port | [3] username | [4] password

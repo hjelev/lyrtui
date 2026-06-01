@@ -185,6 +185,17 @@ impl LmsClient {
         Ok(resp["result"].clone())
     }
 
+    /// Run an RPC and deserialize the array under `loop_key` into a `Vec<T>`, defaulting to
+    /// empty when the key is missing or malformed.
+    async fn fetch_list<T: serde::de::DeserializeOwned>(
+        &self,
+        params: &[Value],
+        loop_key: &str,
+    ) -> Result<Vec<T>> {
+        let mut result = self.rpc("", params).await?;
+        Ok(serde_json::from_value(result[loop_key].take()).unwrap_or_default())
+    }
+
     pub async fn get_players(&self) -> Result<Vec<Player>> {
         let mut result = self
             .rpc("", &[json!("players"), json!(0), json!(100)])
@@ -241,10 +252,7 @@ impl LmsClient {
                 &[json!("status"), json!(0), json!(500), json!("tags:adltK")],
             )
             .await?;
-        let tracks = result["playlist_loop"]
-            .as_array_mut()
-            .map(std::mem::take)
-            .unwrap_or_default();
+        let tracks = take_array(&mut result, "playlist_loop");
         let base = self.server_base_url();
         Ok(tracks
             .into_iter()
@@ -271,10 +279,7 @@ impl LmsClient {
         let mut result = self
             .rpc("", &[json!("playlists"), json!(0), json!(10000)])
             .await?;
-        let playlists: Vec<Playlist> = result["playlists_loop"]
-            .as_array_mut()
-            .map(std::mem::take)
-            .unwrap_or_default()
+        let playlists: Vec<Playlist> = take_array(&mut result, "playlists_loop")
             .into_iter()
             .filter_map(|v| {
                 let name = v["playlist"].as_str()?.to_string();
@@ -286,29 +291,21 @@ impl LmsClient {
     }
 
     pub async fn get_artists(&self) -> Result<Vec<Artist>> {
-        let mut result = self
-            .rpc("", &[json!("artists"), json!(0), json!(10000)])
-            .await?;
-        let artists: Vec<Artist> =
-            serde_json::from_value(result["artists_loop"].take()).unwrap_or_default();
-        Ok(artists)
+        self.fetch_list(&[json!("artists"), json!(0), json!(10000)], "artists_loop")
+            .await
     }
 
     pub async fn get_album_artists(&self) -> Result<Vec<Artist>> {
-        let mut result = self
-            .rpc(
-                "",
-                &[
-                    json!("artists"),
-                    json!(0),
-                    json!(10000),
-                    json!("role_id:ALBUMARTIST"),
-                ],
-            )
-            .await?;
-        let artists: Vec<Artist> =
-            serde_json::from_value(result["artists_loop"].take()).unwrap_or_default();
-        Ok(artists)
+        self.fetch_list(
+            &[
+                json!("artists"),
+                json!(0),
+                json!(10000),
+                json!("role_id:ALBUMARTIST"),
+            ],
+            "artists_loop",
+        )
+        .await
     }
 
     pub async fn get_albums(&self, artist_id: Option<&str>) -> Result<Vec<Album>> {
@@ -316,40 +313,29 @@ impl LmsClient {
         if let Some(id) = artist_id {
             params.push(json!(format!("artist_id:{}", id)));
         }
-        let mut result = self.rpc("", &params).await?;
-        let albums: Vec<Album> =
-            serde_json::from_value(result["albums_loop"].take()).unwrap_or_default();
-        Ok(albums)
+        self.fetch_list(&params, "albums_loop").await
     }
 
     pub async fn get_all_tracks(&self) -> Result<Vec<Track>> {
-        let mut result = self
-            .rpc(
-                "",
-                &[json!("tracks"), json!(0), json!(10000), json!("tags:adlt")],
-            )
-            .await?;
-        let tracks: Vec<Track> =
-            serde_json::from_value(result["titles_loop"].take()).unwrap_or_default();
-        Ok(tracks)
+        self.fetch_list(
+            &[json!("tracks"), json!(0), json!(10000), json!("tags:adlt")],
+            "titles_loop",
+        )
+        .await
     }
 
     pub async fn get_tracks(&self, album_id: &str) -> Result<Vec<Track>> {
-        let mut result = self
-            .rpc(
-                "",
-                &[
-                    json!("tracks"),
-                    json!(0),
-                    json!(10000),
-                    json!(format!("album_id:{}", album_id)),
-                    json!("tags:adlt"),
-                ],
-            )
-            .await?;
-        let tracks: Vec<Track> =
-            serde_json::from_value(result["titles_loop"].take()).unwrap_or_default();
-        Ok(tracks)
+        self.fetch_list(
+            &[
+                json!("tracks"),
+                json!(0),
+                json!(10000),
+                json!(format!("album_id:{}", album_id)),
+                json!("tags:adlt"),
+            ],
+            "titles_loop",
+        )
+        .await
     }
 
     // Playback controls
@@ -981,6 +967,14 @@ fn parse_browse_item(v: &Value, base: &str, default_cmd: &str) -> RadioItem {
         has_items: v["hasitems"].as_u64().unwrap_or(0) > 0,
         is_audio: v["isaudio"].as_u64().unwrap_or(0) > 0,
     }
+}
+
+/// Consume the array stored under `key`, leaving `Null` behind; empty `Vec` if absent.
+fn take_array(value: &mut Value, key: &str) -> Vec<Value> {
+    value[key]
+        .as_array_mut()
+        .map(std::mem::take)
+        .unwrap_or_default()
 }
 
 /// Coerce a JSON value that may be a number or a numeric string into `u64`.
