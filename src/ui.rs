@@ -493,6 +493,7 @@ pub fn draw(
                     hint_line(
                         &[
                             ("Type", "query"),
+                            ("←/→", "cursor"),
                             ("Tab", "scope"),
                             ("Enter", "search"),
                             ("Esc/↓", "results"),
@@ -1588,9 +1589,8 @@ fn draw_search(
     } else {
         Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
-    let cursor = if app.search_input_active { "█" } else { "" };
     let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" }; // nf-fa-search
-    let input_text = format!(" {} {}{}", search_icon, app.search_query, cursor);
+    let input_text = format!(" {} {}", search_icon, app.search_query);
     let input = Paragraph::new(input_text)
         .style(Style::default().fg(Color::White))
         .block(
@@ -1600,6 +1600,13 @@ fn draw_search(
                 .border_style(input_border_style),
         );
     f.render_widget(input, chunks[0]);
+    if app.search_input_active {
+        // prefix inside block: left border(1) + " icon "(3) + cursor_pos
+        f.set_cursor_position((
+            chunks[0].x + 1 + 3 + app.search_cursor_pos as u16,
+            chunks[0].y + 1,
+        ));
+    }
 
     // Scope tab bar
     {
@@ -1866,13 +1873,8 @@ fn draw_app_search(
     } else {
         Style::default().fg(unfocus_border_color(app.effective_accent()))
     };
-    let cursor = if app.app_search_input_active {
-        "█"
-    } else {
-        ""
-    };
     let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" };
-    let input_text = format!(" {} {}{}", search_icon, app.app_search_query, cursor);
+    let input_text = format!(" {} {}", search_icon, app.app_search_query);
     let input = Paragraph::new(input_text)
         .style(Style::default().fg(Color::White))
         .block(
@@ -1882,6 +1884,12 @@ fn draw_app_search(
                 .border_style(input_border_style),
         );
     f.render_widget(input, chunks[0]);
+    if app.app_search_input_active {
+        f.set_cursor_position((
+            chunks[0].x + 1 + 3 + app.app_search_cursor_pos as u16,
+            chunks[0].y + 1,
+        ));
+    }
 
     let results_area = chunks[1];
 

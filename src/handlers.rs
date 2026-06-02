@@ -1513,6 +1513,7 @@ pub async fn handle_action(
                         } else {
                             app.main_view = MainView::Apps;
                             app.app_search_query = String::new();
+                            app.app_search_cursor_pos = 0;
                             app.app_search_results = vec![];
                         }
                     }
@@ -2330,6 +2331,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     let item_id = item.item_id.clone();
                     app.main_view = MainView::AppSearch { cmd, item_id };
                     app.app_search_query = String::new();
+                    app.app_search_cursor_pos = 0;
                     app.app_search_results = vec![];
                     app.app_search_input_active = true;
                     app.main_selected = 0;
@@ -3173,6 +3175,35 @@ async fn handle_replace_queue_with_parent(
     }
 }
 
+fn char_byte_offset(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(b, _)| b)
+        .unwrap_or(s.len())
+}
+
+fn input_insert(s: &mut String, cursor: &mut usize, c: char) {
+    let byte = char_byte_offset(s, *cursor);
+    s.insert(byte, c);
+    *cursor += 1;
+}
+
+fn input_backspace(s: &mut String, cursor: &mut usize) {
+    if *cursor > 0 {
+        *cursor -= 1;
+        let byte = char_byte_offset(s, *cursor);
+        s.remove(byte);
+    }
+}
+
+fn input_delete(s: &mut String, cursor: usize) {
+    let char_len = s.chars().count();
+    if cursor < char_len {
+        let byte = char_byte_offset(s, cursor);
+        s.remove(byte);
+    }
+}
+
 pub async fn handle_search_input_key(
     app: &mut App,
     key: KeyEvent,
@@ -3181,10 +3212,30 @@ pub async fn handle_search_input_key(
 ) {
     match key.code {
         KeyCode::Char(c) => {
-            app.search_query.push(c);
+            input_insert(&mut app.search_query, &mut app.search_cursor_pos, c);
         }
         KeyCode::Backspace => {
-            app.search_query.pop();
+            input_backspace(&mut app.search_query, &mut app.search_cursor_pos);
+        }
+        KeyCode::Delete => {
+            input_delete(&mut app.search_query, app.search_cursor_pos);
+        }
+        KeyCode::Left => {
+            if app.search_cursor_pos > 0 {
+                app.search_cursor_pos -= 1;
+            }
+        }
+        KeyCode::Right => {
+            let char_len = app.search_query.chars().count();
+            if app.search_cursor_pos < char_len {
+                app.search_cursor_pos += 1;
+            }
+        }
+        KeyCode::Home => {
+            app.search_cursor_pos = 0;
+        }
+        KeyCode::End => {
+            app.search_cursor_pos = app.search_query.chars().count();
         }
         KeyCode::Enter => {
             if !app.search_query.is_empty() {
@@ -3201,6 +3252,7 @@ pub async fn handle_search_input_key(
                     tx.clone(),
                 );
                 app.search_input_active = false;
+                app.search_cursor_pos = 0;
             }
         }
         KeyCode::Tab => {
@@ -3229,10 +3281,34 @@ pub async fn handle_app_search_input_key(
     let item_id = item_id.clone();
     match key.code {
         KeyCode::Char(c) => {
-            app.app_search_query.push(c);
+            input_insert(
+                &mut app.app_search_query,
+                &mut app.app_search_cursor_pos,
+                c,
+            );
         }
         KeyCode::Backspace => {
-            app.app_search_query.pop();
+            input_backspace(&mut app.app_search_query, &mut app.app_search_cursor_pos);
+        }
+        KeyCode::Delete => {
+            input_delete(&mut app.app_search_query, app.app_search_cursor_pos);
+        }
+        KeyCode::Left => {
+            if app.app_search_cursor_pos > 0 {
+                app.app_search_cursor_pos -= 1;
+            }
+        }
+        KeyCode::Right => {
+            let char_len = app.app_search_query.chars().count();
+            if app.app_search_cursor_pos < char_len {
+                app.app_search_cursor_pos += 1;
+            }
+        }
+        KeyCode::Home => {
+            app.app_search_cursor_pos = 0;
+        }
+        KeyCode::End => {
+            app.app_search_cursor_pos = app.app_search_query.chars().count();
         }
         KeyCode::Enter => {
             if !app.app_search_query.is_empty() {
@@ -3249,6 +3325,7 @@ pub async fn handle_app_search_input_key(
                     tx.clone(),
                 );
                 app.app_search_input_active = false;
+                app.app_search_cursor_pos = 0;
             }
         }
         KeyCode::Esc | KeyCode::Down => {

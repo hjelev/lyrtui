@@ -355,6 +355,7 @@ pub struct App {
 
     // Search state
     pub search_query: String,
+    pub search_cursor_pos: usize,
     pub search_results: Vec<SearchResultItem>,
     pub search_input_active: bool,
     pub search_scope: SearchScope,
@@ -362,6 +363,7 @@ pub struct App {
 
     // In-app search state (e.g. Spotty search)
     pub app_search_query: String,
+    pub app_search_cursor_pos: usize,
     pub app_search_results: Vec<RadioItem>,
     pub app_search_input_active: bool,
 
@@ -455,11 +457,13 @@ impl App {
             status_height: 11, // overwritten in run() from picker font metrics
             art_col_w: 16,     // overwritten in run() from picker font metrics
             search_query: String::new(),
+            search_cursor_pos: 0,
             search_results: vec![],
             search_input_active: false,
             search_scope: SearchScope::MyMusic,
             radio_services: vec![],
             app_search_query: String::new(),
+            app_search_cursor_pos: 0,
             app_search_results: vec![],
             app_search_input_active: false,
             is_loading: false,
