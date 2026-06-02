@@ -314,35 +314,47 @@ pub async fn handle_mouse_event(
         return;
     }
 
-    // Context menu intercepts all left clicks
+    // Context menu intercepts all mouse events when open
     if app.context_menu.is_some() {
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let option_count = app
-                .context_menu
-                .as_ref()
-                .map(|m| m.option_count())
-                .unwrap_or(0);
-            let menu_area = ui::compute_context_menu_rect(terminal_area, option_count);
-            if point_in(col, row, menu_area) {
-                let opt_top = menu_area.y + 1;
-                let opt_bot = menu_area.y + menu_area.height.saturating_sub(2);
-                if row >= opt_top && row < opt_bot {
-                    let opt_idx = (row - opt_top) as usize;
-                    let count = app
-                        .context_menu
-                        .as_ref()
-                        .map(|m| m.option_count())
-                        .unwrap_or(0);
-                    if opt_idx < count {
-                        if let Some(m) = app.context_menu.as_mut() {
-                            m.selected = opt_idx;
-                        }
-                        execute_context_menu_action(app, client, tx).await;
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if let Some(m) = app.context_menu.as_mut() {
+                    if m.selected > 0 {
+                        m.selected -= 1;
                     }
                 }
-            } else {
-                app.context_menu = None;
             }
+            MouseEventKind::ScrollDown => {
+                if let Some(m) = app.context_menu.as_mut() {
+                    if m.selected + 1 < m.option_count() {
+                        m.selected += 1;
+                    }
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                let option_count = app
+                    .context_menu
+                    .as_ref()
+                    .map(|m| m.option_count())
+                    .unwrap_or(0);
+                let menu_area = ui::compute_context_menu_rect(terminal_area, option_count);
+                if point_in(col, row, menu_area) {
+                    let opt_top = menu_area.y + 1;
+                    let opt_bot = menu_area.y + menu_area.height.saturating_sub(1);
+                    if row >= opt_top && row < opt_bot {
+                        let opt_idx = (row - opt_top) as usize;
+                        if opt_idx < option_count {
+                            if let Some(m) = app.context_menu.as_mut() {
+                                m.selected = opt_idx;
+                            }
+                            execute_context_menu_action(app, client, tx).await;
+                        }
+                    }
+                } else {
+                    app.context_menu = None;
+                }
+            }
+            _ => {}
         }
         return;
     }

@@ -329,12 +329,12 @@ Config file: ~/.config/lyrtui/config.toml
 
     let result = run(&mut terminal, client, cfg, picker).await;
 
-    disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableMouseCapture
     )?;
+    disable_raw_mode()?;
     terminal.show_cursor()?;
 
     result
