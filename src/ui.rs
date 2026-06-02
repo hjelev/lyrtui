@@ -733,7 +733,7 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             ("\u{F2BD}", "Album Artists", "artists with full albums"),       // nf-fa-user_circle
             ("\u{F017}", "Recently Played Artists", "artists you played lately"), // nf-fa-clock-o
             ("\u{EDE9}", "Albums", "all albums"),                           // nf-cod-disc
-            ("\u{F3D8}", "Popular Albums", "most recently added albums"),    // nf-fa-fire
+            ("\u{f0238}", "Popular Albums", "most recently added albums"),    // md-fire
             ("\u{F025}", "Tracks", "all tracks"),                           // nf-fa-headphones
             ("\u{F0C9}", "Playlists", "saved playlists"),                   // nf-fa-list
             ("\u{F07B}", "Folders", "browse by folder"),                    // nf-fa-folder
