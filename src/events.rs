@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use std::time::Duration;
 
 pub enum InputEvent {
@@ -18,7 +18,18 @@ pub fn poll_event(tick_rate: Duration) -> Result<InputEvent> {
             Event::Key(key) if key.kind != crossterm::event::KeyEventKind::Release => {
                 return Ok(InputEvent::Key(key));
             }
-            Event::Mouse(m) => return Ok(InputEvent::Mouse(m)),
+            Event::Mouse(m) => {
+                if matches!(m.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
+                    // Drain extra same-direction scroll events the OS sends per wheel tick
+                    while event::poll(Duration::ZERO)? {
+                        match event::read()? {
+                            Event::Mouse(next) if next.kind == m.kind => {}
+                            _ => break,
+                        }
+                    }
+                }
+                return Ok(InputEvent::Mouse(m));
+            }
             Event::Resize(_, _) => return Ok(InputEvent::Resize),
             _ => {}
         }
