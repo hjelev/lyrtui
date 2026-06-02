@@ -535,8 +535,14 @@ pub enum AppMsg {
     FavItemsLoaded(Vec<RadioItem>),
     FolderItemsLoaded(Vec<FolderItem>),
     PlaylistsLoaded(Vec<Playlist>),
-    ArtworkLoaded(Vec<u8>),
-    ThumbnailLoaded(String, image::DynamicImage), // url, decoded image
+    ArtworkDecoded {
+        img: image::DynamicImage,
+        art_normal: image::DynamicImage, // with_rounded_corners pre-applied
+        art_full: image::DynamicImage,   // with_rounded_corners pre-applied
+        accent: Option<[u8; 3]>,
+        dimensions: (u32, u32),
+    },
+    ThumbnailLoaded(String, image::DynamicImage), // url, pre-resized image
     ThumbnailFailed(String),                      // url
     ArtistArtworkResolved(String, Option<String>), // artist_id, resolved cover url (None = no art)
     FolderArtworkResolved(u32, Option<String>),    // folder_id, resolved cover url (None = no art)

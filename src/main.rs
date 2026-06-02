@@ -23,7 +23,7 @@ use ratatui_image::{
     protocol::StatefulProtocol,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     io,
     sync::Arc,
     time::{Duration, Instant},
@@ -390,6 +390,11 @@ async fn run(
     let mut pending_artist_art: HashSet<String> = HashSet::new();
     // Folder ids whose representative cover art is currently being resolved.
     let mut pending_folder_art: HashSet<u32> = HashSet::new();
+    // Decoded+pre-resized images waiting for protocol creation.
+    // Drained at most MAX_THUMB_PROTOCOLS_PER_TICK per loop iteration to spread the
+    // per-thumbnail encoding cost across frames and keep navigation responsive.
+    let mut thumbnail_render_queue: VecDeque<(String, image::DynamicImage)> = VecDeque::new();
+    const MAX_THUMB_PROTOCOLS_PER_TICK: usize = 3;
 
     // Background: server health + player list polling
     {
@@ -512,48 +517,19 @@ async fn run(
         while let Ok(msg) = rx.try_recv() {
             had_msgs = true;
             match msg {
-                AppMsg::ArtworkLoaded(bytes) => {
-                    if let Ok(img) = image::load_from_memory(&bytes) {
-                        let rgb = img.to_rgb8();
-                        if let Ok(colors) = color_thief::get_palette(
-                            rgb.as_raw(),
-                            color_thief::ColorFormat::Rgb,
-                            10,
-                            5,
-                        ) {
-                            // Pick the first palette color with usable brightness:
-                            // - not too dark (unreadable on dark bg, and black text unreadable on it as bg)
-                            // - not too light (washed out / near white)
-                            let picked = colors
-                                .iter()
-                                .find(|c| {
-                                    let luma =
-                                        (c.r as u32 * 299 + c.g as u32 * 587 + c.b as u32 * 114)
-                                            / 1000;
-                                    (70..=210).contains(&luma)
-                                })
-                                .or_else(|| colors.first());
-                            if let Some(c) = picked {
-                                app.accent_color = Some([c.r, c.g, c.b]);
-                            }
-                        }
-                        app.art_image_size = Some((img.width(), img.height()));
-                        (album_art, album_art_full) = create_album_art_protocols(&img, &mut picker);
-                        last_artwork_image = Some(img);
+                AppMsg::ArtworkDecoded { img, art_normal, art_full, accent, dimensions } => {
+                    if let Some(c) = accent {
+                        app.accent_color = Some(c);
                     }
+                    app.art_image_size = Some(dimensions);
+                    album_art = Some(picker.new_resize_protocol(art_normal));
+                    album_art_full = Some(picker.new_resize_protocol(art_full));
+                    last_artwork_image = Some(img);
                 }
                 AppMsg::ThumbnailLoaded(url, img) => {
                     pending_thumbs.remove(&url);
-                    // Pre-resize to thumbnail pixel dims to cap protocol data size.
-                    // Prevents Kitty cache eviction and Sixel buffer overflow on Windows Terminal
-                    // when many HD thumbnails are visible simultaneously (3-4 would blink).
-                    let (fw, fh) = app.font_size;
-                    let target_w = (crate::ui::THUMB_W as u32 * fw as u32).max(1);
-                    let target_h = (2u32 * fh as u32).max(1);
-                    let small =
-                        img.resize(target_w, target_h, image::imageops::FilterType::Triangle);
-                    thumbnail_images.insert(url.clone(), small.clone());
-                    thumbnails.insert(url, picker.new_resize_protocol(small));
+                    thumbnail_images.insert(url.clone(), img.clone());
+                    thumbnail_render_queue.push_back((url, img));
                 }
                 AppMsg::ThumbnailFailed(url) => {
                     pending_thumbs.remove(&url);
@@ -592,7 +568,42 @@ async fn run(
                 let t = tx.clone();
                 tokio::spawn(async move {
                     if let Ok(bytes) = c.fetch_image_bytes(&url).await {
-                        let _ = t.send(AppMsg::ArtworkLoaded(bytes)).await;
+                        if let Ok(img) = image::load_from_memory(&bytes) {
+                            let rgb = img.to_rgb8();
+                            let accent = color_thief::get_palette(
+                                rgb.as_raw(),
+                                color_thief::ColorFormat::Rgb,
+                                10,
+                                5,
+                            )
+                            .ok()
+                            .and_then(|colors| {
+                                colors
+                                    .iter()
+                                    .find(|c| {
+                                        let luma = (c.r as u32 * 299
+                                            + c.g as u32 * 587
+                                            + c.b as u32 * 114)
+                                            / 1000;
+                                        (70..=210).contains(&luma)
+                                    })
+                                    .or_else(|| colors.first())
+                                    .map(|c| [c.r, c.g, c.b])
+                            });
+                            let dimensions = (img.width(), img.height());
+                            let art_normal =
+                                with_rounded_corners(img.clone(), ART_RADIUS_NORMAL);
+                            let art_full = with_rounded_corners(img.clone(), ART_RADIUS_FULL);
+                            let _ = t
+                                .send(AppMsg::ArtworkDecoded {
+                                    img,
+                                    art_normal,
+                                    art_full,
+                                    accent,
+                                    dimensions,
+                                })
+                                .await;
+                        }
                     }
                 });
             }
@@ -645,11 +656,19 @@ async fn run(
                     let c = client.clone();
                     let t = tx.clone();
                     let u = url.clone();
+                    let (fw, fh) = app.font_size;
+                    let target_w = (crate::ui::THUMB_W as u32 * fw as u32).max(1);
+                    let target_h = (2u32 * fh as u32).max(1);
                     tokio::spawn(async move {
                         match c.fetch_image_bytes(&u).await {
                             Ok(bytes) => match image::load_from_memory(&bytes) {
                                 Ok(img) => {
-                                    let _ = t.send(AppMsg::ThumbnailLoaded(u, img)).await;
+                                    let small = img.resize(
+                                        target_w,
+                                        target_h,
+                                        image::imageops::FilterType::Triangle,
+                                    );
+                                    let _ = t.send(AppMsg::ThumbnailLoaded(u, small)).await;
                                 }
                                 Err(_) => {
                                     let _ = t.send(AppMsg::ThumbnailFailed(u)).await;
@@ -664,9 +683,27 @@ async fn run(
             }
         }
 
+        // Drain at most MAX_THUMB_PROTOCOLS_PER_TICK from the render queue each frame.
+        // This caps the per-frame encoding cost so navigation stays responsive while art loads.
+        for _ in 0..MAX_THUMB_PROTOCOLS_PER_TICK {
+            if let Some((url, img)) = thumbnail_render_queue.pop_front() {
+                thumbnails.insert(url, picker.new_resize_protocol(img));
+                had_msgs = true;
+            } else {
+                break;
+            }
+        }
+
         let had_overlay = has_overlay(&app);
 
-        match poll_event(TICK_RATE)? {
+        // Use a short poll timeout while the render queue has work so the loop spins fast
+        // and thumbnails drain across frames without blocking key events.
+        let poll_duration = if thumbnail_render_queue.is_empty() {
+            TICK_RATE
+        } else {
+            Duration::from_millis(8)
+        };
+        match poll_event(poll_duration)? {
             InputEvent::Key(key) => {
                 if app.config_modal.is_some() {
                     let prev_protocol = cfg.image_protocol.clone();
@@ -999,7 +1036,7 @@ async fn handle_msg(
         AppMsg::FolderArtworkResolved(folder_id, url) => {
             app.folder_artwork.insert(folder_id, url);
         }
-        AppMsg::ArtworkLoaded(_) | AppMsg::ThumbnailLoaded(..) | AppMsg::ThumbnailFailed(_) => {
+        AppMsg::ArtworkDecoded { .. } | AppMsg::ThumbnailLoaded(..) | AppMsg::ThumbnailFailed(_) => {
             // handled inline in the event loop
         }
     }
