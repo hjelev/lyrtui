@@ -887,7 +887,8 @@ fn render_two_row_view(
     app: &App,
     area: Rect,
     title: &str,
-    items: Vec<RowItem>,
+    total: usize,
+    make_row: impl Fn(usize) -> RowItem,
     is_loading: bool,
     state: &mut ListState,
     thumbnails: &mut HashMap<String, StatefulProtocol>,
@@ -896,7 +897,8 @@ fn render_two_row_view(
         f,
         area,
         title,
-        items,
+        total,
+        make_row,
         app.main_selected,
         !app.focus_sidebar,
         is_loading,
@@ -918,49 +920,44 @@ fn draw_library(
     let mid = mid_accent_color(app.effective_accent());
     match view {
         LibraryView::Artists => {
-            let items: Vec<RowItem> = app
-                .artists
-                .iter()
-                .map(|a| RowItem {
+            let total = app.artists.len();
+            let title = format!(" Artists ({}) ", total);
+            render_two_row_view(f, app, area, &title, total, |i| {
+                let a = &app.artists[i];
+                RowItem {
                     thumb_url: crate::utils::artist_artwork_url(app, &a.id),
                     line1: nerd_line(app, "\u{F007} ", a.artist.clone()), // nf-fa-user
                     line2: Line::from(Span::styled("artist", Style::default().fg(mid))),
                     duration: None,
-                })
-                .collect();
-            let title = format!(" Artists ({}) ", items.len());
-            render_two_row_view(f, app, area, &title, items, false, state, thumbnails);
+                }
+            }, false, state, thumbnails);
         }
         LibraryView::AlbumArtists => {
-            let items: Vec<RowItem> = app
-                .album_artists
-                .iter()
-                .map(|a| RowItem {
+            let total = app.album_artists.len();
+            let title = format!(" Album Artists ({}) ", total);
+            render_two_row_view(f, app, area, &title, total, |i| {
+                let a = &app.album_artists[i];
+                RowItem {
                     thumb_url: crate::utils::artist_artwork_url(app, &a.id),
                     line1: nerd_line(app, "\u{F2BD} ", a.artist.clone()), // nf-fa-user_circle
                     line2: Line::from(Span::styled("album artist", Style::default().fg(mid))),
                     duration: None,
-                })
-                .collect();
-            let title = format!(" Album Artists ({}) ", items.len());
-            render_two_row_view(f, app, area, &title, items, false, state, thumbnails);
+                }
+            }, false, state, thumbnails);
         }
         LibraryView::Albums { .. } => {
-            let items: Vec<RowItem> = app
-                .albums
-                .iter()
-                .map(|a| {
-                    let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
-                    RowItem {
-                        thumb_url: Some(a.cover_url(base)),
-                        line1: nerd_line(app, "\u{EDE9} ", a.album.clone()), // nf-fa-compact_disc
-                        line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
-                        duration: None,
-                    }
-                })
-                .collect();
-            let title = format!(" Albums ({}) ", items.len());
-            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
+            let total = app.albums.len();
+            let title = format!(" Albums ({}) ", total);
+            render_two_row_view(f, app, area, &title, total, |i| {
+                let a = &app.albums[i];
+                let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
+                RowItem {
+                    thumb_url: Some(a.cover_url(base)),
+                    line1: nerd_line(app, "\u{EDE9} ", a.album.clone()), // nf-fa-compact_disc
+                    line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
+                    duration: None,
+                }
+            }, app.is_loading, state, thumbnails);
         }
         LibraryView::Tracks { album_id } => {
             let label = if album_id.is_some() { "Tracks" } else { "All Tracks" };
@@ -969,82 +966,76 @@ fn draw_library(
                 .as_ref()
                 .map(|n| n.title.as_str())
                 .unwrap_or("");
-            let items: Vec<RowItem> = app
-                .tracks
-                .iter()
-                .enumerate()
-                .map(|(i, t)| {
-                    let is_current = t.title == playing_title && !playing_title.is_empty();
-                    let thumb_url = t.artwork_url.clone().or_else(|| {
-                        t.id.as_ref().map(|id| {
-                            crate::utils::music_image_url(
-                                base,
-                                crate::utils::json_id_to_string(id),
-                                "cover.jpg",
-                            )
-                        })
-                    });
-                    track_row_item(t, i, is_current, thumb_url, mid, app.use_nerd_icons)
-                })
-                .collect();
-            let title = format!(" {} ({}) ", label, items.len());
-            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
+            let total = app.tracks.len();
+            let title = format!(" {} ({}) ", label, total);
+            render_two_row_view(f, app, area, &title, total, |i| {
+                let t = &app.tracks[i];
+                let is_current = t.title == playing_title && !playing_title.is_empty();
+                let thumb_url = t.artwork_url.clone().or_else(|| {
+                    t.id.as_ref().map(|id| {
+                        crate::utils::music_image_url(
+                            base,
+                            crate::utils::json_id_to_string(id),
+                            "cover.jpg",
+                        )
+                    })
+                });
+                track_row_item(t, i, is_current, thumb_url, mid, app.use_nerd_icons)
+            }, app.is_loading, state, thumbnails);
         }
         LibraryView::Folder { .. } => {
             let breadcrumb = breadcrumb_str(
                 app.folder_nav_stack.iter().map(|n| n.title.as_str()),
                 &app.folder_title,
             );
-            let items: Vec<RowItem> = app
-                .folder_items
-                .iter()
-                .map(|item| {
-                    let is_track = item.item_type == FolderItemType::Track;
-                    let (icon, fg) = if is_track {
-                        (
-                            if app.use_nerd_icons { "\u{F001} " } else { "▶ " },
-                            focus_border_color(app.effective_accent()),
-                        )
+            let total = app.folder_items.len();
+            let title = format!(" {} ({}) ", breadcrumb, total);
+            render_two_row_view(f, app, area, &title, total, |i| {
+                let item = &app.folder_items[i];
+                let is_track = item.item_type == FolderItemType::Track;
+                let (icon, fg) = if is_track {
+                    (
+                        if app.use_nerd_icons { "\u{F001} " } else { "▶ " },
+                        focus_border_color(app.effective_accent()),
+                    )
+                } else {
+                    (
+                        if app.use_nerd_icons { "\u{F07B} " } else { "▸ " },
+                        Color::White,
+                    )
+                };
+                RowItem {
+                    thumb_url: if is_track {
+                        Some(crate::utils::music_image_url(base, item.id, "cover.jpg"))
                     } else {
-                        (
-                            if app.use_nerd_icons { "\u{F07B} " } else { "▸ " },
-                            Color::White,
-                        )
-                    };
-                    RowItem {
-                        thumb_url: if is_track {
-                            Some(crate::utils::music_image_url(base, item.id, "cover.jpg"))
+                        app.folder_artwork.get(&item.id).cloned().flatten()
+                    },
+                    line1: Line::from(Span::styled(
+                        format!("{}{}", icon, strip_wide_chars(&item.filename)),
+                        Style::default().fg(fg),
+                    )),
+                    line2: Line::from(Span::styled(
+                        if is_track {
+                            String::new()
                         } else {
-                            app.folder_artwork.get(&item.id).cloned().flatten()
+                            "folder".to_string()
                         },
-                        line1: Line::from(Span::styled(
-                            format!("{}{}", icon, strip_wide_chars(&item.filename)),
-                            Style::default().fg(fg),
-                        )),
-                        line2: Line::from(Span::styled(
-                            if is_track {
-                                String::new()
-                            } else {
-                                "folder".to_string()
-                            },
-                            Style::default().fg(mid),
-                        )),
-                        duration: if is_track {
-                            item.duration.map(format_duration)
-                        } else {
-                            None
-                        },
-                    }
-                })
-                .collect();
-            let title = format!(" {} ({}) ", breadcrumb, items.len());
-            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
+                        Style::default().fg(mid),
+                    )),
+                    duration: if is_track {
+                        item.duration.map(format_duration)
+                    } else {
+                        None
+                    },
+                }
+            }, app.is_loading, state, thumbnails);
         }
         LibraryView::Playlists => {
-            let items: Vec<RowItem> = app
-                .playlists
-                .iter()
-                .map(|p| RowItem {
+            let total = app.playlists.len();
+            let title = format!(" Playlists ({}) ", total);
+            render_two_row_view(f, app, area, &title, total, |i| {
+                let p = &app.playlists[i];
+                RowItem {
                     thumb_url: Some(crate::utils::music_image_url(
                         base,
                         crate::utils::json_id_to_string(&p.id),
@@ -1053,16 +1044,15 @@ fn draw_library(
                     line1: nerd_line(app, "\u{F0C9} ", p.name.clone()), // nf-fa-list
                     line2: Line::from(Span::styled("playlist", Style::default().fg(mid))),
                     duration: None,
-                })
-                .collect();
-            let title = format!(" Playlists ({}) ", items.len());
-            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
+                }
+            }, app.is_loading, state, thumbnails);
         }
         LibraryView::RecentlyPlayedArtists => {
-            let items: Vec<RowItem> = app
-                .recent_artists
-                .iter()
-                .map(|a| RowItem {
+            let total = app.recent_artists.len();
+            let title = format!(" Recently Played Artists ({}) ", total);
+            render_two_row_view(f, app, area, &title, total, |i| {
+                let a = &app.recent_artists[i];
+                RowItem {
                     thumb_url: crate::utils::artist_artwork_url(app, &a.id),
                     line1: nerd_line(app, "\u{F007} ", a.artist.clone()), // nf-fa-user
                     line2: Line::from(Span::styled(
@@ -1070,27 +1060,22 @@ fn draw_library(
                         Style::default().fg(mid),
                     )),
                     duration: None,
-                })
-                .collect();
-            let title = format!(" Recently Played Artists ({}) ", items.len());
-            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
+                }
+            }, app.is_loading, state, thumbnails);
         }
         LibraryView::PopularAlbums => {
-            let items: Vec<RowItem> = app
-                .popular_albums
-                .iter()
-                .map(|a| {
-                    let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
-                    RowItem {
-                        thumb_url: Some(a.cover_url(base)),
-                        line1: nerd_line(app, "\u{EDE9} ", a.album.clone()), // nf-fa-compact_disc
-                        line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
-                        duration: None,
-                    }
-                })
-                .collect();
-            let title = format!(" Popular Albums ({}) ", items.len());
-            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
+            let total = app.popular_albums.len();
+            let title = format!(" Popular Albums ({}) ", total);
+            render_two_row_view(f, app, area, &title, total, |i| {
+                let a = &app.popular_albums[i];
+                let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
+                RowItem {
+                    thumb_url: Some(a.cover_url(base)),
+                    line1: nerd_line(app, "\u{EDE9} ", a.album.clone()), // nf-fa-compact_disc
+                    line2: Line::from(Span::styled(sub.to_string(), Style::default().fg(mid))),
+                    duration: None,
+                }
+            }, app.is_loading, state, thumbnails);
         }
     }
 }
@@ -1106,11 +1091,15 @@ fn draw_queue(
     let mid = mid_accent_color(app.effective_accent());
     let cur_idx = app.now_playing.as_ref().and_then(|n| n.playlist_cur_index);
 
-    let items: Vec<RowItem> = app
-        .queue
-        .iter()
-        .enumerate()
-        .map(|(i, t)| {
+    let total = app.queue.len();
+    let queue_title = format!(" Queue ({}) ", total);
+    draw_two_row_list(
+        f,
+        area,
+        &queue_title,
+        total,
+        |i| {
+            let t = &app.queue[i];
             let is_current = cur_idx.map(|idx| idx == i).unwrap_or(false);
             track_row_item(
                 t,
@@ -1120,15 +1109,7 @@ fn draw_queue(
                 mid,
                 app.use_nerd_icons,
             )
-        })
-        .collect();
-
-    let queue_title = format!(" Queue ({}) ", items.len());
-    draw_two_row_list(
-        f,
-        area,
-        &queue_title,
-        items,
+        },
         app.main_selected,
         focused,
         false,
@@ -1420,9 +1401,15 @@ fn draw_browse_list(
     let mid = mid_accent_color(app.effective_accent());
     let accent = app.effective_accent();
     let nerd = app.use_nerd_icons;
-    let row_items: Vec<RowItem> = items
-        .iter()
-        .map(|item| {
+    let total = items.len();
+    let titled = format!("{} ({}) ", title.trim_end(), total);
+    draw_two_row_list(
+        f,
+        area,
+        &titled,
+        total,
+        |i| {
+            let item = &items[i];
             let (icon, icon_fg): (&str, Color) = match (nerd, item.is_playable()) {
                 (true, true) => ("\u{F130} ", focus_border_color(accent)), // nf-fa-microphone
                 (true, false) => ("\u{F07B} ", Color::White),              // nf-fa-folder
@@ -1450,14 +1437,7 @@ fn draw_browse_list(
                 )),
                 duration: None,
             }
-        })
-        .collect();
-    let titled = format!("{} ({}) ", title.trim_end(), row_items.len());
-    draw_two_row_list(
-        f,
-        area,
-        &titled,
-        row_items,
+        },
         app.main_selected,
         focused,
         app.is_loading,
@@ -2700,11 +2680,15 @@ fn breadcrumb_str<'a>(stack: impl Iterator<Item = &'a str>, current: &'a str) ->
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Renders a two-row list, building only the rows in the visible window via `make_row`.
+/// `total` is the full item count (drives the title count, scrollbar and bounds); rows are
+/// constructed lazily so list length no longer affects per-frame cost (5k items == 20 items).
 fn draw_two_row_list(
     f: &mut Frame,
     area: Rect,
     title: &str,
-    items: Vec<RowItem>,
+    total: usize,
+    make_row: impl Fn(usize) -> RowItem,
     selected: usize,
     focused: bool,
     is_loading: bool,
@@ -2719,7 +2703,7 @@ fn draw_two_row_list(
     };
     let block = styled_block(title, border_style, focus_border_color(accent));
 
-    if items.is_empty() {
+    if total == 0 {
         state.select(None);
         let msg = if is_loading {
             "  Loading..."
@@ -2738,7 +2722,7 @@ fn draw_two_row_list(
     let inner = render_bordered_panel(f, block, area);
 
     let visible = ((inner.height / 2) as usize).max(1);
-    let needs_scroll = items.len() > visible;
+    let needs_scroll = total > visible;
 
     let offset = sync_scroll_offset(state, selected, visible);
 
@@ -2746,7 +2730,7 @@ fn draw_two_row_list(
     let text_w = inner.width.saturating_sub(THUMB_W + THUMB_SEP);
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
-        if vis_i >= items.len() {
+        if vis_i >= total {
             break;
         }
         let y = inner.y + (item_i as u16) * 2;
@@ -2754,7 +2738,7 @@ fn draw_two_row_list(
             break;
         }
 
-        let item = &items[vis_i];
+        let item = make_row(vis_i);
         let is_sel = vis_i == selected;
 
         let (s1, s2) = if is_sel {
@@ -2814,7 +2798,7 @@ fn draw_two_row_list(
         render_scrollbar(
             f,
             scroll_area,
-            items.len().saturating_sub(visible),
+            total.saturating_sub(visible),
             offset,
             visible,
             accent,

@@ -204,6 +204,8 @@ utils.rs      — shared helpers
 
 Network I/O runs in background `tokio` tasks and communicates with the UI via `mpsc` channels. The render loop never blocks on I/O.
 
+Large lists (e.g. *All Tracks* with thousands of entries) stay fluid because navigation cost is independent of both list length and image-load state: each frame builds only the rows in the visible window (not the whole list), and cover-art thumbnails are fully resized **and** encoded for the terminal in the background task before being handed to the UI — so the draw call never blocks waiting for an image to encode.
+
 ## Development
 
 ```sh

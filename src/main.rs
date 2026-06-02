@@ -19,11 +19,12 @@ use crossterm::{
 use events::{Action, InputEvent, key_to_action, poll_event};
 use ratatui::{Terminal, backend::CrosstermBackend, widgets::ListState};
 use ratatui_image::{
+    Resize, ResizeEncodeRender,
     picker::{Picker, ProtocolType},
     protocol::StatefulProtocol,
 };
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     io,
     sync::Arc,
     time::{Duration, Instant},
@@ -390,11 +391,6 @@ async fn run(
     let mut pending_artist_art: HashSet<String> = HashSet::new();
     // Folder ids whose representative cover art is currently being resolved.
     let mut pending_folder_art: HashSet<u32> = HashSet::new();
-    // Decoded+pre-resized images waiting for protocol creation.
-    // Drained at most MAX_THUMB_PROTOCOLS_PER_TICK per loop iteration to spread the
-    // per-thumbnail encoding cost across frames and keep navigation responsive.
-    let mut thumbnail_render_queue: VecDeque<(String, image::DynamicImage)> = VecDeque::new();
-    const MAX_THUMB_PROTOCOLS_PER_TICK: usize = 3;
 
     // Background: server health + player list polling
     {
@@ -526,10 +522,10 @@ async fn run(
                     album_art_full = Some(picker.new_resize_protocol(art_full));
                     last_artwork_image = Some(img);
                 }
-                AppMsg::ThumbnailLoaded(url, img) => {
+                AppMsg::ThumbnailLoaded(url, img, proto) => {
                     pending_thumbs.remove(&url);
-                    thumbnail_images.insert(url.clone(), img.clone());
-                    thumbnail_render_queue.push_back((url, img));
+                    thumbnail_images.insert(url.clone(), img);
+                    thumbnails.insert(url, proto);
                 }
                 AppMsg::ThumbnailFailed(url) => {
                     pending_thumbs.remove(&url);
@@ -656,6 +652,7 @@ async fn run(
                     let c = client.clone();
                     let t = tx.clone();
                     let u = url.clone();
+                    let pk = picker.clone();
                     let (fw, fh) = app.font_size;
                     let target_w = (crate::ui::THUMB_W as u32 * fw as u32).max(1);
                     let target_h = (2u32 * fh as u32).max(1);
@@ -668,7 +665,10 @@ async fn run(
                                         target_h,
                                         image::imageops::FilterType::Triangle,
                                     );
-                                    let _ = t.send(AppMsg::ThumbnailLoaded(u, small)).await;
+                                    // Fully resize+encode the protocol off the UI thread so the
+                                    // draw call never blocks: at render time needs_resize is None.
+                                    let proto = encode_thumb_protocol(&pk, small.clone());
+                                    let _ = t.send(AppMsg::ThumbnailLoaded(u, small, proto)).await;
                                 }
                                 Err(_) => {
                                     let _ = t.send(AppMsg::ThumbnailFailed(u)).await;
@@ -683,27 +683,9 @@ async fn run(
             }
         }
 
-        // Drain at most MAX_THUMB_PROTOCOLS_PER_TICK from the render queue each frame.
-        // This caps the per-frame encoding cost so navigation stays responsive while art loads.
-        for _ in 0..MAX_THUMB_PROTOCOLS_PER_TICK {
-            if let Some((url, img)) = thumbnail_render_queue.pop_front() {
-                thumbnails.insert(url, picker.new_resize_protocol(img));
-                had_msgs = true;
-            } else {
-                break;
-            }
-        }
-
         let had_overlay = has_overlay(&app);
 
-        // Use a short poll timeout while the render queue has work so the loop spins fast
-        // and thumbnails drain across frames without blocking key events.
-        let poll_duration = if thumbnail_render_queue.is_empty() {
-            TICK_RATE
-        } else {
-            Duration::from_millis(8)
-        };
-        match poll_event(poll_duration)? {
+        match poll_event(TICK_RATE)? {
             InputEvent::Key(key) => {
                 if app.config_modal.is_some() {
                     let prev_protocol = cfg.image_protocol.clone();
@@ -1076,6 +1058,21 @@ fn apply_image_protocol(picker: &mut Picker, protocol: &str) {
             }
         }
     }
+}
+
+/// Build a thumbnail protocol and fully resize+encode it for the fixed `THUMB_W × 2` cell
+/// thumbnail rect. Doing the encode here (off the UI thread when called from a spawned task)
+/// means draw-time `needs_resize` returns `None`, so rendering never blocks on encoding.
+fn encode_thumb_protocol(picker: &Picker, img: image::DynamicImage) -> StatefulProtocol {
+    let mut proto = picker.new_resize_protocol(img);
+    let area = ratatui::layout::Size {
+        width: crate::ui::THUMB_W,
+        height: 2,
+    };
+    if let Some(sz) = proto.needs_resize(&Resize::Fit(None), area) {
+        proto.resize_encode(&Resize::Fit(None), sz);
+    }
+    proto
 }
 
 fn create_album_art_protocols(

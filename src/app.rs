@@ -542,7 +542,7 @@ pub enum AppMsg {
         accent: Option<[u8; 3]>,
         dimensions: (u32, u32),
     },
-    ThumbnailLoaded(String, image::DynamicImage), // url, pre-resized image
+    ThumbnailLoaded(String, image::DynamicImage, ratatui_image::protocol::StatefulProtocol), // url, pre-resized image, pre-encoded protocol
     ThumbnailFailed(String),                      // url
     ArtistArtworkResolved(String, Option<String>), // artist_id, resolved cover url (None = no art)
     FolderArtworkResolved(u32, Option<String>),    // folder_id, resolved cover url (None = no art)
