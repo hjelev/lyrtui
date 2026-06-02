@@ -713,6 +713,22 @@ async fn run(
                     let idx = app.main_selected;
                     handlers::open_sync_modal(&mut app, idx);
                 } else {
+                    if key.code == crossterm::event::KeyCode::Esc {
+                        let double = app
+                            .esc_last_pressed
+                            .take()
+                            .map(|t| t.elapsed() < Duration::from_millis(500))
+                            .unwrap_or(false);
+                        if double {
+                            app.confirm_quit = true;
+                            app.quit_selected_button = 1;
+                            needs_redraw = true;
+                            continue;
+                        }
+                        app.esc_last_pressed = Some(Instant::now());
+                    } else {
+                        app.esc_last_pressed = None;
+                    }
                     let action = key_to_action(key);
                     if matches!(action, Action::OpenConfig) {
                         app.config_modal = Some(ConfigModal::new(

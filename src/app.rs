@@ -1,6 +1,7 @@
 use crate::api::{Album, Artist, FolderItem, NowPlaying, Player, Playlist, RadioItem, Track};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConnectionState {
@@ -343,9 +344,10 @@ pub struct App {
     pub sync_modal: Option<SyncModal>,
     pub confirm_clear_queue: bool,
     pub clear_queue_selected_button: u8, // 0 = OK, 1 = Cancel
-    pub confirm_quit: bool,              // mouse-triggered "close lyrtui?" dialog
-    pub quit_selected_button: u8,        // 0 = OK, 1 = Cancel
-    pub should_quit: bool,               // set when the quit dialog is confirmed
+    pub confirm_quit: bool,         // "close lyrtui?" dialog
+    pub quit_selected_button: u8,   // 0 = OK, 1 = Cancel
+    pub should_quit: bool,          // set when the quit dialog is confirmed
+    pub esc_last_pressed: Option<Instant>,
     pub confirm_delete_queue_item: Option<usize>, // Some(idx) when pending confirmation
     pub delete_queue_selected_button: u8, // 0 = OK, 1 = Cancel
     /// Height (in terminal rows) of the Now Playing panel, computed from font metrics.
@@ -452,6 +454,7 @@ impl App {
             confirm_quit: false,
             quit_selected_button: 1,
             should_quit: false,
+            esc_last_pressed: None,
             confirm_delete_queue_item: None,
             delete_queue_selected_button: 0,
             status_height: 11, // overwritten in run() from picker font metrics

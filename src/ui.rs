@@ -731,9 +731,9 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             ("\u{F0C0}", "Artists", "your music library by artist"),        // nf-fa-users
             ("\u{F2BD}", "Album Artists", "artists with full albums"),       // nf-fa-user_circle
             ("\u{F017}", "Recently Played Artists", "artists you played lately"), // nf-fa-clock-o
-            ("\u{EDE9}", "Albums", "all albums"),                           // nf-fa-compact_disc
-            ("\u{F005}", "Popular Albums", "most recently added albums"),    // nf-fa-star
-            ("\u{F001}", "Tracks", "all tracks"),                           // nf-fa-music
+            ("\u{EDE9}", "Albums", "all albums"),                           // nf-cod-disc
+            ("\u{F3D8}", "Popular Albums", "most recently added albums"),    // nf-fa-fire
+            ("\u{F025}", "Tracks", "all tracks"),                           // nf-fa-headphones
             ("\u{F0C9}", "Playlists", "saved playlists"),                   // nf-fa-list
             ("\u{F07B}", "Folders", "browse by folder"),                    // nf-fa-folder
         ]
@@ -916,7 +916,7 @@ fn draw_library(
     let mid = mid_accent_color(app.effective_accent());
     match view {
         LibraryView::Artists => {
-            let items = app
+            let items: Vec<RowItem> = app
                 .artists
                 .iter()
                 .map(|a| RowItem {
@@ -926,10 +926,11 @@ fn draw_library(
                     duration: None,
                 })
                 .collect();
-            render_two_row_view(f, app, area, " Artists ", items, false, state, thumbnails);
+            let title = format!(" Artists ({}) ", items.len());
+            render_two_row_view(f, app, area, &title, items, false, state, thumbnails);
         }
         LibraryView::AlbumArtists => {
-            let items = app
+            let items: Vec<RowItem> = app
                 .album_artists
                 .iter()
                 .map(|a| RowItem {
@@ -939,10 +940,11 @@ fn draw_library(
                     duration: None,
                 })
                 .collect();
-            render_two_row_view(f, app, area, " Album Artists ", items, false, state, thumbnails);
+            let title = format!(" Album Artists ({}) ", items.len());
+            render_two_row_view(f, app, area, &title, items, false, state, thumbnails);
         }
         LibraryView::Albums { .. } => {
-            let items = app
+            let items: Vec<RowItem> = app
                 .albums
                 .iter()
                 .map(|a| {
@@ -955,20 +957,17 @@ fn draw_library(
                     }
                 })
                 .collect();
-            render_two_row_view(f, app, area, " Albums ", items, app.is_loading, state, thumbnails);
+            let title = format!(" Albums ({}) ", items.len());
+            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
         }
         LibraryView::Tracks { album_id } => {
-            let title = if album_id.is_some() {
-                " Tracks "
-            } else {
-                " All Tracks "
-            };
+            let label = if album_id.is_some() { "Tracks" } else { "All Tracks" };
             let playing_title = app
                 .now_playing
                 .as_ref()
                 .map(|n| n.title.as_str())
                 .unwrap_or("");
-            let items = app
+            let items: Vec<RowItem> = app
                 .tracks
                 .iter()
                 .enumerate()
@@ -986,23 +985,29 @@ fn draw_library(
                     track_row_item(t, i, is_current, thumb_url, mid, app.use_nerd_icons)
                 })
                 .collect();
-            render_two_row_view(f, app, area, title, items, app.is_loading, state, thumbnails);
+            let title = format!(" {} ({}) ", label, items.len());
+            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
         }
         LibraryView::Folder { .. } => {
             let breadcrumb = breadcrumb_str(
                 app.folder_nav_stack.iter().map(|n| n.title.as_str()),
                 &app.folder_title,
             );
-            let title = format!(" Folders — {} ", breadcrumb);
-            let items = app
+            let items: Vec<RowItem> = app
                 .folder_items
                 .iter()
                 .map(|item| {
                     let is_track = item.item_type == FolderItemType::Track;
                     let (icon, fg) = if is_track {
-                        ("▶ ", focus_border_color(app.effective_accent()))
+                        (
+                            if app.use_nerd_icons { "\u{F001} " } else { "▶ " },
+                            focus_border_color(app.effective_accent()),
+                        )
                     } else {
-                        ("▸ ", Color::White)
+                        (
+                            if app.use_nerd_icons { "\u{F07B} " } else { "▸ " },
+                            Color::White,
+                        )
                     };
                     RowItem {
                         thumb_url: if is_track {
@@ -1030,10 +1035,11 @@ fn draw_library(
                     }
                 })
                 .collect();
+            let title = format!(" {} ({}) ", breadcrumb, items.len());
             render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
         }
         LibraryView::Playlists => {
-            let items = app
+            let items: Vec<RowItem> = app
                 .playlists
                 .iter()
                 .map(|p| RowItem {
@@ -1047,10 +1053,11 @@ fn draw_library(
                     duration: None,
                 })
                 .collect();
-            render_two_row_view(f, app, area, " Playlists ", items, app.is_loading, state, thumbnails);
+            let title = format!(" Playlists ({}) ", items.len());
+            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
         }
         LibraryView::RecentlyPlayedArtists => {
-            let items = app
+            let items: Vec<RowItem> = app
                 .recent_artists
                 .iter()
                 .map(|a| RowItem {
@@ -1063,19 +1070,11 @@ fn draw_library(
                     duration: None,
                 })
                 .collect();
-            render_two_row_view(
-                f,
-                app,
-                area,
-                " Recently Played Artists ",
-                items,
-                app.is_loading,
-                state,
-                thumbnails,
-            );
+            let title = format!(" Recently Played Artists ({}) ", items.len());
+            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
         }
         LibraryView::PopularAlbums => {
-            let items = app
+            let items: Vec<RowItem> = app
                 .popular_albums
                 .iter()
                 .map(|a| {
@@ -1088,16 +1087,8 @@ fn draw_library(
                     }
                 })
                 .collect();
-            render_two_row_view(
-                f,
-                app,
-                area,
-                " Popular Albums ",
-                items,
-                app.is_loading,
-                state,
-                thumbnails,
-            );
+            let title = format!(" Popular Albums ({}) ", items.len());
+            render_two_row_view(f, app, area, &title, items, app.is_loading, state, thumbnails);
         }
     }
 }
@@ -1113,7 +1104,7 @@ fn draw_queue(
     let mid = mid_accent_color(app.effective_accent());
     let cur_idx = app.now_playing.as_ref().and_then(|n| n.playlist_cur_index);
 
-    let items = app
+    let items: Vec<RowItem> = app
         .queue
         .iter()
         .enumerate()
@@ -1130,10 +1121,11 @@ fn draw_queue(
         })
         .collect();
 
+    let queue_title = format!(" Queue ({}) ", items.len());
     draw_two_row_list(
         f,
         area,
-        " Queue ",
+        &queue_title,
         items,
         app.main_selected,
         focused,
@@ -1426,7 +1418,7 @@ fn draw_browse_list(
     let mid = mid_accent_color(app.effective_accent());
     let accent = app.effective_accent();
     let nerd = app.use_nerd_icons;
-    let row_items = items
+    let row_items: Vec<RowItem> = items
         .iter()
         .map(|item| {
             let (icon, icon_fg): (&str, Color) = match (nerd, item.is_playable()) {
@@ -1458,10 +1450,11 @@ fn draw_browse_list(
             }
         })
         .collect();
+    let titled = format!("{} ({}) ", title.trim_end(), row_items.len());
     draw_two_row_list(
         f,
         area,
-        title,
+        &titled,
         row_items,
         app.main_selected,
         focused,
@@ -1555,7 +1548,12 @@ fn draw_search(
     let mid = mid_accent_color(accent);
 
     let border_style = border_style_for_focus(focused, accent);
-    let block = styled_block(" Search ", border_style, focus_border_color(accent));
+    let search_title = if app.search_results.is_empty() {
+        " Search ".to_string()
+    } else {
+        format!(" Search ({}) ", app.search_results.len())
+    };
+    let block = styled_block(&search_title, border_style, focus_border_color(accent));
     let inner = render_bordered_panel(f, block, area);
 
     let chunks = Layout::default()
@@ -1817,7 +1815,7 @@ fn draw_search(
             offset,
             visible,
             app.effective_accent(),
-            results_focused,
+            focused,
         );
     }
 }
