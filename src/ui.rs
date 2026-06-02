@@ -13,6 +13,7 @@ use ratatui::{
         ScrollbarOrientation, ScrollbarState,
     },
 };
+use unicode_width::UnicodeWidthChar;
 use ratatui_image::{Resize, StatefulImage, protocol::StatefulProtocol};
 use std::collections::HashMap;
 
@@ -852,7 +853,7 @@ fn track_row_item(
         thumb_url,
         line1: Line::from(vec![
             Span::styled(icon, icon_style),
-            Span::styled(t.title.clone(), title_style),
+            Span::styled(strip_wide_chars(&t.title), title_style),
         ]),
         line2: Line::from(Span::styled(subtitle, l2_style)),
         duration: t.duration.map(format_duration),
@@ -863,16 +864,17 @@ fn track_row_item(
 /// icons are enabled, otherwise just the name is shown. Collapses the identical
 /// `if app.use_nerd_icons { ... } else { ... }` blocks repeated across the library views.
 fn nerd_line(app: &App, icon: &'static str, name: String) -> Line<'static> {
+    let clean = strip_wide_chars(&name);
     if app.use_nerd_icons {
         Line::from(vec![
             Span::styled(
                 icon,
                 Style::default().fg(focus_border_color(app.effective_accent())),
             ),
-            Span::raw(name),
+            Span::raw(clean),
         ])
     } else {
-        Line::from(Span::raw(name))
+        Line::from(Span::raw(clean))
     }
 }
 
@@ -1016,7 +1018,7 @@ fn draw_library(
                             app.folder_artwork.get(&item.id).cloned().flatten()
                         },
                         line1: Line::from(Span::styled(
-                            format!("{}{}", icon, item.filename),
+                            format!("{}{}", icon, strip_wide_chars(&item.filename)),
                             Style::default().fg(fg),
                         )),
                         line2: Line::from(Span::styled(
@@ -1385,7 +1387,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             1,
             list_area.height,
         );
-        let mut ss = ScrollbarState::new(total)
+        let mut ss = ScrollbarState::new(total.saturating_sub(visible) + 1)
             .position(offset)
             .viewport_content_length(visible);
         let (track_style, thumb_style) = scrollbar_accent_styles(accent, focused);
@@ -1435,7 +1437,7 @@ fn draw_browse_list(
             RowItem {
                 thumb_url: item.artwork_url.clone(),
                 line1: Line::from(Span::styled(
-                    format!("{}{}", icon, item.name),
+                    format!("{}{}", icon, strip_wide_chars(&item.name)),
                     Style::default().fg(name_fg),
                 )),
                 line2: Line::from(Span::styled(
@@ -1660,7 +1662,10 @@ fn draw_search(
     let offset = sync_scroll_offset(state, selected, visible);
 
     let text_x = results_area.x + THUMB_W + THUMB_SEP;
-    let text_w = results_area.width.saturating_sub(THUMB_W + THUMB_SEP);
+    let text_w = results_area
+        .width
+        .saturating_sub(THUMB_W + THUMB_SEP)
+        + u16::from(total > visible);
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
         if vis_i >= total {
@@ -1901,7 +1906,10 @@ fn draw_app_search(
     let offset = sync_scroll_offset(state, selected, visible);
 
     let text_x = results_area.x + THUMB_W + THUMB_SEP;
-    let text_w = results_area.width.saturating_sub(THUMB_W + THUMB_SEP);
+    let text_w = results_area
+        .width
+        .saturating_sub(THUMB_W + THUMB_SEP)
+        + u16::from(total > visible);
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
         if vis_i >= total {
@@ -2058,7 +2066,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
             1,
             inner.height,
         );
-        let mut ss = ScrollbarState::new(content_lines as usize)
+        let mut ss = ScrollbarState::new((max_scroll + 1) as usize)
             .position(scroll as usize)
             .viewport_content_length(visible as usize);
         let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), focused);
@@ -2770,7 +2778,7 @@ fn draw_two_row_list(
             if dur_w < text_w {
                 let title_w = text_w - dur_w;
                 f.render_widget(
-                    Paragraph::new(item.line1.clone()).style(s1),
+                    Paragraph::new(truncate_line_to_cols(item.line1.clone(), title_w)).style(s1),
                     Rect::new(text_x, y, title_w, 1),
                 );
                 f.render_widget(
@@ -2779,18 +2787,18 @@ fn draw_two_row_list(
                 );
             } else {
                 f.render_widget(
-                    Paragraph::new(item.line1.clone()).style(s1),
+                    Paragraph::new(truncate_line_to_cols(item.line1.clone(), text_w)).style(s1),
                     Rect::new(text_x, y, text_w, 1),
                 );
             }
         } else {
             f.render_widget(
-                Paragraph::new(item.line1.clone()).style(s1),
+                Paragraph::new(truncate_line_to_cols(item.line1.clone(), text_w)).style(s1),
                 Rect::new(text_x, y, text_w, 1),
             );
         }
         f.render_widget(
-            Paragraph::new(item.line2.clone()).style(s2),
+            Paragraph::new(truncate_line_to_cols(item.line2.clone(), text_w)).style(s2),
             Rect::new(text_x, y + 1, text_w, 1),
         );
     }
@@ -2870,7 +2878,7 @@ fn render_scrollbar(
     accent: Option<[u8; 3]>,
     focused: bool,
 ) {
-    let mut ss = ScrollbarState::new(content_len + visible)
+    let mut ss = ScrollbarState::new(content_len + 1)
         .position(offset)
         .viewport_content_length(visible);
     let (track_style, thumb_style) = scrollbar_accent_styles(accent, focused);
@@ -3601,6 +3609,63 @@ fn truncate_ellipsis(s: &str, max_chars: usize) -> String {
     } else {
         s.to_string()
     }
+}
+
+fn strip_wide_chars(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_space = false;
+    for ch in s.chars() {
+        match ch {
+            '\u{200D}' | '\u{FE0F}' | '\u{20E3}' => continue,
+            _ => {}
+        }
+        if UnicodeWidthChar::width(ch).unwrap_or(1) >= 2 {
+            continue;
+        }
+        if ch == ' ' {
+            if prev_space {
+                continue;
+            }
+            prev_space = true;
+        } else {
+            prev_space = false;
+        }
+        out.push(ch);
+    }
+    out.trim_end().to_string()
+}
+
+fn truncate_line_to_cols(line: Line<'static>, max_cols: u16) -> Line<'static> {
+    let max = max_cols as usize;
+    let mut remaining = max;
+    let spans: Vec<Span<'static>> = line
+        .spans
+        .into_iter()
+        .filter_map(|span| {
+            if remaining == 0 {
+                return None;
+            }
+            let s = span.content.as_ref();
+            let mut w = 0usize;
+            let mut end = s.len();
+            for (i, ch) in s.char_indices() {
+                let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+                if w + cw > remaining {
+                    end = i;
+                    break;
+                }
+                w += cw;
+            }
+            remaining -= w;
+            let content = s[..end].to_string();
+            if content.is_empty() {
+                None
+            } else {
+                Some(Span::styled(content, span.style))
+            }
+        })
+        .collect();
+    Line::from(spans)
 }
 
 /// Returns (popup_rect, [option_rects; 5]) for click-hit-testing the 5 menu rows.
