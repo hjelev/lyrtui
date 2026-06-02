@@ -238,28 +238,31 @@ const ART_RADIUS_FULL: u32 = 2;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    if std::env::args().any(|a| a == "-v" || a == "--version") {
+    let args: std::collections::HashSet<String> = std::env::args().collect();
+    let has = |flags: &[&str]| flags.iter().any(|f| args.contains(*f));
+
+    if has(&["-v", "--version"]) {
         println!("lyrtui v{}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
-    if std::env::args().any(|a| a == "-i" || a == "--info") {
+    if has(&["-i", "--info"]) {
         return print_info().await;
     }
 
-    if std::env::args().any(|a| a == "-p" || a == "--play-pause") {
+    if has(&["-p", "--play-pause"]) {
         return cmd_play_pause().await;
     }
 
-    if std::env::args().any(|a| a == "--next") {
+    if has(&["--next"]) {
         return cmd_next().await;
     }
 
-    if std::env::args().any(|a| a == "--prev") {
+    if has(&["--prev"]) {
         return cmd_prev().await;
     }
 
-    if std::env::args().any(|a| a == "-h" || a == "--help") {
+    if has(&["-h", "--help"]) {
         print!(
             "\
 lyrtui v{version} — TUI for Lyrion Music Server
@@ -595,11 +598,12 @@ async fn run(
             }
         }
 
+        let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
+
         // Resolve representative cover art for visible artists (artists carry no art of their
         // own; we look up the coverid of an album they appear on). Resolved URLs land in
         // `app.artist_artwork` and are then fetched by the thumbnail prefetch block below.
         {
-            let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
             for idx in thumb_range(term_h, &main_state, &app) {
                 if let Some(artist_id) = utils::artist_id_at(&app, idx)
                     && !app.artist_artwork.contains_key(&artist_id)
@@ -630,7 +634,6 @@ async fn run(
 
         // Request thumbnails for currently visible items
         {
-            let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
             let base = client.server_base_url();
             for idx in thumb_range(term_h, &main_state, &app) {
                 if let Some(url) = utils::thumbnail_url_for(&app, idx, &base)
@@ -789,7 +792,6 @@ async fn run(
         // When an overlay closes its Clear widget may overwrite image cells, causing terminals
         // to discard stored graphic-protocol data. Recreate affected protocols on overlay close.
         if had_overlay && !has_overlay(&app) {
-            let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
             let base = client.server_base_url();
             for idx in thumb_range(term_h, &main_state, &app) {
                 if let Some(url) = utils::thumbnail_url_for(&app, idx, &base)

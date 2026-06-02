@@ -96,14 +96,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyCode::Tab, _) | (KeyCode::BackTab, _) => Action::ToggleFocus,
         (KeyCode::Char('['), _) => Action::ScopePrev,
         (KeyCode::Char(']'), _) => Action::ScopeNext,
-        (KeyCode::Char('1'), _) => Action::NavToSidebar(0),
-        (KeyCode::Char('2'), _) => Action::NavToSidebar(1),
-        (KeyCode::Char('3'), _) => Action::NavToSidebar(2),
-        (KeyCode::Char('4'), _) => Action::NavToSidebar(3),
-        (KeyCode::Char('5'), _) => Action::NavToSidebar(4),
-        (KeyCode::Char('6'), _) => Action::NavToSidebar(5),
-        (KeyCode::Char('7'), _) => Action::NavToSidebar(6),
-        (KeyCode::Char('8'), _) => Action::NavToSidebar(7),
+        (KeyCode::Char(c @ '1'..='8'), _) => Action::NavToSidebar(c as usize - '1' as usize),
         _ => Action::None,
     }
 }

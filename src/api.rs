@@ -4,6 +4,11 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{sync::RwLock, time::Duration};
 
+const LIMIT_PLAYERS: u64 = 100;
+const LIMIT_FULL: u64 = 10_000;
+const LIMIT_BROWSE: u64 = 200;
+const LIMIT_QUEUE: u64 = 500;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Player {
     pub playerid: String,
@@ -218,7 +223,7 @@ impl LmsClient {
 
     pub async fn get_players(&self) -> Result<Vec<Player>> {
         let mut result = self
-            .rpc("", &[json!("players"), json!(0), json!(100)])
+            .rpc("", &[json!("players"), json!(0), json!(LIMIT_PLAYERS)])
             .await?;
         let count = result["count"].as_u64().unwrap_or(0);
         if count == 0 {
@@ -269,7 +274,7 @@ impl LmsClient {
         let mut result = self
             .rpc(
                 player_id,
-                &[json!("status"), json!(0), json!(500), json!("tags:adltK")],
+                &[json!("status"), json!(0), json!(LIMIT_QUEUE), json!("tags:adltK")],
             )
             .await?;
         let tracks = take_array(&mut result, "playlist_loop");
@@ -297,7 +302,7 @@ impl LmsClient {
 
     pub async fn get_playlists(&self) -> Result<Vec<Playlist>> {
         let mut result = self
-            .rpc("", &[json!("playlists"), json!(0), json!(10000)])
+            .rpc("", &[json!("playlists"), json!(0), json!(LIMIT_FULL)])
             .await?;
         let playlists: Vec<Playlist> = take_array(&mut result, "playlists_loop")
             .into_iter()
@@ -311,7 +316,7 @@ impl LmsClient {
     }
 
     pub async fn get_artists(&self) -> Result<Vec<Artist>> {
-        self.fetch_list(&[json!("artists"), json!(0), json!(10000)], "artists_loop")
+        self.fetch_list(&[json!("artists"), json!(0), json!(LIMIT_FULL)], "artists_loop")
             .await
     }
 
@@ -320,7 +325,7 @@ impl LmsClient {
             &[
                 json!("artists"),
                 json!(0),
-                json!(10000),
+                json!(LIMIT_FULL),
                 json!("role_id:ALBUMARTIST"),
             ],
             "artists_loop",
@@ -329,7 +334,7 @@ impl LmsClient {
     }
 
     pub async fn get_albums(&self, artist_id: Option<&str>) -> Result<Vec<Album>> {
-        let mut params = vec![json!("albums"), json!(0), json!(10000), json!("tags:alj")];
+        let mut params = vec![json!("albums"), json!(0), json!(LIMIT_FULL), json!("tags:alj")];
         if let Some(id) = artist_id {
             params.push(json!(format!("artist_id:{}", id)));
         }
@@ -338,7 +343,7 @@ impl LmsClient {
 
     pub async fn get_all_tracks(&self) -> Result<Vec<Track>> {
         self.fetch_list(
-            &[json!("tracks"), json!(0), json!(10000), json!("tags:adlt")],
+            &[json!("tracks"), json!(0), json!(LIMIT_FULL), json!("tags:adlt")],
             "titles_loop",
         )
         .await
@@ -431,7 +436,7 @@ impl LmsClient {
             &[
                 json!("tracks"),
                 json!(0),
-                json!(10000),
+                json!(LIMIT_FULL),
                 json!(format!("album_id:{}", album_id)),
                 json!("tags:adlt"),
             ],
@@ -589,10 +594,11 @@ impl LmsClient {
         Ok(())
     }
 
-    /// Returns the list of installed apps (Spotify, Deezer, etc.).
-    pub async fn get_apps(&self) -> Result<Vec<RadioItem>> {
-        let result = self.rpc("", &[json!("apps"), json!(0), json!(100)]).await?;
-        let items = result["appss_loop"].as_array().cloned().unwrap_or_default();
+    async fn fetch_top_level_items(&self, cmd: &str, loop_key: &str) -> Result<Vec<RadioItem>> {
+        let result = self
+            .rpc("", &[json!(cmd), json!(0), json!(LIMIT_PLAYERS)])
+            .await?;
+        let items = result[loop_key].as_array().cloned().unwrap_or_default();
         let base = self.server_base_url();
         Ok(items
             .into_iter()
@@ -609,29 +615,14 @@ impl LmsClient {
             .collect())
     }
 
+    /// Returns the list of installed apps (Spotify, Deezer, etc.).
+    pub async fn get_apps(&self) -> Result<Vec<RadioItem>> {
+        self.fetch_top_level_items("apps", "appss_loop").await
+    }
+
     /// Returns the list of available radio services/plugins (TuneIn, etc.).
     pub async fn get_radio_services(&self) -> Result<Vec<RadioItem>> {
-        let result = self
-            .rpc("", &[json!("radios"), json!(0), json!(100)])
-            .await?;
-        let items = result["radioss_loop"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-        let base = self.server_base_url();
-        Ok(items
-            .into_iter()
-            .map(|v| RadioItem {
-                name: v["name"].as_str().unwrap_or("").to_string(),
-                item_type: "link".to_string(),
-                url: None,
-                cmd: v["cmd"].as_str().map(String::from),
-                item_id: None,
-                artwork_url: resolve_image_url(&v, &base),
-                has_items: true,
-                is_audio: false,
-            })
-            .collect())
+        self.fetch_top_level_items("radios", "radioss_loop").await
     }
 
     /// Browse into a radio service or subfolder.
@@ -647,7 +638,7 @@ impl LmsClient {
             json!(cmd),
             json!("items"),
             json!(0),
-            json!(200),
+            json!(LIMIT_BROWSE),
             json!("want_url:1"),
         ];
         if let Some(id) = item_id {
@@ -745,7 +736,7 @@ impl LmsClient {
         let mut params = vec![
             json!("musicfolder"),
             json!(0),
-            json!(10000),
+            json!(LIMIT_FULL),
             json!("tags:dlt"),
         ];
         if let Some(id) = folder_id {
@@ -875,7 +866,7 @@ impl LmsClient {
             json!(cmd),
             json!("items"),
             json!(0),
-            json!(200),
+            json!(LIMIT_BROWSE),
             json!(format!("search:{}", query)),
             json!("want_url:1"),
         ];
@@ -902,7 +893,7 @@ impl LmsClient {
                 &[
                     json!("search"),
                     json!(0),
-                    json!(200),
+                    json!(LIMIT_BROWSE),
                     json!(format!("term:{}", query)),
                 ],
             )
@@ -1091,7 +1082,7 @@ impl LmsClient {
 
     pub async fn get_players_detailed(&self) -> Result<Vec<PlayerDetail>> {
         let mut result = self
-            .rpc("", &[json!("players"), json!(0), json!(100)])
+            .rpc("", &[json!("players"), json!(0), json!(LIMIT_PLAYERS)])
             .await?;
         let count = result["count"].as_u64().unwrap_or(0);
         if count == 0 {

@@ -135,6 +135,20 @@ pub fn folder_id_at(app: &App, idx: usize) -> Option<u32> {
     }
 }
 
+fn queue_labels(name: &str, folder: bool) -> (Option<String>, Option<String>) {
+    if folder {
+        (
+            Some(format!("Add \"{}\" folder to queue", name)),
+            Some(format!("Replace queue with \"{}\" folder", name)),
+        )
+    } else {
+        (
+            Some(format!("Add \"{}\" to queue", name)),
+            Some(format!("Replace queue with \"{}\"", name)),
+        )
+    }
+}
+
 pub fn compute_parent_labels(app: &App) -> (Option<String>, Option<String>) {
     match &app.main_view {
         MainView::Search | MainView::AppSearch { .. } => (None, None),
@@ -145,27 +159,20 @@ pub fn compute_parent_labels(app: &App) -> (Option<String>, Option<String>) {
                 .find(|a| json_id_to_string(&a.id) == *id)
                 .map(|a| a.album.clone())
                 .unwrap_or_else(|| "album".to_string());
-            (
-                Some(format!("Add \"{}\" to queue", name)),
-                Some(format!("Replace queue with \"{}\"", name)),
-            )
+            queue_labels(&name, false)
         }
-        MainView::Radio if !app.radio_items.is_empty() => (
-            Some(format!("Add \"{}\" folder to queue", app.radio_title)),
-            Some(format!("Replace queue with \"{}\" folder", app.radio_title)),
-        ),
-        MainView::Apps if !app.app_items.is_empty() => (
-            Some(format!("Add \"{}\" folder to queue", app.app_title)),
-            Some(format!("Replace queue with \"{}\" folder", app.app_title)),
-        ),
-        MainView::Favourites if !app.fav_items.is_empty() => (
-            Some(format!("Add \"{}\" folder to queue", app.fav_title)),
-            Some(format!("Replace queue with \"{}\" folder", app.fav_title)),
-        ),
-        MainView::Library(LibraryView::Folder { folder_id: Some(_) }) => (
-            Some(format!("Add \"{}\" to queue", app.folder_title)),
-            Some(format!("Replace queue with \"{}\"", app.folder_title)),
-        ),
+        MainView::Radio if !app.radio_items.is_empty() => {
+            queue_labels(&app.radio_title, true)
+        }
+        MainView::Apps if !app.app_items.is_empty() => {
+            queue_labels(&app.app_title, true)
+        }
+        MainView::Favourites if !app.fav_items.is_empty() => {
+            queue_labels(&app.fav_title, true)
+        }
+        MainView::Library(LibraryView::Folder { folder_id: Some(_) }) => {
+            queue_labels(&app.folder_title, false)
+        }
         _ => (None, None),
     }
 }

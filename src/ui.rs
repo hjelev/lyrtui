@@ -59,6 +59,28 @@ const THUMB_PLACEHOLDER: Color = Color::Rgb(80, 80, 110);
 const BAR_FOCUSED: Color = Color::Rgb(100, 180, 255);
 const BAR_UNFOCUSED: Color = Color::Rgb(60, 80, 110);
 
+fn accent_to_color(accent: Option<[u8; 3]>) -> Color {
+    accent.map(|c| Color::Rgb(c[0], c[1], c[2])).unwrap_or(Color::Yellow)
+}
+
+fn styled_block<'a>(title: &'a str, border_style: Style, title_color: Color) -> Block<'a> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title_style(Style::default().fg(title_color))
+        .title(title)
+}
+
+fn build_bar_fill(value: u8, width: usize) -> String {
+    let filled = (value as usize * width) / 100;
+    format!(
+        "{}{}",
+        "█".repeat(filled),
+        "░".repeat(width.saturating_sub(filled))
+    )
+}
+
 fn sidebar_nerd_icon(item: &SidebarItem) -> &'static str {
     match item {
         SidebarItem::MyMusic => "\u{F001}",    // nf-fa-music
@@ -1124,15 +1146,11 @@ fn draw_queue(
 
 fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.effective_accent());
-    let border_style = border_style_for_focus(focused, app.effective_accent());
+    let accent = app.effective_accent();
+    let mid = mid_accent_color(accent);
+    let border_style = border_style_for_focus(focused, accent);
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(border_style)
-        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
-        .title(" Players ");
+    let block = styled_block(" Players ", border_style, focus_border_color(accent));
     let inner = render_bordered_panel(f, block, area);
 
     let chunks = Layout::default()
@@ -1167,16 +1185,8 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     };
 
     let glob_focused = focused && app.players_focus_global;
-    let glob_bg = if glob_focused {
-        Color::Rgb(45, 100, 170)
-    } else {
-        Color::Reset
-    };
-    let glob_fg = if glob_focused {
-        Color::Rgb(220, 235, 255)
-    } else {
-        mid
-    };
+    let glob_bg = if glob_focused { PILL_BG_FOCUSED } else { Color::Reset };
+    let glob_fg = if glob_focused { PILL_FG_FOCUSED } else { mid };
 
     let checkbox = if app.global_volume_control {
         "[x]"
@@ -1189,16 +1199,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         vol_icon_str
     };
     let vol_str = format!(" {}{:3}%", glob_icon, global_avg);
-    let filled = if player_bar_w > 0 {
-        (global_avg as usize * player_bar_w) / 100
-    } else {
-        0
-    };
-    let bar = format!(
-        "{}{}",
-        "█".repeat(filled),
-        "░".repeat(player_bar_w.saturating_sub(filled))
-    );
+    let bar = build_bar_fill(global_avg, player_bar_w);
 
     // Pad the label suffix so the bar starts at the same column as per-player bars.
     // Per-player bar starts at: pwr(3) + label(player_name_col_w+3) + sync(3) = player_name_col_w+9.
@@ -1209,12 +1210,12 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
     let all_powered = !app.players.is_empty() && app.players.iter().all(|p| p.power > 0);
     let glob_pwr_fg = if all_powered {
-        focus_border_color(app.effective_accent())
+        focus_border_color(accent)
     } else {
-        btn_dim_color(app.effective_accent())
+        btn_dim_color(accent)
     };
     let checkbox_color = if app.global_volume_control {
-        focus_border_color(app.effective_accent())
+        focus_border_color(accent)
     } else {
         mid
     };
@@ -1304,16 +1305,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let vol_str = format!(" {}{:3}%", player_vol_icon, vol);
         let bar_w = player_bar_w;
         let name_col_w = player_name_col_w;
-        let filled = if bar_w > 0 {
-            (vol as usize * bar_w) / 100
-        } else {
-            0
-        };
-        let bar_str = format!(
-            "{}{}",
-            "█".repeat(filled),
-            "░".repeat(bar_w.saturating_sub(filled))
-        );
+        let bar_str = build_bar_fill(vol, bar_w);
 
         let marker = if active { "● " } else { "○ " };
         let name_raw = format!("{}{}", marker, p.name);
@@ -1330,13 +1322,9 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         };
         let label = format!(" {}  ", name_padded);
 
-        let row_bg = if is_sel {
-            Color::Rgb(45, 100, 170)
-        } else {
-            Color::Reset
-        };
+        let row_bg = if is_sel { PILL_BG_FOCUSED } else { Color::Reset };
         let name_fg = if is_sel {
-            Color::Rgb(220, 235, 255)
+            PILL_FG_FOCUSED
         } else if active {
             Color::Green
         } else if powered {
@@ -1349,9 +1337,9 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
 
         // Power button: accent when on, dim when off (always uses btn_bg_color background).
         let player_pwr_fg = if powered {
-            focus_border_color(app.effective_accent())
+            focus_border_color(accent)
         } else {
-            btn_dim_color(app.effective_accent())
+            btn_dim_color(accent)
         };
 
         // Sync button — bright accent if player is currently in a sync group, dim otherwise
@@ -1361,9 +1349,9 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             .map(|v| !v.is_empty())
             .unwrap_or(false);
         let sync_fg = if is_synced {
-            focus_border_color(app.effective_accent())
+            focus_border_color(accent)
         } else {
-            btn_dim_color(app.effective_accent())
+            btn_dim_color(accent)
         };
 
         let line = if is_sel {
@@ -1408,7 +1396,7 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let mut ss = ScrollbarState::new(total)
             .position(offset)
             .viewport_content_length(visible);
-        let (track_style, thumb_style) = scrollbar_accent_styles(app.effective_accent(), focused);
+        let (track_style, thumb_style) = scrollbar_accent_styles(accent, focused);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("║")
             .track_symbol(Some("│"))
@@ -1563,15 +1551,11 @@ fn draw_search(
     base: &str,
 ) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.effective_accent());
+    let accent = app.effective_accent();
+    let mid = mid_accent_color(accent);
 
-    let border_style = border_style_for_focus(focused, app.effective_accent());
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(border_style)
-        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
-        .title(" Search ");
+    let border_style = border_style_for_focus(focused, accent);
+    let block = styled_block(" Search ", border_style, focus_border_color(accent));
     let inner = render_bordered_panel(f, block, area);
 
     let chunks = Layout::default()
@@ -1585,9 +1569,9 @@ fn draw_search(
 
     // Search input box
     let input_border_style = if app.search_input_active {
-        Style::default().fg(focus_border_color(app.effective_accent()))
+        Style::default().fg(focus_border_color(accent))
     } else {
-        Style::default().fg(unfocus_border_color(app.effective_accent()))
+        Style::default().fg(unfocus_border_color(accent))
     };
     let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" }; // nf-fa-search
     let input_text = format!(" {} {}", search_icon, app.search_query);
@@ -1724,7 +1708,7 @@ fn draw_search(
                         } else {
                             "▸ "
                         }, // nf-fa-user
-                        Style::default().fg(focus_border_color(app.effective_accent())),
+                        Style::default().fg(focus_border_color(accent)),
                     ),
                     Span::styled(a.artist.clone(), Style::default().fg(Color::White)),
                 ]),
@@ -1739,7 +1723,7 @@ fn draw_search(
                         } else {
                             "▸ "
                         }, // nf-fa-compact_disc
-                        Style::default().fg(focus_border_color(app.effective_accent())),
+                        Style::default().fg(focus_border_color(accent)),
                     ),
                     Span::styled(alb.album.clone(), Style::default().fg(Color::White)),
                 ]),
@@ -1753,7 +1737,7 @@ fn draw_search(
                 Line::from(vec![
                     Span::styled(
                         "▶ ",
-                        Style::default().fg(focus_border_color(app.effective_accent())),
+                        Style::default().fg(focus_border_color(accent)),
                     ),
                     Span::styled(t.title.clone(), Style::default().fg(Color::White)),
                 ]),
@@ -1846,20 +1830,16 @@ fn draw_app_search(
     thumbnails: &mut HashMap<String, StatefulProtocol>,
 ) {
     let focused = !app.focus_sidebar;
-    let mid = mid_accent_color(app.effective_accent());
-    let accent = focus_border_color(app.effective_accent());
+    let raw_accent = app.effective_accent();
+    let mid = mid_accent_color(raw_accent);
+    let accent = focus_border_color(raw_accent);
 
     let border_style = if focused {
         Style::default().fg(accent)
     } else {
-        Style::default().fg(unfocus_border_color(app.effective_accent()))
+        Style::default().fg(unfocus_border_color(raw_accent))
     };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(border_style)
-        .title_style(Style::default().fg(accent))
-        .title(" Spotify Search ");
+    let block = styled_block(" Spotify Search ", border_style, accent);
     let inner = render_bordered_panel(f, block, area);
 
     let chunks = Layout::default()
@@ -1871,7 +1851,7 @@ fn draw_app_search(
     let input_border_style = if app.app_search_input_active {
         Style::default().fg(accent)
     } else {
-        Style::default().fg(unfocus_border_color(app.effective_accent()))
+        Style::default().fg(unfocus_border_color(raw_accent))
     };
     let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" };
     let input_text = format!(" {} {}", search_icon, app.app_search_query);
@@ -1991,28 +1971,23 @@ fn draw_app_search(
             total.saturating_sub(visible),
             offset,
             visible,
-            app.effective_accent(),
+            raw_accent,
             results_focused,
         );
     }
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
-    let accent = focus_border_color(app.effective_accent());
-    let mid = mid_accent_color(app.effective_accent());
+    let raw_accent = app.effective_accent();
+    let accent = focus_border_color(raw_accent);
+    let mid = mid_accent_color(raw_accent);
     let focused = !app.focus_sidebar;
     let border_style = if focused {
         Style::default().fg(accent)
     } else {
-        Style::default().fg(unfocus_border_color(app.effective_accent()))
+        Style::default().fg(unfocus_border_color(raw_accent))
     };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(border_style)
-        .title_style(Style::default().fg(accent))
-        .title(" Keyboard Shortcuts ");
-
+    let block = styled_block(" Keyboard Shortcuts ", border_style, accent);
     let inner = render_bordered_panel(f, block, area);
 
     let col_w = inner.width / 2;
@@ -2135,35 +2110,39 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     let mid = mid_accent_color(app.effective_accent());
     let accent = focus_border_color(app.effective_accent());
     let player_icon = icon_player_dot(app.use_nerd_icons);
-    let title_line = if let Some(np) = &app.now_playing {
+    let left_title = Line::from(vec![
+        Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
+        Span::styled(format!("{} ", player_name), Style::default().fg(Color::White)),
+    ]);
+    let block = if let Some(np) = &app.now_playing {
         let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
         let globe = if app.global_volume_control {
             icon_globe(app.use_nerd_icons)
         } else {
             ""
         };
-        Line::from(vec![
-            Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
-            Span::styled(player_name, Style::default().fg(Color::White)),
-            Span::styled(" ─ ", Style::default().fg(mid)),
-            Span::styled(format!("{} ", vol_icon), Style::default().fg(mid)),
+        let right_title = Line::from(vec![
+            Span::styled(format!(" {} ", vol_icon), Style::default().fg(mid)),
             Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
-            Span::styled(format!("{} ", globe), Style::default().fg(accent)),
-        ])
-    } else {
-        Line::from(vec![
-            Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
             Span::styled(
-                format!("{} ", player_name),
-                Style::default().fg(Color::White),
+                if globe.is_empty() { " ".to_string() } else { format!(" {} ", globe) },
+                Style::default().fg(accent),
             ),
         ])
+        .alignment(Alignment::Right);
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(accent))
+            .title(left_title)
+            .title(right_title)
+    } else {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(accent))
+            .title(left_title)
     };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(accent))
-        .title(title_line);
     let inner = render_bordered_panel(f, block, area);
 
     let Some(np) = &app.now_playing else {
@@ -2228,7 +2207,8 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let ctrl_row = if bigscreen { 6 } else { 4 };
     let progress_row = if bigscreen { 8 } else { 6 };
     let indent: &str = if bigscreen { " " } else { "" };
-    let mid = mid_accent_color(app.effective_accent());
+    let raw_accent = app.effective_accent();
+    let mid = mid_accent_color(raw_accent);
 
     let play_icon = if app.use_nerd_icons {
         if np.is_playing {
@@ -2287,7 +2267,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     ]);
     f.render_widget(Paragraph::new(title_line), rows[0]);
 
-    let accent = focus_border_color(app.effective_accent());
+    let accent = focus_border_color(raw_accent);
     let artist_label = if app.use_nerd_icons {
         "  \u{F007} "
     } else {
@@ -2384,8 +2364,8 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             f.render_widget(
                 Paragraph::new(format!(" {} ", icon)).style(
                     Style::default()
-                        .fg(focus_border_color(app.effective_accent()))
-                        .bg(btn_bg_color(app.effective_accent())),
+                        .fg(focus_border_color(raw_accent))
+                        .bg(btn_bg_color(raw_accent)),
                 ),
                 Rect::new(x, ctrl.y, btn_w, 1),
             );
@@ -2399,13 +2379,13 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         if shuffle_x + btn_w <= ctrl_max_x {
             let (sfg, sbg) = if np.shuffle > 0 {
                 (
-                    focus_border_color(app.effective_accent()),
-                    btn_active_bg_color(app.effective_accent()),
+                    focus_border_color(raw_accent),
+                    btn_active_bg_color(raw_accent),
                 )
             } else {
                 (
-                    btn_dim_color(app.effective_accent()),
-                    btn_bg_color(app.effective_accent()),
+                    btn_dim_color(raw_accent),
+                    btn_bg_color(raw_accent),
                 )
             };
             f.render_widget(
@@ -2417,8 +2397,8 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         if repeat_x + btn_w <= ctrl_max_x {
             let (rfg, rbg, rep_btn) = match np.repeat {
                 1 => (
-                    focus_border_color(app.effective_accent()),
-                    btn_active_bg_color(app.effective_accent()),
+                    focus_border_color(raw_accent),
+                    btn_active_bg_color(raw_accent),
                     if app.use_nerd_icons {
                         " \u{F01E}1".to_string()
                     } else {
@@ -2426,8 +2406,8 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                     },
                 ),
                 2 => (
-                    focus_border_color(app.effective_accent()),
-                    btn_active_bg_color(app.effective_accent()),
+                    focus_border_color(raw_accent),
+                    btn_active_bg_color(raw_accent),
                     if app.use_nerd_icons {
                         " \u{F01E} ".to_string()
                     } else {
@@ -2435,13 +2415,13 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                     },
                 ),
                 3 => (
-                    focus_border_color(app.effective_accent()),
-                    btn_active_bg_color(app.effective_accent()),
+                    focus_border_color(raw_accent),
+                    btn_active_bg_color(raw_accent),
                     " ∞ ".to_string(),
                 ),
                 _ => (
-                    btn_dim_color(app.effective_accent()),
-                    btn_bg_color(app.effective_accent()),
+                    btn_dim_color(raw_accent),
+                    btn_bg_color(raw_accent),
                     if app.use_nerd_icons {
                         " \u{F01E} ".to_string()
                     } else {
@@ -2464,8 +2444,8 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             f.render_widget(
                 Paragraph::new(format!(" {} ", vol_down_icon)).style(
                     Style::default()
-                        .fg(focus_border_color(app.effective_accent()))
-                        .bg(btn_bg_color(app.effective_accent())),
+                        .fg(focus_border_color(raw_accent))
+                        .bg(btn_bg_color(raw_accent)),
                 ),
                 Rect::new(vol_down_x, ctrl.y, btn_w, 1),
             );
@@ -2476,8 +2456,8 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
             f.render_widget(
                 Paragraph::new(format!(" {} ", vol_up_icon)).style(
                     Style::default()
-                        .fg(focus_border_color(app.effective_accent()))
-                        .bg(btn_bg_color(app.effective_accent())),
+                        .fg(focus_border_color(raw_accent))
+                        .bg(btn_bg_color(raw_accent)),
                 ),
                 Rect::new(vol_up_x, ctrl.y, btn_w, 1),
             );
@@ -2514,7 +2494,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     let over_filled_text: String = text_bytes[..over_filled].iter().collect();
     let over_unfilled_text: String = text_bytes[over_filled..].iter().collect();
 
-    let (accent, track_color) = match app.effective_accent() {
+    let (accent, track_color) = match raw_accent {
         Some([r, g, b]) => (
             Color::Rgb(r, g, b),
             Color::Rgb(
@@ -2618,12 +2598,48 @@ fn draw_full_art_mode(
         .constraints([Constraint::Length(8), Constraint::Min(1)])
         .split(info_area);
 
-    let np_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(focus_border_color(app.effective_accent())))
-        .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
-        .title(" Now Playing ");
+    let fc = focus_border_color(app.effective_accent());
+    let mid = mid_accent_color(app.effective_accent());
+    let player_name = app
+        .active_player
+        .as_ref()
+        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "Now Playing".to_string());
+    let player_icon = icon_player_dot(app.use_nerd_icons);
+    let left_title = Line::from(vec![
+        Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
+        Span::styled(format!("{} ", player_name), Style::default().fg(Color::White)),
+    ]);
+    let np_block = if let Some(np) = &app.now_playing {
+        let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
+        let globe = if app.global_volume_control {
+            icon_globe(app.use_nerd_icons)
+        } else {
+            ""
+        };
+        let right_title = Line::from(vec![
+            Span::styled(format!(" {} ", vol_icon), Style::default().fg(mid)),
+            Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
+            Span::styled(
+                if globe.is_empty() { " ".to_string() } else { format!(" {} ", globe) },
+                Style::default().fg(fc),
+            ),
+        ])
+        .alignment(Alignment::Right);
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(fc))
+            .title(left_title)
+            .title(right_title)
+    } else {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(fc))
+            .title(left_title)
+    };
     let np_inner = np_block.inner(info_rows[0]);
     f.render_widget(np_block, info_rows[0]);
 
@@ -2637,30 +2653,6 @@ fn draw_full_art_mode(
 
     draw_queue(f, app, info_rows[1], main_state, thumbnails);
 
-    let mid = mid_accent_color(app.effective_accent());
-    let accent = focus_border_color(app.effective_accent());
-    let player_name = app
-        .active_player
-        .as_ref()
-        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| "—".to_string());
-    let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
-    let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
-    let player_icon = icon_player_dot(app.use_nerd_icons);
-    let globe = if app.global_volume_control {
-        icon_globe(app.use_nerd_icons)
-    } else {
-        ""
-    };
-    let vol_str = format!("{}%", vol);
-    let right_w = art_footer_player_width(app);
-
-    let footer_cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(1), Constraint::Length(right_w)])
-        .split(footer_area);
-
     let footer = hint_line(
         &[
             ("`", "exit art"),
@@ -2672,16 +2664,7 @@ fn draw_full_art_mode(
         ],
         app.effective_accent(),
     );
-    f.render_widget(Paragraph::new(footer), footer_cols[0]);
-
-    let right_line = Line::from(vec![
-        Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
-        Span::styled(player_name, Style::default().fg(Color::White)),
-        Span::styled(format!("  {} ", vol_icon), Style::default().fg(mid)),
-        Span::styled(vol_str, Style::default().fg(Color::White)),
-        Span::styled(format!("{} ", globe), Style::default().fg(accent)),
-    ]);
-    f.render_widget(Paragraph::new(right_line), footer_cols[1]);
+    f.render_widget(Paragraph::new(footer), footer_area);
 }
 
 fn draw_disconnected_overlay(f: &mut Frame, area: Rect, state: &ConnectionState) {
@@ -2728,12 +2711,7 @@ fn draw_two_row_list(
     } else {
         Style::default().fg(unfocus_border_color(accent))
     };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(border_style)
-        .title_style(Style::default().fg(focus_border_color(accent)))
-        .title(title);
+    let block = styled_block(title, border_style, focus_border_color(accent));
 
     if items.is_empty() {
         state.select(None);
@@ -3060,78 +3038,27 @@ pub fn compute_full_art_footer_exit_rect(area: Rect) -> Rect {
     Rect::new(area.x, footer_y, 12, 1)
 }
 
-fn art_footer_player_width(app: &App) -> u16 {
-    let player_name = app
-        .active_player
-        .as_ref()
-        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| "—".to_string());
-    let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
-    let vol_icon = icon_vol(app.use_nerd_icons);
-    let player_icon = icon_player_dot(app.use_nerd_icons);
-    let globe = if app.global_volume_control {
-        icon_globe(app.use_nerd_icons)
-    } else {
-        ""
-    };
-    let vol_str = format!("{}%", vol);
-    (1 + player_icon.chars().count()
-        + 1
-        + player_name.chars().count()
-        + 2
-        + vol_icon.chars().count()
-        + 1
-        + vol_str.chars().count()
-        + globe.chars().count()
-        + 1) as u16
-}
-
-/// Returns the rect covering the player name + volume area in the art mode footer (right side).
-pub fn compute_full_art_footer_player_rect(area: Rect, app: &App) -> Rect {
+fn compute_full_art_np_block_rect(area: Rect, app: &App) -> Rect {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(area);
-    let footer_area = outer[1];
-    let right_w = art_footer_player_width(app);
-    let footer_cols = Layout::default()
+    let content_area = outer[0];
+    let image_col_w = art_rendered_cols(app, content_area);
+    let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(1), Constraint::Length(right_w)])
-        .split(footer_area);
-    footer_cols[1]
+        .constraints([Constraint::Length(image_col_w), Constraint::Min(1)])
+        .split(content_area);
+    let info_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(8), Constraint::Min(1)])
+        .split(cols[1]);
+    info_rows[0]
 }
 
-/// Returns the rect of the volume icon in the full art mode footer right column.
-/// Returns None when there is no now-playing track.
-pub fn compute_full_art_footer_vol_icon_rect(area: Rect, app: &App) -> Option<Rect> {
-    app.now_playing.as_ref()?;
-    let player_rect = compute_full_art_footer_player_rect(area, app);
-    let player_icon = icon_player_dot(app.use_nerd_icons);
-    let player_name = app
-        .active_player
-        .as_ref()
-        .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| "—".to_string());
-    // Layout: " {player_icon} {player_name}  {vol_icon} {vol_str}{globe} "
-    // vol_icon offset from player_rect.x: 1 + icon_len + 1 + name_len + 2
-    let offset = 1 + player_icon.chars().count() + 1 + player_name.chars().count() + 2;
-    let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
-    let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
-    let w = (vol_icon.chars().count() + 1) as u16; // icon + trailing space
-    let x = player_rect.x + offset as u16;
-    if x + w > player_rect.x + player_rect.width {
-        return None;
-    }
-    Some(Rect::new(x, player_rect.y, w, 1))
-}
-
-/// Returns the rect of the volume icon in the Now Playing statusbar block title.
-/// Returns None when there is no now-playing track.
-pub fn compute_statusbar_vol_icon_rect(area: Rect, status_height: u16, app: &App) -> Option<Rect> {
-    app.now_playing.as_ref()?;
-    let title_rect = compute_statusbar_title_area(area, status_height);
+/// Returns the rect covering the player name area in the Now Playing block border (left title).
+pub fn compute_full_art_footer_player_rect(area: Rect, app: &App) -> Rect {
+    let np_rect = compute_full_art_np_block_rect(area, app);
     let player_icon = icon_player_dot(app.use_nerd_icons);
     let player_name = app
         .active_player
@@ -3139,13 +3066,61 @@ pub fn compute_statusbar_vol_icon_rect(area: Rect, status_height: u16, app: &App
         .and_then(|id| app.players.iter().find(|p| &p.playerid == id))
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "Now Playing".to_string());
-    // Title starts at title_rect.x + 1 (after corner char).
-    // Layout: " {player_icon} {player_name} ─ {vol_icon} {vol}%..."
-    let offset = 1 + player_icon.chars().count() + 1 + player_name.chars().count() + 3;
+    // Left title: " {player_icon} {player_name} " — starts after the left corner char
+    let w = (1 + player_icon.chars().count() + 1 + player_name.chars().count() + 1) as u16;
+    Rect::new(np_rect.x + 1, np_rect.y, w.min(np_rect.width.saturating_sub(2)), 1)
+}
+
+/// Returns the rect of the volume icon in the Now Playing block border (right title).
+/// Returns None when there is no now-playing track.
+pub fn compute_full_art_footer_vol_icon_rect(area: Rect, app: &App) -> Option<Rect> {
+    app.now_playing.as_ref()?;
+    let np_rect = compute_full_art_np_block_rect(area, app);
     let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
     let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
+    let vol_str = format!("{}%", vol);
+    let globe = if app.global_volume_control {
+        icon_globe(app.use_nerd_icons)
+    } else {
+        ""
+    };
+    let globe_part_w = if globe.is_empty() { 1usize } else { 1 + globe.chars().count() + 1 };
+    // Right title (right-aligned): " {vol_icon} {vol%}{globe_part}"
+    let right_title_w =
+        1 + vol_icon.chars().count() + 1 + vol_str.chars().count() + globe_part_w;
+    // Title ends at np_rect.x + np_rect.width - 2 (before right corner)
+    let right_title_start_x =
+        (np_rect.x + np_rect.width).saturating_sub(1 + right_title_w as u16);
+    let x = right_title_start_x + 1; // skip leading space
     let w = (vol_icon.chars().count() + 1) as u16; // icon + trailing space
-    let x = title_rect.x + 1 + offset as u16;
+    if x + w > np_rect.x + np_rect.width {
+        return None;
+    }
+    Some(Rect::new(x, np_rect.y, w, 1))
+}
+
+/// Returns the rect of the volume icon in the Now Playing statusbar block title (right title).
+/// Returns None when there is no now-playing track.
+pub fn compute_statusbar_vol_icon_rect(area: Rect, status_height: u16, app: &App) -> Option<Rect> {
+    app.now_playing.as_ref()?;
+    let title_rect = compute_statusbar_title_area(area, status_height);
+    let vol = app.now_playing.as_ref().map(|np| np.volume).unwrap_or(0);
+    let vol_icon = icon_vol_or_mute(app.use_nerd_icons, vol);
+    let vol_str = format!("{}%", vol);
+    let globe = if app.global_volume_control {
+        icon_globe(app.use_nerd_icons)
+    } else {
+        ""
+    };
+    let globe_part_w = if globe.is_empty() { 1usize } else { 1 + globe.chars().count() + 1 };
+    // Right title (right-aligned): " {vol_icon} {vol%}{globe_part}"
+    let right_title_w =
+        1 + vol_icon.chars().count() + 1 + vol_str.chars().count() + globe_part_w;
+    // Title ends at title_rect.x + title_rect.width - 2 (before right corner)
+    let right_title_start_x =
+        (title_rect.x + title_rect.width).saturating_sub(1 + right_title_w as u16);
+    let x = right_title_start_x + 1; // skip leading space
+    let w = (vol_icon.chars().count() + 1) as u16; // icon + trailing space
     if x + w > title_rect.x + title_rect.width {
         return None;
     }
@@ -3342,17 +3317,8 @@ fn draw_confirm_clear_queue(
 
     f.render_widget(Clear, popup);
 
-    let accent_color = accent
-        .map(|c| Color::Rgb(c[0], c[1], c[2]))
-        .unwrap_or(Color::Yellow);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(accent_color))
-        .title_style(Style::default().fg(accent_color))
-        .title(" Clear Queue ");
-
+    let ac = accent_to_color(accent);
+    let block = styled_block(" Clear Queue ", Style::default().fg(ac), ac);
     let inner = render_bordered_panel(f, block, popup);
 
     let rows = Layout::default()
@@ -3374,7 +3340,7 @@ fn draw_confirm_clear_queue(
     .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    render_two_button_dialog(f, rows[3], selected_button, accent_color, "[ OK ]", "[ Cancel ]");
+    render_two_button_dialog(f, rows[3], selected_button, ac, "[ OK ]", "[ Cancel ]");
 }
 
 /// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
@@ -3397,17 +3363,8 @@ fn draw_confirm_quit(f: &mut Frame, selected_button: u8, accent: Option<[u8; 3]>
 
     f.render_widget(Clear, popup);
 
-    let accent_color = accent
-        .map(|c| Color::Rgb(c[0], c[1], c[2]))
-        .unwrap_or(Color::Yellow);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(accent_color))
-        .title_style(Style::default().fg(accent_color))
-        .title(" Quit lyrtui ");
-
+    let ac = accent_to_color(accent);
+    let block = styled_block(" Quit lyrtui ", Style::default().fg(ac), ac);
     let inner = render_bordered_panel(f, block, popup);
 
     let rows = Layout::default()
@@ -3425,7 +3382,7 @@ fn draw_confirm_quit(f: &mut Frame, selected_button: u8, accent: Option<[u8; 3]>
         .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    render_two_button_dialog(f, rows[3], selected_button, accent_color, "[ Quit ]", "[ Cancel ]");
+    render_two_button_dialog(f, rows[3], selected_button, ac, "[ Quit ]", "[ Cancel ]");
 }
 
 /// Returns (popup_rect, [quit_button_rect, cancel_button_rect]) for the quit dialog.
@@ -3455,18 +3412,9 @@ fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, ar
 
     f.render_widget(Clear, popup);
 
-    let accent_color = accent
-        .map(|c| Color::Rgb(c[0], c[1], c[2]))
-        .unwrap_or(Color::Yellow);
-
+    let ac = accent_to_color(accent);
     let title = format!(" Sync: {} ", modal.player_name);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(accent_color))
-        .title_style(Style::default().fg(accent_color))
-        .title(title);
-
+    let block = styled_block(&title, Style::default().fg(ac), ac);
     let inner = render_bordered_panel(f, block, popup);
 
     // Layout: pad | player rows (n) | pad | buttons | hint
@@ -3490,21 +3438,9 @@ fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, ar
         let is_sel = !modal.focus_buttons && modal.list_selected == i;
 
         let checkbox = if checked { "[x]" } else { "[ ]" };
-        let check_fg = if checked {
-            accent_color
-        } else {
-            Color::DarkGray
-        };
-        let row_bg = if is_sel {
-            Color::Rgb(45, 100, 170)
-        } else {
-            Color::Reset
-        };
-        let name_fg = if is_sel {
-            Color::Rgb(220, 235, 255)
-        } else {
-            Color::White
-        };
+        let check_fg = if checked { ac } else { Color::DarkGray };
+        let row_bg = if is_sel { PILL_BG_FOCUSED } else { Color::Reset };
+        let name_fg = if is_sel { PILL_FG_FOCUSED } else { Color::White };
 
         let row_line = Line::from(vec![
             Span::styled(" ", Style::default().bg(row_bg)),
@@ -3523,12 +3459,12 @@ fn draw_sync_modal(f: &mut Frame, modal: &SyncModal, accent: Option<[u8; 3]>, ar
         .split(btn_row);
 
     let sync_style = if modal.focus_buttons && modal.selected_button == 0 {
-        Style::default().fg(Color::Black).bg(accent_color).bold()
+        Style::default().fg(Color::Black).bg(ac).bold()
     } else {
         Style::default().fg(Color::White)
     };
     let cancel_style = if modal.focus_buttons && modal.selected_button == 1 {
-        Style::default().fg(Color::Black).bg(accent_color).bold()
+        Style::default().fg(Color::Black).bg(ac).bold()
     } else {
         Style::default().fg(Color::White)
     };
@@ -3592,17 +3528,8 @@ fn draw_confirm_delete_queue_item(
 
     f.render_widget(Clear, popup);
 
-    let accent_color = accent
-        .map(|c| Color::Rgb(c[0], c[1], c[2]))
-        .unwrap_or(Color::Yellow);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(accent_color))
-        .title_style(Style::default().fg(accent_color))
-        .title(" Remove from Queue ");
-
+    let ac = accent_to_color(accent);
+    let block = styled_block(" Remove from Queue ", Style::default().fg(ac), ac);
     let inner = render_bordered_panel(f, block, popup);
 
     let rows = Layout::default()
@@ -3661,7 +3588,7 @@ fn draw_confirm_delete_queue_item(
         let style = if !enabled {
             Style::default().fg(Color::DarkGray)
         } else if is_selected {
-            Style::default().fg(accent_color).add_modifier(Modifier::BOLD)
+            Style::default().fg(ac).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };

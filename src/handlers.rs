@@ -121,6 +121,28 @@ fn seek_to_click(app: &mut App, client: &Arc<LmsClient>, col: u16, bar: Rect) {
     spawn_fire(client, move |c| async move { c.seek(&pid, secs).await });
 }
 
+fn set_volume_from_click(
+    app: &mut App,
+    vol_sync_tx: &mpsc::Sender<(String, u8)>,
+    col: u16,
+    bar: Rect,
+    pid: &str,
+) {
+    if bar.width == 0 {
+        return;
+    }
+    let frac = (col.saturating_sub(bar.x) as f64 / bar.width as f64).clamp(0.0, 1.0);
+    let nv = (frac * 100.0).round() as u8;
+    app.player_volumes.insert(pid.to_string(), nv);
+    app.volume_pending.insert(pid.to_string(), std::time::Instant::now());
+    if app.active_player.as_deref() == Some(pid) {
+        if let Some(np) = app.now_playing.as_mut() {
+            np.volume = nv;
+        }
+    }
+    let _ = vol_sync_tx.try_send((pid.to_string(), nv));
+}
+
 fn cycle_search_scope(
     forward: bool,
     app: &mut App,
@@ -565,6 +587,15 @@ pub async fn handle_mouse_event(
                             // Checkbox "[x]"/"[ ]": toggle global volume control
                             app.players_focus_global = true;
                             app.global_volume_control = !app.global_volume_control;
+                        } else if col >= sync_btn_end && col < sync_btn_end + player_bar_w as u16 {
+                            // Volume bar click on global row: set all players to clicked volume
+                            let bar = Rect::new(sync_btn_end, row, player_bar_w as u16, 1);
+                            let pids: Vec<String> =
+                                app.players.iter().map(|p| p.playerid.clone()).collect();
+                            for pid in &pids {
+                                set_volume_from_click(app, vol_sync_tx, col, bar, &pid);
+                            }
+                            app.players_focus_global = true;
                         } else if col >= vol_str_start_x && col < vol_str_start_x + vol_str_w as u16
                         {
                             // Vol icon in global row: mute/unmute all players
@@ -590,6 +621,15 @@ pub async fn handle_mouse_event(
                             }
                         } else if col >= sync_btn_x && col < sync_btn_end {
                             open_sync_modal(app, player_i);
+                        } else if col >= sync_btn_end && col < sync_btn_end + player_bar_w as u16 {
+                            // Volume bar click: set this player's volume
+                            if let Some(p) = app.players.get(player_i) {
+                                let bar = Rect::new(sync_btn_end, row, player_bar_w as u16, 1);
+                                let pid = p.playerid.clone();
+                                set_volume_from_click(app, vol_sync_tx, col, bar, &pid);
+                            }
+                            app.players_focus_global = false;
+                            app.main_selected = player_i;
                         } else if col >= vol_str_start_x && col < vol_str_start_x + vol_str_w as u16
                         {
                             // Vol icon: mute/unmute this specific player
