@@ -1363,7 +1363,9 @@ pub async fn handle_action(
         }
 
         Action::NavUp => {
-            if app.focus_sidebar {
+            if app.full_art_mode {
+                app.main_selected = app.main_selected.saturating_sub(1);
+            } else if app.focus_sidebar {
                 app.sidebar_selected = app.sidebar_selected.saturating_sub(1);
             } else if let MainView::Help = &app.main_view {
                 app.help_scroll = app.help_scroll.saturating_sub(1);
@@ -1389,7 +1391,12 @@ pub async fn handle_action(
         }
 
         Action::NavDown => {
-            if app.focus_sidebar {
+            if app.full_art_mode {
+                let max = app.queue.len().saturating_sub(1);
+                if app.main_selected < max {
+                    app.main_selected += 1;
+                }
+            } else if app.focus_sidebar {
                 let max = app.sidebar_items.len().saturating_sub(1);
                 if app.sidebar_selected < max {
                     app.sidebar_selected += 1;
