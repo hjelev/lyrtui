@@ -857,6 +857,29 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .highlight_symbol("");
 
     f.render_stateful_widget(list, area, state);
+
+    // Vertical scrollbar when the entries don't fit (short terminals). The List widget
+    // manages its own offset during render to keep the selection visible, so read it back
+    // afterwards and draw the scrollbar on the right border column, matching the browse views.
+    let total = entries.len();
+    let visible = area.height.saturating_sub(2) as usize;
+    if total > visible {
+        let scroll_area = Rect::new(
+            area.x + area.width.saturating_sub(1),
+            area.y + 1,
+            1,
+            area.height.saturating_sub(2),
+        );
+        render_scrollbar(
+            f,
+            scroll_area,
+            total.saturating_sub(visible),
+            state.offset(),
+            visible,
+            app.effective_accent(),
+            focused,
+        );
+    }
 }
 
 /// Build the shared two-row item for a track, used by both the Tracks library view and the
@@ -2136,7 +2159,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     ]);
     let center_title = Line::from(vec![
         Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
-        Span::styled(format!("{} ", player_name), Style::default().fg(Color::White)),
+        Span::styled(format!("{} ", player_name), Style::default().fg(accent)),
     ])
     .alignment(Alignment::Center);
     let block = if let Some(np) = &app.now_playing {
@@ -2148,7 +2171,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         };
         let right_title = Line::from(vec![
             Span::styled(format!(" {} ", vol_icon), Style::default().fg(mid)),
-            Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
+            Span::styled(format!("{}%", np.volume), Style::default().fg(accent)),
             Span::styled(
                 if globe.is_empty() { " ".to_string() } else { format!(" {} ", globe) },
                 Style::default().fg(accent),
@@ -2273,6 +2296,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         }
     };
 
+    let accent = focus_border_color(raw_accent);
     let queue_pos = match (np.playlist_cur_index, np.playlist_tracks) {
         (Some(idx), Some(total)) => format!("  ({}/{})", idx + 1, total),
         _ => String::new(),
@@ -2283,7 +2307,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         Span::styled(
             np.title.clone(),
             Style::default()
-                .fg(Color::White)
+                .fg(accent)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(queue_pos, Style::default().fg(Color::DarkGray)),
@@ -2293,8 +2317,6 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         ),
     ]);
     f.render_widget(Paragraph::new(title_line), rows[0]);
-
-    let accent = focus_border_color(raw_accent);
     let artist_label = if app.use_nerd_icons {
         "  \u{F007} "
     } else {
@@ -2348,9 +2370,9 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 },
                 Style::default().fg(mid),
             ),
-            Span::styled(player_name.to_string(), Style::default().fg(Color::White)),
+            Span::styled(player_name.to_string(), Style::default().fg(accent)),
             Span::styled(format!("  {} ", vol_icon), Style::default().fg(mid)),
-            Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
+            Span::styled(format!("{}%", np.volume), Style::default().fg(accent)),
             Span::styled(globe_icon, Style::default().fg(accent)),
         ]);
         f.render_widget(Paragraph::new(player_vol_line), rows[4]);
@@ -2659,7 +2681,7 @@ fn draw_full_art_mode(
     ]);
     let center_title = Line::from(vec![
         Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
-        Span::styled(format!("{} ", player_name), Style::default().fg(Color::White)),
+        Span::styled(format!("{} ", player_name), Style::default().fg(fc)),
     ])
     .alignment(Alignment::Center);
     let np_block = if let Some(np) = &app.now_playing {
@@ -2671,7 +2693,7 @@ fn draw_full_art_mode(
         };
         let right_title = Line::from(vec![
             Span::styled(format!(" {} ", vol_icon), Style::default().fg(mid)),
-            Span::styled(format!("{}%", np.volume), Style::default().fg(Color::White)),
+            Span::styled(format!("{}%", np.volume), Style::default().fg(fc)),
             Span::styled(
                 if globe.is_empty() { " ".to_string() } else { format!(" {} ", globe) },
                 Style::default().fg(fc),
