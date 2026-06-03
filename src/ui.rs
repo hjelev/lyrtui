@@ -2155,7 +2155,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     let accent = focus_border_color(app.effective_accent());
     let player_icon = icon_player_dot(app.use_nerd_icons);
     let left_title = Line::from(vec![
-        Span::styled(" Now Playing ".to_string(), Style::default().fg(mid)),
+        Span::styled(" Now Playing ".to_string(), Style::default().fg(accent)),
     ]);
     let center_title = Line::from(vec![
         Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
@@ -2677,7 +2677,7 @@ fn draw_full_art_mode(
         .unwrap_or_else(|| "Now Playing".to_string());
     let player_icon = icon_player_dot(app.use_nerd_icons);
     let left_title = Line::from(vec![
-        Span::styled(" Now Playing ".to_string(), Style::default().fg(mid)),
+        Span::styled(" Now Playing ".to_string(), Style::default().fg(fc)),
     ]);
     let center_title = Line::from(vec![
         Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
