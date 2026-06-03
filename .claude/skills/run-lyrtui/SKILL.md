@@ -95,28 +95,35 @@ Opens the TUI full-screen. Press `q` to quit. This is useless headless or in a n
 # 1. Launch
 .claude/skills/run-lyrtui/driver.sh launch
 
-# 2. Observe starting state
+# 2. Observe starting state — sidebar focused on "My Music"
 .claude/skills/run-lyrtui/driver.sh ss
 
-# 3. Navigate: select Artists → first artist → albums
-.claude/skills/run-lyrtui/driver.sh send "Enter"   # drill into Artists
+# 3. Navigate to Artists list: Right focuses main panel, Enter selects
+.claude/skills/run-lyrtui/driver.sh send "Right" "Enter"
+.claude/skills/run-lyrtui/driver.sh ss              # verify Artists (N) panel loaded
+
+# 4. Drill into an artist's albums
+.claude/skills/run-lyrtui/driver.sh send "j" "j" "Enter"
+sleep 1
 .claude/skills/run-lyrtui/driver.sh ss              # verify Albums panel
 
-# 4. Go back
+# 5. Go back
 .claude/skills/run-lyrtui/driver.sh send "Escape"
 .claude/skills/run-lyrtui/driver.sh ss
 
-# 5. Done
+# 6. Done
 .claude/skills/run-lyrtui/driver.sh quit
 ```
 
 ## Gotchas
 
-- **The app starts in Artists view.** The sidebar focus is on "Artists" by default; pressing `Enter` immediately drills into the first artist's albums. Press `Left` first to focus the sidebar if you want to navigate to a different section.
-- **Albums panel may show `(empty)` briefly** when navigating to an artist's albums — the API call is async and completes within ~1 s. Re-run `ss` to see the populated list.
+- **The app starts in My Music view with the sidebar focused.** The main panel shows the My Music submenu (Artists, Album Artists, Recently Played Artists, Albums, Popular Albums, Tracks, Playlists, Folders). Press `Right` to focus the main panel, then `Enter` to select a section. Pressing `Enter` from the sidebar also moves focus to the main panel (does not auto-select).
+- **Use `Right` + `Enter` to enter a section from the sidebar, not two quick `Enter` presses.** From the sidebar, the first `Enter` moves focus to the main panel; a second `Enter` immediately after (300ms gap) may be eaten before the panel is ready. `Right` + `Enter` is reliable.
+- **Albums panel may show `(empty)` briefly** when navigating to an artist's albums — the API call is async and completes within ~1 s. Add `sleep 1` then re-run `ss` to see the populated list.
 - **No LMS = no library data.** The app starts fine but shows "Disconnected" in the Status box and "No player selected" in Now Playing. The sidebar and structure are still visible and navigable.
 - **`capture-pane` strips terminal color codes** — the output is plain text box-drawing characters, which is exactly what you want for assertions.
 - **tmux session name is `lyrtui-driver`.** If another session with that name exists from a previous run, `launch` kills it first.
+- **Search view captures keystrokes.** Once in Search, `j`/`k` type into the search box rather than navigate. Press `Escape` to move to results, `Left` to return focus to the sidebar.
 
 ## Troubleshooting
 
@@ -126,3 +133,4 @@ Opens the TUI full-screen. Press `q` to quit. This is useless headless or in a n
 | `tmux: command not found` | `sudo apt-get install tmux` |
 | `cargo: command not found` | Install Rust via `rustup` |
 | Screen shows garbage / misaligned boxes | Terminal width is too narrow; use `launch 160x50` |
+| `launch` times out but `status` says "running" | App started in art mode and "Navigation" text wasn't visible — driver now auto-exits art mode, but if it fails check `ss` for "exit art" and send a backtick manually |

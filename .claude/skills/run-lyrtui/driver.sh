@@ -18,15 +18,25 @@ case "${1:-}" in
     tmux kill-session -t "$SESSION" 2>/dev/null || true
     tmux new-session -d -s "$SESSION" -x "$W" -y "$H"
     tmux send-keys -t "$SESSION" "cd '$REPO' && cargo run 2>/tmp/lyrtui-err.txt" Enter
-    # Wait up to 10s for the app to appear (look for the Navigation box)
-    for i in $(seq 1 20); do
+    # Wait up to 15s for the app to appear (Navigation box or art mode)
+    for i in $(seq 1 30); do
       sleep 0.5
-      if tmux capture-pane -t "$SESSION" -p 2>/dev/null | grep -q "Navigation"; then
+      SCREEN=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null)
+      if echo "$SCREEN" | grep -q "Navigation"; then
         echo "ready"
         exit 0
       fi
+      # App may start in art mode (persisted toggle state); exit it automatically
+      if echo "$SCREEN" | grep -q "exit art"; then
+        tmux send-keys -t "$SESSION" "\`" ""
+        sleep 0.5
+        if tmux capture-pane -t "$SESSION" -p 2>/dev/null | grep -q "Navigation"; then
+          echo "ready"
+          exit 0
+        fi
+      fi
     done
-    echo "timeout — app did not start within 10s" >&2
+    echo "timeout — app did not start within 15s" >&2
     cat /tmp/lyrtui-err.txt >&2
     exit 1
     ;;
