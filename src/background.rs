@@ -1,10 +1,57 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::api::{Album, Artist, LmsClient, RadioItem};
-use crate::app::{AppMsg, SearchResultItem, SearchScope};
+use crate::app::{App, AppMsg, SearchResultItem, SearchScope};
+use crate::utils;
+
+pub fn spawn_artwork_fetch(url: String, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
+    tokio::spawn(async move {
+        let ok = async {
+            let bytes = client.fetch_image_bytes(&url).await.ok()?;
+            let img = image::load_from_memory(&bytes).ok()?;
+            let rgb = img.to_rgb8();
+            let accent = color_thief::get_palette(
+                rgb.as_raw(),
+                color_thief::ColorFormat::Rgb,
+                10,
+                5,
+            )
+            .ok()
+            .and_then(|colors| {
+                colors
+                    .iter()
+                    .find(|c| {
+                        let luma = (c.r as u32 * 299 + c.g as u32 * 587 + c.b as u32 * 114)
+                            / 1000;
+                        (70..=210).contains(&luma)
+                    })
+                    .or_else(|| colors.first())
+                    .map(|c| [c.r, c.g, c.b])
+            });
+            let dimensions = (img.width(), img.height());
+            let art_normal = crate::artwork::with_rounded_corners(img.clone(), crate::artwork::ART_RADIUS_NORMAL);
+            let art_full = crate::artwork::with_rounded_corners(img.clone(), crate::artwork::ART_RADIUS_FULL);
+            let _ = tx
+                .send(AppMsg::ArtworkDecoded {
+                    img,
+                    art_normal,
+                    art_full,
+                    accent,
+                    dimensions,
+                })
+                .await;
+            Some(())
+        }
+        .await;
+        if ok.is_none() {
+            let _ = tx.send(AppMsg::ArtworkFetchFailed(url)).await;
+        }
+    });
+}
 
 fn spawn_if_ok<F, Fut, T>(
     client: Arc<LmsClient>,
@@ -346,4 +393,57 @@ pub fn load_tracks(album_id: String, client: Arc<LmsClient>, tx: mpsc::Sender<Ap
         |c| async move { c.get_tracks(&album_id).await },
         AppMsg::TracksLoaded,
     );
+}
+
+pub fn set_timed_status(app: &mut App, msg: String, tx: &mpsc::Sender<AppMsg>) {
+    app.status_message_gen += 1;
+    let seq = app.status_message_gen;
+    app.status_message = Some(msg);
+    let t = tx.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        let _ = t.send(AppMsg::ClearStatusMsg(seq)).await;
+    });
+}
+
+pub fn resolve_artist_art(
+    app: &App,
+    idx: usize,
+    pending: &mut HashSet<String>,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    if let Some(artist_id) = utils::artist_id_at(app, idx)
+        && !app.artist_artwork.contains_key(&artist_id)
+        && !pending.contains(&artist_id)
+    {
+        pending.insert(artist_id.clone());
+        let c = client.clone();
+        let t = tx.clone();
+        tokio::spawn(async move {
+            let url = c.get_artist_artwork(&artist_id).await;
+            let _ = t.send(AppMsg::ArtistArtworkResolved(artist_id, url)).await;
+        });
+    }
+}
+
+pub fn resolve_folder_art(
+    app: &App,
+    idx: usize,
+    pending: &mut HashSet<u32>,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    if let Some(folder_id) = utils::folder_id_at(app, idx)
+        && !app.folder_artwork.contains_key(&folder_id)
+        && !pending.contains(&folder_id)
+    {
+        pending.insert(folder_id);
+        let c = client.clone();
+        let t = tx.clone();
+        tokio::spawn(async move {
+            let url = c.get_folder_artwork(folder_id).await;
+            let _ = t.send(AppMsg::FolderArtworkResolved(folder_id, url)).await;
+        });
+    }
 }

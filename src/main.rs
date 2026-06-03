@@ -1,6 +1,8 @@
 mod api;
 mod app;
+mod artwork;
 mod background;
+mod cli;
 mod config;
 mod discovery;
 mod events;
@@ -18,11 +20,7 @@ use crossterm::{
 };
 use events::{Action, InputEvent, key_to_action, poll_event};
 use ratatui::{Terminal, backend::CrosstermBackend, widgets::ListState};
-use ratatui_image::{
-    Resize, ResizeEncodeRender,
-    picker::{Picker, ProtocolType},
-    protocol::StatefulProtocol,
-};
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -31,211 +29,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-async fn print_info() -> Result<()> {
-    let cfg = config::Config::load()?;
-    let config_path = config::config_path();
-
-    println!("lyrtui v{} — Info", env!("CARGO_PKG_VERSION"));
-
-    // ── Configuration ──────────────────────────────────────────────────────────
-    println!("\nCONFIGURATION  ({})", config_path.display());
-    println!("  server:          {}:{}", cfg.host, cfg.port);
-    println!("  url:             {}", cfg.base_url());
-    match (&cfg.username, &cfg.password) {
-        (Some(u), Some(_)) => println!("  auth:            username={}, password=set", u),
-        (Some(u), None) => println!("  auth:            username={}, password=not set", u),
-        _ => println!("  auth:            none"),
-    }
-    match &cfg.default_player {
-        Some(id) => println!("  default player:  {}", id),
-        None => println!("  default player:  none"),
-    }
-    println!(
-        "  auto-discover:   {} (mask: {})",
-        yn(cfg.auto_discover),
-        cfg.broadcast_mask
-    );
-    println!("  nerd icons:      {}", yn(cfg.use_nerd_icons));
-    println!("  image protocol:  {}", cfg.image_protocol);
-    println!("  full art mode:   {}", yn(cfg.full_art_mode));
-    println!("  auto colors:     {}", yn(!cfg.disable_auto_colors));
-    println!("  global volume:   {}", yn(cfg.global_volume_control));
-
-    let client = LmsClient::new(cfg.base_url(), cfg.credentials());
-
-    // ── Server ─────────────────────────────────────────────────────────────────
-    println!("\nSERVER  (live)");
-    match client.get_server_info().await {
-        Err(e) => println!("  [unreachable: {}]", e),
-        Ok(info) => {
-            if let Some(v) = &info.version {
-                println!("  version:         {}", v);
-            }
-            if let Some(n) = &info.name {
-                println!("  name:            {}", n);
-            }
-            if let Some(ip) = &info.ip {
-                println!("  ip:              {}", ip);
-            }
-            if let Some(m) = &info.mac {
-                println!("  mac:             {}", m);
-            }
-            if let Some(id) = &info.uuid {
-                println!("  uuid:            {}", id);
-            }
-            if let Some(c) = info.player_count {
-                println!("  players:         {}", c);
-            }
-        }
-    }
-
-    // ── Players ────────────────────────────────────────────────────────────────
-    let players = match client.get_players_detailed().await {
-        Err(e) => {
-            println!("\nPLAYERS\n  [unreachable: {}]", e);
-            return Ok(());
-        }
-        Ok(p) => p,
-    };
-
-    println!("\nPLAYERS  ({})", players.len());
-
-    for (i, p) in players.iter().enumerate() {
-        let status = if p.power == 0 {
-            "OFF".to_string()
-        } else if p.is_playing == 1 {
-            "PLAYING".to_string()
-        } else {
-            "STOPPED".to_string()
-        };
-        let indicator = if p.power == 0 {
-            "○"
-        } else if p.is_playing == 1 {
-            "▶"
-        } else {
-            "■"
-        };
-        println!("\n  [{}] {:<38} {} {}", i + 1, p.name, indicator, status);
-        println!("      id:          {}", p.playerid);
-        if let Some(ip) = &p.ip {
-            println!("      ip:          {}", ip);
-        }
-        match (&p.model, &p.modelname) {
-            (Some(m), Some(mn)) => println!("      model:       {} ({})", m, mn),
-            (Some(m), None) => println!("      model:       {}", m),
-            _ => {}
-        }
-        if let Some(fw) = &p.firmware {
-            println!("      firmware:    {}", fw);
-        }
-        if let Some(uid) = &p.uuid
-            && !uid.is_empty()
-        {
-            println!("      uuid:        {}", uid);
-        }
-        println!(
-            "      power:       {}    connected: {}",
-            yn(p.power == 1),
-            yn(p.connected == 1)
-        );
-
-        if p.power == 1 {
-            match client.get_now_playing(&p.playerid).await {
-                Ok(np) => {
-                    println!("      volume:      {}", np.volume);
-                    if !np.title.is_empty() {
-                        println!("      now:         \"{}\" — {}", np.title, np.artist);
-                        let mut meta = np.album.clone();
-                        if let Some(y) = np.year {
-                            meta = format!("{} ({})", meta, y);
-                        }
-                        if let (Some(idx), Some(total)) =
-                            (np.playlist_cur_index, np.playlist_tracks)
-                        {
-                            meta = format!("{}  [track {} / {}]", meta, idx + 1, total);
-                        }
-                        if !meta.is_empty() {
-                            println!("                   {}", meta);
-                        }
-                    } else {
-                        println!("      now:         (nothing playing)");
-                    }
-                }
-                Err(e) => println!("      status:      [error: {}]", e),
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn yn(b: bool) -> &'static str {
-    if b { "yes" } else { "no" }
-}
-
-async fn resolve_player(client: &LmsClient, cfg: &config::Config) -> Result<String> {
-    if let Some(id) = &cfg.default_player {
-        return Ok(id.clone());
-    }
-    let players = client.get_players().await?;
-    players
-        .into_iter()
-        .next()
-        .map(|p| p.playerid)
-        .ok_or_else(|| anyhow::anyhow!("no players found on server"))
-}
-
-fn format_track(title: &str, artist: &str) -> String {
-    match (title.is_empty(), artist.is_empty()) {
-        (true, _) => "(unknown)".to_string(),
-        (false, true) => format!("\"{}\"", title),
-        (false, false) => format!("\"{}\" — {}", title, artist),
-    }
-}
-
-/// Load config and resolve the default player for one-shot CLI commands.
-async fn cli_player() -> Result<(LmsClient, String)> {
-    let cfg = config::Config::load()?;
-    let client = LmsClient::new(cfg.base_url(), cfg.credentials());
-    let pid = resolve_player(&client, &cfg).await?;
-    Ok((client, pid))
-}
-
-async fn cmd_play_pause() -> Result<()> {
-    let (client, pid) = cli_player().await?;
-    let np = client.get_now_playing(&pid).await?;
-    let track = format_track(&np.title, &np.artist);
-    if np.is_playing {
-        client.pause(&pid).await?;
-        println!("paused  {}", track);
-    } else {
-        client.play(&pid).await?;
-        println!("playing {}", track);
-    }
-    Ok(())
-}
-
-async fn cmd_next() -> Result<()> {
-    let (client, pid) = cli_player().await?;
-    client.next(&pid).await?;
-    if let Ok(np) = client.get_now_playing(&pid).await {
-        println!("next  {}", format_track(&np.title, &np.artist));
-    }
-    Ok(())
-}
-
-async fn cmd_prev() -> Result<()> {
-    let (client, pid) = cli_player().await?;
-    client.prev(&pid).await?;
-    if let Ok(np) = client.get_now_playing(&pid).await {
-        println!("prev  {}", format_track(&np.title, &np.artist));
-    }
-    Ok(())
-}
-
 const TICK_RATE: Duration = Duration::from_millis(250);
-const ART_RADIUS_NORMAL: u32 = 6;
-const ART_RADIUS_FULL: u32 = 2;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -248,19 +42,19 @@ async fn main() -> Result<()> {
     }
 
     if has(&["-i", "--info"]) {
-        return print_info().await;
+        return cli::print_info().await;
     }
 
     if has(&["-p", "--play-pause"]) {
-        return cmd_play_pause().await;
+        return cli::cmd_play_pause().await;
     }
 
     if has(&["--next"]) {
-        return cmd_next().await;
+        return cli::cmd_next().await;
     }
 
     if has(&["--prev"]) {
-        return cmd_prev().await;
+        return cli::cmd_prev().await;
     }
 
     if has(&["-h", "--help"]) {
@@ -324,7 +118,7 @@ Config file: ~/.config/lyrtui/config.toml
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     // Picker must be created after EnterAlternateScreen, before reading events.
     let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-    apply_image_protocol(&mut picker, &cfg.image_protocol);
+    artwork::apply_image_protocol(&mut picker, &cfg.image_protocol);
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -374,7 +168,7 @@ async fn run(
     // Set initial dynamic status height from actual terminal size (avoids a per-frame poll).
     // After this, dimensions are updated only on resize events so the image area stays stable.
     if let Ok(sz) = terminal.size() {
-        update_status_height(&mut app, sz.height, base_status_height);
+        utils::update_status_height(&mut app, sz.height, base_status_height);
     }
     let mut album_art: Option<StatefulProtocol> = None;
     let mut album_art_full: Option<StatefulProtocol> = None;
@@ -565,93 +359,24 @@ async fn run(
             }
             // Keep the previous accent_color until the new image resolves.
             if let Some(url) = current_url {
-                let c = client.clone();
-                let t = tx.clone();
-                tokio::spawn(async move {
-                    let ok = async {
-                        let bytes = c.fetch_image_bytes(&url).await.ok()?;
-                        let img = image::load_from_memory(&bytes).ok()?;
-                        let rgb = img.to_rgb8();
-                        let accent = color_thief::get_palette(
-                            rgb.as_raw(),
-                            color_thief::ColorFormat::Rgb,
-                            10,
-                            5,
-                        )
-                        .ok()
-                        .and_then(|colors| {
-                            colors
-                                .iter()
-                                .find(|c| {
-                                    let luma = (c.r as u32 * 299
-                                        + c.g as u32 * 587
-                                        + c.b as u32 * 114)
-                                        / 1000;
-                                    (70..=210).contains(&luma)
-                                })
-                                .or_else(|| colors.first())
-                                .map(|c| [c.r, c.g, c.b])
-                        });
-                        let dimensions = (img.width(), img.height());
-                        let art_normal = with_rounded_corners(img.clone(), ART_RADIUS_NORMAL);
-                        let art_full = with_rounded_corners(img.clone(), ART_RADIUS_FULL);
-                        let _ = t
-                            .send(AppMsg::ArtworkDecoded {
-                                img,
-                                art_normal,
-                                art_full,
-                                accent,
-                                dimensions,
-                            })
-                            .await;
-                        Some(())
-                    }
-                    .await;
-                    if ok.is_none() {
-                        let _ = t.send(AppMsg::ArtworkFetchFailed(url)).await;
-                    }
-                });
+                background::spawn_artwork_fetch(url, client.clone(), tx.clone());
             }
         }
 
         let term_h = terminal.size().map(|s| s.height).unwrap_or(24);
 
-        // Resolve representative cover art for visible artists (artists carry no art of their
-        // own; we look up the coverid of an album they appear on). Resolved URLs land in
-        // `app.artist_artwork` and are then fetched by the thumbnail prefetch block below.
-        {
-            for idx in thumb_range(term_h, &main_state, &app) {
-                if let Some(artist_id) = utils::artist_id_at(&app, idx)
-                    && !app.artist_artwork.contains_key(&artist_id)
-                    && !pending_artist_art.contains(&artist_id)
-                {
-                    pending_artist_art.insert(artist_id.clone());
-                    let c = client.clone();
-                    let t = tx.clone();
-                    tokio::spawn(async move {
-                        let url = c.get_artist_artwork(&artist_id).await;
-                        let _ = t.send(AppMsg::ArtistArtworkResolved(artist_id, url)).await;
-                    });
-                }
-                if let Some(folder_id) = utils::folder_id_at(&app, idx)
-                    && !app.folder_artwork.contains_key(&folder_id)
-                    && !pending_folder_art.contains(&folder_id)
-                {
-                    pending_folder_art.insert(folder_id);
-                    let c = client.clone();
-                    let t = tx.clone();
-                    tokio::spawn(async move {
-                        let url = c.get_folder_artwork(folder_id).await;
-                        let _ = t.send(AppMsg::FolderArtworkResolved(folder_id, url)).await;
-                    });
-                }
-            }
+        // Resolve representative cover art for visible artists/folders. Resolved URLs land in
+        // `app.artist_artwork` / `app.folder_artwork` and are then fetched by the thumbnail
+        // prefetch block below.
+        for idx in utils::thumb_range(term_h, &main_state, &app) {
+            background::resolve_artist_art(&app, idx, &mut pending_artist_art, &client, &tx);
+            background::resolve_folder_art(&app, idx, &mut pending_folder_art, &client, &tx);
         }
 
         // Request thumbnails for currently visible items
         {
             let base = client.server_base_url();
-            for idx in thumb_range(term_h, &main_state, &app) {
+            for idx in utils::thumb_range(term_h, &main_state, &app) {
                 if let Some(url) = utils::thumbnail_url_for(&app, idx, &base)
                     && !thumbnails.contains_key(&url)
                     && !pending_thumbs.contains(&url)
@@ -676,7 +401,7 @@ async fn run(
                                     );
                                     // Fully resize+encode the protocol off the UI thread so the
                                     // draw call never blocks: at render time needs_resize is None.
-                                    let proto = encode_thumb_protocol(&pk, small.clone());
+                                    let proto = artwork::encode_thumb_protocol(&pk, small.clone());
                                     let _ = t.send(AppMsg::ThumbnailLoaded(u, small, proto)).await;
                                 }
                                 Err(_) => {
@@ -692,7 +417,7 @@ async fn run(
             }
         }
 
-        let had_overlay = has_overlay(&app);
+        let had_overlay = utils::has_overlay(&app);
 
         match poll_event(TICK_RATE)? {
             InputEvent::Key(key) => {
@@ -700,19 +425,14 @@ async fn run(
                     let prev_protocol = cfg.image_protocol.clone();
                     handlers::handle_config_key(&mut app, key, &mut cfg, &client, &tx);
                     if cfg.image_protocol != prev_protocol {
-                        apply_image_protocol(&mut picker, &cfg.image_protocol);
-                        refresh_album_art(
+                        artwork::apply_image_protocol(&mut picker, &cfg.image_protocol);
+                        artwork::refresh_album_art(
                             &last_artwork_image,
                             &mut picker,
                             &mut album_art,
                             &mut album_art_full,
                         );
-                        thumbnails = thumbnail_images
-                            .iter()
-                            .map(|(url, img)| {
-                                (url.clone(), picker.new_resize_protocol(img.clone()))
-                            })
-                            .collect();
+                        thumbnails = artwork::rebuild_all_thumbnails(&thumbnail_images, &mut picker);
                     }
                 } else if app.sync_modal.is_some() {
                     handlers::handle_sync_modal_key(&mut app, key, &client).await;
@@ -787,7 +507,7 @@ async fn run(
                             let _ = cfg.save();
                             // Render area size changes between modes; recreate protocol so the
                             // image is retransmitted at the correct dimensions.
-                            refresh_album_art(
+                            artwork::refresh_album_art(
                                 &last_artwork_image,
                                 &mut picker,
                                 &mut album_art,
@@ -820,7 +540,7 @@ async fn run(
             }
             InputEvent::Resize => {
                 if let Ok(sz) = terminal.size() {
-                    update_status_height(&mut app, sz.height, base_status_height);
+                    utils::update_status_height(&mut app, sz.height, base_status_height);
                 }
                 needs_redraw = true;
             }
@@ -835,16 +555,16 @@ async fn run(
 
         // When an overlay closes its Clear widget may overwrite image cells, causing terminals
         // to discard stored graphic-protocol data. Recreate affected protocols on overlay close.
-        if had_overlay && !has_overlay(&app) {
+        if had_overlay && !utils::has_overlay(&app) {
             let base = client.server_base_url();
-            for idx in thumb_range(term_h, &main_state, &app) {
+            for idx in utils::thumb_range(term_h, &main_state, &app) {
                 if let Some(url) = utils::thumbnail_url_for(&app, idx, &base)
                     && let Some(img) = thumbnail_images.get(&url)
                 {
                     thumbnails.insert(url, picker.new_resize_protocol(img.clone()));
                 }
             }
-            refresh_album_art(
+            artwork::refresh_album_art(
                 &last_artwork_image,
                 &mut picker,
                 &mut album_art,
@@ -927,26 +647,11 @@ async fn handle_msg(
         }
         AppMsg::ArtistsLoaded(a) => app.artists = a,
         AppMsg::AlbumArtistsLoaded(a) => app.album_artists = a,
-        AppMsg::PlaylistsLoaded(p) => {
-            app.playlists = p;
-            app.is_loading = false;
-        }
-        AppMsg::AlbumsLoaded(a) => {
-            app.albums = a;
-            app.is_loading = false;
-        }
-        AppMsg::TracksLoaded(t) => {
-            app.tracks = t;
-            app.is_loading = false;
-        }
-        AppMsg::RecentArtistsLoaded(a) => {
-            app.recent_artists = a;
-            app.is_loading = false;
-        }
-        AppMsg::PopularAlbumsLoaded(a) => {
-            app.popular_albums = a;
-            app.is_loading = false;
-        }
+        AppMsg::PlaylistsLoaded(p) => { app.playlists = p; app.is_loading = false; }
+        AppMsg::AlbumsLoaded(a) => { app.albums = a; app.is_loading = false; }
+        AppMsg::TracksLoaded(t) => { app.tracks = t; app.is_loading = false; }
+        AppMsg::RecentArtistsLoaded(a) => { app.recent_artists = a; app.is_loading = false; }
+        AppMsg::PopularAlbumsLoaded(a) => { app.popular_albums = a; app.is_loading = false; }
         AppMsg::RadioItemsLoaded(items) => {
             if app.radio_nav_stack.is_empty() {
                 app.radio_services = items.clone();
@@ -967,16 +672,8 @@ async fn handle_msg(
             }
             app.is_loading = false;
         }
-        AppMsg::FavItemsLoaded(items) => {
-            app.fav_items = items;
-            app.main_selected = 0;
-            app.is_loading = false;
-        }
-        AppMsg::FolderItemsLoaded(items) => {
-            app.folder_items = items;
-            app.main_selected = 0;
-            app.is_loading = false;
-        }
+        AppMsg::FavItemsLoaded(items) => { app.fav_items = items; app.main_selected = 0; app.is_loading = false; }
+        AppMsg::FolderItemsLoaded(items) => { app.folder_items = items; app.main_selected = 0; app.is_loading = false; }
         AppMsg::PlayerVolumesLoaded(volumes) => {
             let now = std::time::Instant::now();
             // Drop stale pending entries, then skip pids still within the guard window
@@ -991,27 +688,15 @@ async fn handle_msg(
         AppMsg::PlayerSyncGroupsLoaded(groups) => {
             app.player_sync_groups = groups;
         }
-        AppMsg::StatusMsg(msg) => {
-            set_timed_status(app, msg, tx);
-        }
+        AppMsg::StatusMsg(msg) => background::set_timed_status(app, msg, tx),
         AppMsg::ClearStatusMsg(seq) => {
             if app.status_message_gen == seq {
                 app.status_message = None;
             }
         }
-        AppMsg::SearchResultsLoaded(results) => {
-            app.search_results = results;
-            app.main_selected = 0;
-            app.is_loading = false;
-        }
-        AppMsg::AppSearchResultsLoaded(items) => {
-            app.app_search_results = items;
-            app.main_selected = 0;
-            app.is_loading = false;
-        }
-        AppMsg::Error(e) => {
-            set_timed_status(app, e, tx);
-        }
+        AppMsg::SearchResultsLoaded(results) => { app.search_results = results; app.main_selected = 0; app.is_loading = false; }
+        AppMsg::AppSearchResultsLoaded(items) => { app.app_search_results = items; app.main_selected = 0; app.is_loading = false; }
+        AppMsg::Error(e) => background::set_timed_status(app, e, tx),
         AppMsg::DiscoveredServers(servers) => {
             if let Some(modal) = app.config_modal.as_mut() {
                 modal.is_scanning = false;
@@ -1020,144 +705,13 @@ async fn handle_msg(
                 modal.selected_field = 7;
             }
         }
-        AppMsg::ArtistArtworkResolved(artist_id, url) => {
-            // `None` is cached too, so we don't re-query an artist that has no resolvable art.
-            app.artist_artwork.insert(artist_id, url);
-        }
-        AppMsg::FolderArtworkResolved(folder_id, url) => {
-            app.folder_artwork.insert(folder_id, url);
-        }
         AppMsg::ArtworkDecoded { .. }
         | AppMsg::ThumbnailLoaded(..)
         | AppMsg::ThumbnailFailed(_)
-        | AppMsg::ArtworkFetchFailed(_) => {
+        | AppMsg::ArtworkFetchFailed(_)
+        | AppMsg::ArtistArtworkResolved(..)
+        | AppMsg::FolderArtworkResolved(..) => {
             // handled inline in the event loop
         }
     }
-}
-
-fn thumb_range(
-    term_h: u16,
-    state: &ratatui::widgets::ListState,
-    app: &App,
-) -> std::ops::Range<usize> {
-    let inner_h = term_h.saturating_sub(13);
-    let visible = ((inner_h / 2) as usize).max(1);
-    let offset = state.offset();
-    let end = (offset + visible + 5).min(utils::main_list_len(app));
-    offset..end
-}
-
-fn has_overlay(app: &App) -> bool {
-    app.confirm_delete_queue_item.is_some()
-        || app.confirm_clear_queue
-        || app.confirm_quit
-        || app.config_modal.is_some()
-        || app.context_menu.is_some()
-        || app.sync_modal.is_some()
-}
-
-fn apply_image_protocol(picker: &mut Picker, protocol: &str) {
-    match protocol {
-        "halfblocks" => picker.set_protocol_type(ProtocolType::Halfblocks),
-        "sixel" => picker.set_protocol_type(ProtocolType::Sixel),
-        "kitty" => picker.set_protocol_type(ProtocolType::Kitty),
-        "iterm2" => picker.set_protocol_type(ProtocolType::Iterm2),
-        _ => {
-            // "auto" or unknown: on Windows, terminal graphics protocols aren't supported
-            if cfg!(target_os = "windows") {
-                picker.set_protocol_type(ProtocolType::Halfblocks);
-            }
-        }
-    }
-}
-
-/// Build a thumbnail protocol and fully resize+encode it for the fixed `THUMB_W × 2` cell
-/// thumbnail rect. Doing the encode here (off the UI thread when called from a spawned task)
-/// means draw-time `needs_resize` returns `None`, so rendering never blocks on encoding.
-fn encode_thumb_protocol(picker: &Picker, img: image::DynamicImage) -> StatefulProtocol {
-    let mut proto = picker.new_resize_protocol(img);
-    let area = ratatui::layout::Size {
-        width: crate::ui::THUMB_W,
-        height: 2,
-    };
-    if let Some(sz) = proto.needs_resize(&Resize::Fit(None), area) {
-        proto.resize_encode(&Resize::Fit(None), sz);
-    }
-    proto
-}
-
-fn create_album_art_protocols(
-    img: &image::DynamicImage,
-    picker: &mut Picker,
-) -> (Option<StatefulProtocol>, Option<StatefulProtocol>) {
-    (
-        Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), ART_RADIUS_NORMAL))),
-        Some(picker.new_resize_protocol(with_rounded_corners(img.clone(), ART_RADIUS_FULL))),
-    )
-}
-
-/// Recreate the normal/full album-art protocols from the cached image (if any), forcing the
-/// terminal to retransmit at current dimensions. No-op when no artwork is cached.
-fn refresh_album_art(
-    last_artwork_image: &Option<image::DynamicImage>,
-    picker: &mut Picker,
-    album_art: &mut Option<StatefulProtocol>,
-    album_art_full: &mut Option<StatefulProtocol>,
-) {
-    if let Some(img) = last_artwork_image {
-        (*album_art, *album_art_full) = create_album_art_protocols(img, picker);
-    }
-}
-
-fn update_status_height(app: &mut App, term_height: u16, base_height: u16) {
-    let fw = app.font_size.0.max(1) as u32;
-    let fh = app.font_size.1.max(1) as u32;
-    let dyn_sh = (term_height / 3).max(base_height);
-    app.status_height = dyn_sh;
-    let inner_h = dyn_sh.saturating_sub(2);
-    app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
-}
-
-fn set_timed_status(app: &mut App, msg: String, tx: &mpsc::Sender<AppMsg>) {
-    app.status_message_gen += 1;
-    let seq = app.status_message_gen;
-    app.status_message = Some(msg);
-    let t = tx.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(4)).await;
-        let _ = t.send(AppMsg::ClearStatusMsg(seq)).await;
-    });
-}
-
-/// Round the corners of an image by making corner pixels transparent.
-/// `radius_pct` is the radius as a percentage of the shorter dimension (clamped to ≥4 px).
-fn with_rounded_corners(img: image::DynamicImage, radius_pct: u32) -> image::DynamicImage {
-    let mut rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    let r = ((w.min(h) * radius_pct / 100) as f64).max(4.0);
-    for y in 0..h {
-        for x in 0..w {
-            let corner = match (
-                x < r as u32,
-                x >= w.saturating_sub(r as u32),
-                y < r as u32,
-                y >= h.saturating_sub(r as u32),
-            ) {
-                (true, _, true, _) => Some((r as u32, r as u32)),
-                (_, true, true, _) => Some((w - r as u32, r as u32)),
-                (true, _, _, true) => Some((r as u32, h - r as u32)),
-                (_, true, _, true) => Some((w - r as u32, h - r as u32)),
-                _ => None,
-            };
-            if let Some((cx, cy)) = corner {
-                let dx = x as f64 - cx as f64;
-                let dy = y as f64 - cy as f64;
-                if dx * dx + dy * dy > r * r {
-                    rgba.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
-                }
-            }
-        }
-    }
-    image::DynamicImage::ImageRgba8(rgba)
 }

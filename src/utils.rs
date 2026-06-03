@@ -1,5 +1,6 @@
 use crate::api::FolderItemType;
 use crate::app::{App, LibraryView, MainView, SearchResultItem};
+use ratatui::widgets::ListState;
 
 /// Extracts a string id from an `Option<&Value>`, falling back to an empty string for `None`/`Null`.
 pub fn extract_id(id: Option<&serde_json::Value>) -> String {
@@ -224,6 +225,32 @@ pub fn is_main_item_playable(app: &App) -> bool {
             .unwrap_or(false),
         _ => false,
     }
+}
+
+pub fn thumb_range(term_h: u16, state: &ListState, app: &App) -> std::ops::Range<usize> {
+    let inner_h = term_h.saturating_sub(13);
+    let visible = ((inner_h / 2) as usize).max(1);
+    let offset = state.offset();
+    let end = (offset + visible + 5).min(main_list_len(app));
+    offset..end
+}
+
+pub fn has_overlay(app: &App) -> bool {
+    app.confirm_delete_queue_item.is_some()
+        || app.confirm_clear_queue
+        || app.confirm_quit
+        || app.config_modal.is_some()
+        || app.context_menu.is_some()
+        || app.sync_modal.is_some()
+}
+
+pub fn update_status_height(app: &mut App, term_height: u16, base_height: u16) {
+    let fw = app.font_size.0.max(1) as u32;
+    let fh = app.font_size.1.max(1) as u32;
+    let dyn_sh = (term_height / 3).max(base_height);
+    app.status_height = dyn_sh;
+    let inner_h = dyn_sh.saturating_sub(2);
+    app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
 }
 
 pub fn main_list_len(app: &App) -> usize {
