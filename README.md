@@ -181,7 +181,7 @@ When `auto_discover = true` (the default), lyrtui sends a SLIM-protocol UDP broa
 
 #### Nerd Font icons
 
-Set `use_nerd_icons = true` to enable Nerd Font glyphs in the sidebar, now-playing bar, search box, and library lists (artist/album icons and volume indicator). Requires a [Nerd Font](https://www.nerdfonts.com/) installed in your terminal.
+Set `use_nerd_icons = true` to enable Nerd Font glyphs in the sidebar, now-playing bar, search box, and library lists (artist/album icons and volume indicator). With Nerd Fonts enabled, the progress bar, player volume bars, and the now-playing media control buttons also render with rounded "pill" ends for a softer, cohesive look. Requires a [Nerd Font](https://www.nerdfonts.com/) installed in your terminal.
 
 #### Adaptive theme
 

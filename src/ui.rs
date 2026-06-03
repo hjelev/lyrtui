@@ -59,6 +59,7 @@ const THUMB_BG_DEFAULT: Color = Color::Rgb(25, 25, 35);
 const THUMB_PLACEHOLDER: Color = Color::Rgb(80, 80, 110);
 const BAR_FOCUSED: Color = Color::Rgb(100, 180, 255);
 const BAR_UNFOCUSED: Color = Color::Rgb(60, 80, 110);
+const VOL_BAR_TRACK: Color = Color::Rgb(30, 35, 50);
 
 fn accent_to_color(accent: Option<[u8; 3]>) -> Color {
     accent.map(|c| Color::Rgb(c[0], c[1], c[2])).unwrap_or(Color::Yellow)
@@ -73,13 +74,43 @@ fn styled_block<'a>(title: &'a str, border_style: Style, title_color: Color) -> 
         .title(title)
 }
 
-fn build_bar_fill(value: u8, width: usize) -> String {
-    let filled = (value as usize * width) / 100;
-    format!(
-        "{}{}",
-        "█".repeat(filled),
-        "░".repeat(width.saturating_sub(filled))
-    )
+fn vol_bar_spans(value: u8, bar_w: usize, bar_color: Color, bg: Color, use_nerd_icons: bool) -> Vec<Span<'static>> {
+    let filled = (value as usize * bar_w) / 100;
+    let unfilled = bar_w.saturating_sub(filled);
+    if !use_nerd_icons || bar_w < 3 {
+        return vec![Span::styled(
+            format!("{}{}", "█".repeat(filled), "░".repeat(unfilled)),
+            Style::default().fg(bar_color).bg(bg),
+        )];
+    }
+    if filled == 0 {
+        // Empty bar: left cap + track spaces + right cap (2 glyphs + content)
+        return vec![
+            Span::styled("\u{e0b6}", Style::default().fg(VOL_BAR_TRACK).bg(bg)),
+            Span::styled(" ".repeat(bar_w.saturating_sub(2)), Style::default().bg(VOL_BAR_TRACK)),
+            Span::styled("\u{e0b4}", Style::default().fg(VOL_BAR_TRACK).bg(bg)),
+        ];
+    }
+    if filled >= bar_w {
+        // Full bar: left cap + fill spaces + right cap (2 glyphs + content)
+        return vec![
+            Span::styled("\u{e0b6}", Style::default().fg(bar_color).bg(bg)),
+            Span::styled(" ".repeat(bar_w.saturating_sub(2)), Style::default().bg(bar_color)),
+            Span::styled("\u{e0b4}", Style::default().fg(bar_color).bg(bg)),
+        ];
+    }
+    // Partial: left cap + fill spaces + boundary cap + track spaces + right cap
+    // 3 glyphs consume 3 cells; remaining bar_w-3 cells split proportionally between fill and track.
+    let content_w = bar_w - 3;
+    let fill_content = (value as usize * content_w) / 100;
+    let track_content = content_w.saturating_sub(fill_content);
+    vec![
+        Span::styled("\u{e0b6}", Style::default().fg(bar_color).bg(bg)),
+        Span::styled(" ".repeat(fill_content), Style::default().bg(bar_color)),
+        Span::styled("\u{e0b4}", Style::default().fg(bar_color).bg(VOL_BAR_TRACK)),
+        Span::styled(" ".repeat(track_content), Style::default().bg(VOL_BAR_TRACK)),
+        Span::styled("\u{e0b4}", Style::default().fg(VOL_BAR_TRACK).bg(bg)),
+    ]
 }
 
 fn sidebar_nerd_icon(item: &SidebarItem) -> &'static str {
@@ -191,15 +222,24 @@ fn mid_accent_color(accent: Option<[u8; 3]>) -> Color {
     accent_tint(accent, 58, 18, 18, 25, Color::Gray)
 }
 
-fn sync_scroll_offset(state: &mut ListState, selected: usize, visible: usize) -> usize {
-    let o = *state.offset_mut();
+fn sync_scroll_offset(state: &mut ListState, selected: usize, visible: usize, total: usize) -> usize {
+    // Clamp any stale offset (e.g. left over from a longer list, like the art-mode
+    // queue) so we never scroll past the point where the window would show empty
+    // space below the last item — which would otherwise render only a trailing item.
+    let max_offset = total.saturating_sub(visible);
+    // Guard against a selection left over from a longer list (e.g. the art-mode
+    // queue index carried into a shorter normal view): an out-of-range `selected`
+    // must not drive the offset past the end.
+    let selected = selected.min(total.saturating_sub(1));
+    let o = (*state.offset_mut()).min(max_offset);
     let new_o = if selected < o {
         selected
     } else if visible > 0 && selected >= o + visible {
         selected + 1 - visible
     } else {
         o
-    };
+    }
+    .min(max_offset);
     *state.offset_mut() = new_o;
     new_o
 }
@@ -217,6 +257,21 @@ fn pill_endcap_right(bg: Color, nerd: bool) -> Span<'static> {
         Span::styled("\u{e0b4}", Style::default().fg(bg).bg(Color::Reset))
     } else {
         Span::raw("")
+    }
+}
+
+/// A 3-cell pill-rounded control button: rounded-left cap + single-glyph icon +
+/// rounded-right cap (nerd mode), or the original " icon " flat chip (non-nerd).
+/// Width-invariant: always 3 columns, so button layout/hit-test rects are unchanged.
+fn pill_button(icon: &str, fg: Color, bg: Color, nerd: bool) -> Paragraph<'static> {
+    if nerd {
+        Paragraph::new(Line::from(vec![
+            pill_endcap_left(bg, true),
+            Span::styled(icon.to_string(), Style::default().fg(fg).bg(bg)),
+            pill_endcap_right(bg, true),
+        ]))
+    } else {
+        Paragraph::new(format!(" {} ", icon)).style(Style::default().fg(fg).bg(bg))
     }
 }
 
@@ -1174,7 +1229,6 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         vol_icon_str
     };
     let vol_str = format!(" {}{:3}%", glob_icon, global_avg);
-    let bar = build_bar_fill(global_avg, player_bar_w);
 
     // Pad the label suffix so the bar starts at the same column as per-player bars.
     // Per-player bar starts at: pwr(3) + label(player_name_col_w+3) + sync(3) = player_name_col_w+9.
@@ -1195,44 +1249,28 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         mid
     };
     let global_line = if glob_focused {
-        Line::from(vec![
+        let mut spans = vec![
             pill_endcap_left(pill_bg, app.use_nerd_icons),
-            Span::styled(
-                format!(" {} ", pwr_icon),
-                Style::default().fg(glob_pwr_fg).bg(glob_bg),
-            ),
+            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
             Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(
-                checkbox,
-                Style::default()
-                    .fg(checkbox_color)
-                    .bg(glob_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
             Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(bar, Style::default().fg(BAR_FOCUSED).bg(glob_bg)),
-            Span::styled(&vol_str, Style::default().fg(Color::White).bg(glob_bg)),
-            pill_endcap_right(pill_bg, app.use_nerd_icons),
-        ])
+        ];
+        spans.extend(vol_bar_spans(global_avg, player_bar_w, BAR_FOCUSED, glob_bg, app.use_nerd_icons));
+        spans.push(Span::styled(vol_str.clone(), Style::default().fg(Color::White).bg(glob_bg)));
+        spans.push(pill_endcap_right(pill_bg, app.use_nerd_icons));
+        Line::from(spans)
     } else {
-        Line::from(vec![
+        let mut spans = vec![
             Span::raw(" "),
-            Span::styled(
-                format!(" {} ", pwr_icon),
-                Style::default().fg(glob_pwr_fg).bg(glob_bg),
-            ),
+            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
             Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(
-                checkbox,
-                Style::default()
-                    .fg(checkbox_color)
-                    .bg(glob_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
             Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(bar, Style::default().fg(BAR_UNFOCUSED).bg(glob_bg)),
-            Span::styled(&vol_str, Style::default().fg(mid).bg(glob_bg)),
-        ])
+        ];
+        spans.extend(vol_bar_spans(global_avg, player_bar_w, BAR_UNFOCUSED, glob_bg, app.use_nerd_icons));
+        spans.push(Span::styled(vol_str.clone(), Style::default().fg(mid).bg(glob_bg)));
+        Line::from(spans)
     };
     f.render_widget(Paragraph::new(global_line), chunks[0]);
 
@@ -1251,9 +1289,11 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let visible = list_area.height as usize;
 
     let offset = if !app.players_focus_global {
-        sync_scroll_offset(state, app.main_selected, visible)
+        sync_scroll_offset(state, app.main_selected, visible, total)
     } else {
-        *state.offset_mut()
+        let clamped = (*state.offset_mut()).min(total.saturating_sub(visible));
+        *state.offset_mut() = clamped;
+        clamped
     };
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
@@ -1280,7 +1320,6 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         let vol_str = format!(" {}{:3}%", player_vol_icon, vol);
         let bar_w = player_bar_w;
         let name_col_w = player_name_col_w;
-        let bar_str = build_bar_fill(vol, bar_w);
 
         let marker = if active { "● " } else { "○ " };
         let name_raw = format!("{}{}", marker, p.name);
@@ -1330,30 +1369,26 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         };
 
         let line = if is_sel {
-            Line::from(vec![
+            let mut spans = vec![
                 pill_endcap_left(pill_bg, app.use_nerd_icons),
-                Span::styled(
-                    format!(" {} ", pwr_icon),
-                    Style::default().fg(player_pwr_fg).bg(row_bg),
-                ),
+                Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
                 Span::styled(label, Style::default().fg(name_fg).bg(row_bg)),
                 Span::styled(" ⇄ ", Style::default().fg(sync_fg).bg(row_bg)),
-                Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
-                Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
-                pill_endcap_right(pill_bg, app.use_nerd_icons),
-            ])
+            ];
+            spans.extend(vol_bar_spans(vol, bar_w, bar_color, row_bg, app.use_nerd_icons));
+            spans.push(Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)));
+            spans.push(pill_endcap_right(pill_bg, app.use_nerd_icons));
+            Line::from(spans)
         } else {
-            Line::from(vec![
+            let mut spans = vec![
                 Span::raw(" "),
-                Span::styled(
-                    format!(" {} ", pwr_icon),
-                    Style::default().fg(player_pwr_fg).bg(row_bg),
-                ),
+                Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
                 Span::styled(label, Style::default().fg(name_fg).bg(row_bg)),
                 Span::styled(" ⇄ ", Style::default().fg(sync_fg).bg(row_bg)),
-                Span::styled(bar_str, Style::default().fg(bar_color).bg(row_bg)),
-                Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)),
-            ])
+            ];
+            spans.extend(vol_bar_spans(vol, bar_w, bar_color, row_bg, app.use_nerd_icons));
+            spans.push(Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)));
+            Line::from(spans)
         };
         f.render_widget(
             Paragraph::new(line),
@@ -1639,7 +1674,7 @@ fn draw_search(
     let visible = ((results_area.height / 2) as usize).max(1);
     let total = app.search_results.len();
 
-    let offset = sync_scroll_offset(state, selected, visible);
+    let offset = sync_scroll_offset(state, selected, visible, total);
 
     let text_x = results_area.x + THUMB_W + THUMB_SEP;
     let text_w = results_area
@@ -1883,7 +1918,7 @@ fn draw_app_search(
     let visible = ((results_area.height / 2) as usize).max(1);
     let total = app.app_search_results.len();
 
-    let offset = sync_scroll_offset(state, selected, visible);
+    let offset = sync_scroll_offset(state, selected, visible, total);
 
     let text_x = results_area.x + THUMB_W + THUMB_SEP;
     let text_w = results_area
@@ -2354,10 +2389,11 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 break;
             }
             f.render_widget(
-                Paragraph::new(format!(" {} ", icon)).style(
-                    Style::default()
-                        .fg(focus_border_color(raw_accent))
-                        .bg(btn_bg_color(raw_accent)),
+                pill_button(
+                    icon,
+                    focus_border_color(raw_accent),
+                    btn_bg_color(raw_accent),
+                    app.use_nerd_icons,
                 ),
                 Rect::new(x, ctrl.y, btn_w, 1),
             );
@@ -2381,50 +2417,39 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 )
             };
             f.render_widget(
-                Paragraph::new(format!(" {} ", shuf_icon)).style(Style::default().fg(sfg).bg(sbg)),
+                pill_button(shuf_icon, sfg, sbg, app.use_nerd_icons),
                 Rect::new(shuffle_x, ctrl.y, btn_w, 1),
             );
         }
         let repeat_x = shuffle_x + btn_w + gap;
         if repeat_x + btn_w <= ctrl_max_x {
-            let (rfg, rbg, rep_btn) = match np.repeat {
-                1 => (
+            let (rfg, rbg) = match np.repeat {
+                1..=3 => (
                     focus_border_color(raw_accent),
                     btn_active_bg_color(raw_accent),
-                    if app.use_nerd_icons {
-                        " \u{F01E}1".to_string()
-                    } else {
-                        " ↺1".to_string()
-                    },
                 ),
-                2 => (
-                    focus_border_color(raw_accent),
-                    btn_active_bg_color(raw_accent),
-                    if app.use_nerd_icons {
-                        " \u{F01E} ".to_string()
-                    } else {
-                        " ↺ ".to_string()
-                    },
-                ),
-                3 => (
-                    focus_border_color(raw_accent),
-                    btn_active_bg_color(raw_accent),
-                    " ∞ ".to_string(),
-                ),
-                _ => (
-                    btn_dim_color(raw_accent),
-                    btn_bg_color(raw_accent),
-                    if app.use_nerd_icons {
-                        " \u{F01E} ".to_string()
-                    } else {
-                        " ↺ ".to_string()
-                    },
-                ),
+                _ => (btn_dim_color(raw_accent), btn_bg_color(raw_accent)),
             };
-            f.render_widget(
-                Paragraph::new(rep_btn).style(Style::default().fg(rfg).bg(rbg)),
-                Rect::new(repeat_x, ctrl.y, btn_w, 1),
-            );
+            let rect = Rect::new(repeat_x, ctrl.y, btn_w, 1);
+            if app.use_nerd_icons {
+                // Single-glyph pill — distinct glyphs for single-track vs queue repeat.
+                let rep_icon = match np.repeat {
+                    1 => "\u{f0458}", // mdi repeat-once (single track)
+                    3 => "∞",         // repeat-all / infinite
+                    _ => "\u{f0456}", // mdi repeat (queue + off)
+                };
+                f.render_widget(pill_button(rep_icon, rfg, rbg, true), rect);
+            } else {
+                let rep_btn = match np.repeat {
+                    1 => " ↺1",
+                    3 => " ∞ ",
+                    _ => " ↺ ",
+                };
+                f.render_widget(
+                    Paragraph::new(rep_btn).style(Style::default().fg(rfg).bg(rbg)),
+                    rect,
+                );
+            }
         }
         let vol_down_x = repeat_x + btn_w + sep;
         if vol_down_x + btn_w <= ctrl_max_x {
@@ -2434,10 +2459,11 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 "−"
             }; // nf-fa-volume-down
             f.render_widget(
-                Paragraph::new(format!(" {} ", vol_down_icon)).style(
-                    Style::default()
-                        .fg(focus_border_color(raw_accent))
-                        .bg(btn_bg_color(raw_accent)),
+                pill_button(
+                    vol_down_icon,
+                    focus_border_color(raw_accent),
+                    btn_bg_color(raw_accent),
+                    app.use_nerd_icons,
                 ),
                 Rect::new(vol_down_x, ctrl.y, btn_w, 1),
             );
@@ -2446,10 +2472,11 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
         if vol_up_x + btn_w <= ctrl_max_x {
             let vol_up_icon = if app.use_nerd_icons { "\u{F028}" } else { "+" }; // nf-fa-volume-up
             f.render_widget(
-                Paragraph::new(format!(" {} ", vol_up_icon)).style(
-                    Style::default()
-                        .fg(focus_border_color(raw_accent))
-                        .bg(btn_bg_color(raw_accent)),
+                pill_button(
+                    vol_up_icon,
+                    focus_border_color(raw_accent),
+                    btn_bg_color(raw_accent),
+                    app.use_nerd_icons,
                 ),
                 Rect::new(vol_up_x, ctrl.y, btn_w, 1),
             );
@@ -2499,25 +2526,53 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
     };
     let left_cap_color = if pct > 0 { accent } else { track_color };
     let right_cap_color = if filled >= bar_w { accent } else { track_color };
-    let bar = Line::from(vec![
-        pill_endcap_left(left_cap_color, app.use_nerd_icons),
-        Span::styled(" ".repeat(pure_filled), Style::default().bg(accent)),
-        Span::styled(" ".repeat(pure_unfilled), Style::default().bg(track_color)),
-        Span::styled(
-            over_filled_text,
-            Style::default()
-                .bg(accent)
-                .fg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            over_unfilled_text,
-            Style::default()
-                .bg(track_color)
-                .fg(Color::Rgb(210, 215, 225)),
-        ),
-        pill_endcap_right(right_cap_color, app.use_nerd_icons),
-    ]);
+    let bar = if app.use_nerd_icons && filled > 0 && filled < bar_w {
+        // Inner pill right-cap at the fill boundary: replaces the last filled cell so the
+        // filled indicator is pill-shaped (rounded right edge) against the track background.
+        let inner_cap = Span::styled("\u{e0b4}", Style::default().fg(accent).bg(track_color));
+        if filled <= text_start {
+            // Fill boundary sits before the time text — clean cap placement.
+            Line::from(vec![
+                pill_endcap_left(left_cap_color, true),
+                Span::styled(" ".repeat(filled.saturating_sub(1)), Style::default().bg(accent)),
+                inner_cap,
+                Span::styled(" ".repeat(pure_unfilled), Style::default().bg(track_color)),
+                Span::styled(over_unfilled_text, Style::default().bg(track_color).fg(Color::Rgb(210, 215, 225))),
+                pill_endcap_right(right_cap_color, true),
+            ])
+        } else {
+            // Fill boundary falls within the time text — cap appears mid-text at the boundary.
+            let pre_cap: String = text_bytes[..over_filled.saturating_sub(1)].iter().collect();
+            Line::from(vec![
+                pill_endcap_left(left_cap_color, true),
+                Span::styled(" ".repeat(pure_filled), Style::default().bg(accent)),
+                Span::styled(pre_cap, Style::default().bg(accent).fg(Color::Black).add_modifier(Modifier::BOLD)),
+                inner_cap,
+                Span::styled(over_unfilled_text, Style::default().bg(track_color).fg(Color::Rgb(210, 215, 225))),
+                pill_endcap_right(right_cap_color, true),
+            ])
+        }
+    } else {
+        Line::from(vec![
+            pill_endcap_left(left_cap_color, app.use_nerd_icons),
+            Span::styled(" ".repeat(pure_filled), Style::default().bg(accent)),
+            Span::styled(" ".repeat(pure_unfilled), Style::default().bg(track_color)),
+            Span::styled(
+                over_filled_text,
+                Style::default()
+                    .bg(accent)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                over_unfilled_text,
+                Style::default()
+                    .bg(track_color)
+                    .fg(Color::Rgb(210, 215, 225)),
+            ),
+            pill_endcap_right(right_cap_color, app.use_nerd_icons),
+        ])
+    };
     let progress_rect = Rect::new(prog_x, prog.y, prog_w, prog.height);
     f.render_widget(Paragraph::new(bar), progress_rect);
 }
@@ -2736,7 +2791,7 @@ fn draw_two_row_list(
     let visible = ((inner.height / 2) as usize).max(1);
     let needs_scroll = total > visible;
 
-    let offset = sync_scroll_offset(state, selected, visible);
+    let offset = sync_scroll_offset(state, selected, visible, total);
 
     let text_x = inner.x + THUMB_W + THUMB_SEP;
     let text_w = inner.width.saturating_sub(THUMB_W + THUMB_SEP);
@@ -4017,4 +4072,46 @@ pub fn compute_config_modal_button_rects(area: Rect, n_servers: usize) -> (Rect,
     let ok_rect = Rect::new(inner_x, btn_y, half_w, 1);
     let cancel_rect = Rect::new(inner_x + half_w, btn_y, inner_w - half_w, 1);
     (popup, [ok_rect, cancel_rect])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state_with_offset(off: usize) -> ListState {
+        let mut s = ListState::default();
+        *s.offset_mut() = off;
+        s
+    }
+
+    // Regression: toggling full-art-mode pushes the shared `main_state` offset down to
+    // follow the now-playing queue index. Returning to a SHORTER normal-view list must
+    // not leave that stale offset in place, or the window renders starting near the end
+    // and only a trailing item is visible.
+    #[test]
+    fn stale_large_offset_clamped_for_short_list() {
+        // Offset 33 left over from a 50-item queue; new list has 3 items, panel fits all.
+        let mut s = state_with_offset(33);
+        let off = sync_scroll_offset(&mut s, 0, 40, 3);
+        assert_eq!(off, 0, "short list must render from the top, not a trailing item");
+        assert_eq!(*s.offset_mut(), 0);
+    }
+
+    #[test]
+    fn out_of_range_selection_does_not_push_offset_past_end() {
+        // saved_main_selected was None (mouse / config-startup art-mode entry), so the
+        // queue index (47) is carried into a 5-item list. Offset must stay in range.
+        let mut s = state_with_offset(40);
+        let off = sync_scroll_offset(&mut s, 47, 10, 5);
+        assert_eq!(off, 0, "max_offset for total=5,visible=10 is 0");
+    }
+
+    #[test]
+    fn normal_scrolling_still_follows_selection() {
+        // Selection below the window scrolls down; above scrolls up.
+        let mut s = state_with_offset(0);
+        assert_eq!(sync_scroll_offset(&mut s, 12, 10, 100), 3); // 12+1-10
+        let mut s = state_with_offset(20);
+        assert_eq!(sync_scroll_offset(&mut s, 5, 10, 100), 5);
+    }
 }
