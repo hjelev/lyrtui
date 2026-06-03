@@ -531,6 +531,11 @@ async fn run(
                     pending_thumbs.remove(&url);
                     failed_thumbs.insert(url);
                 }
+                AppMsg::ArtworkFetchFailed(url) => {
+                    if last_artwork_url.as_deref() == Some(url.as_str()) {
+                        last_artwork_url = None;
+                    }
+                }
                 AppMsg::ArtistArtworkResolved(artist_id, url) => {
                     pending_artist_art.remove(&artist_id);
                     // Cache `None` too, so an artist with no resolvable art is not re-queried.
@@ -563,43 +568,47 @@ async fn run(
                 let c = client.clone();
                 let t = tx.clone();
                 tokio::spawn(async move {
-                    if let Ok(bytes) = c.fetch_image_bytes(&url).await {
-                        if let Ok(img) = image::load_from_memory(&bytes) {
-                            let rgb = img.to_rgb8();
-                            let accent = color_thief::get_palette(
-                                rgb.as_raw(),
-                                color_thief::ColorFormat::Rgb,
-                                10,
-                                5,
-                            )
-                            .ok()
-                            .and_then(|colors| {
-                                colors
-                                    .iter()
-                                    .find(|c| {
-                                        let luma = (c.r as u32 * 299
-                                            + c.g as u32 * 587
-                                            + c.b as u32 * 114)
-                                            / 1000;
-                                        (70..=210).contains(&luma)
-                                    })
-                                    .or_else(|| colors.first())
-                                    .map(|c| [c.r, c.g, c.b])
-                            });
-                            let dimensions = (img.width(), img.height());
-                            let art_normal =
-                                with_rounded_corners(img.clone(), ART_RADIUS_NORMAL);
-                            let art_full = with_rounded_corners(img.clone(), ART_RADIUS_FULL);
-                            let _ = t
-                                .send(AppMsg::ArtworkDecoded {
-                                    img,
-                                    art_normal,
-                                    art_full,
-                                    accent,
-                                    dimensions,
+                    let ok = async {
+                        let bytes = c.fetch_image_bytes(&url).await.ok()?;
+                        let img = image::load_from_memory(&bytes).ok()?;
+                        let rgb = img.to_rgb8();
+                        let accent = color_thief::get_palette(
+                            rgb.as_raw(),
+                            color_thief::ColorFormat::Rgb,
+                            10,
+                            5,
+                        )
+                        .ok()
+                        .and_then(|colors| {
+                            colors
+                                .iter()
+                                .find(|c| {
+                                    let luma = (c.r as u32 * 299
+                                        + c.g as u32 * 587
+                                        + c.b as u32 * 114)
+                                        / 1000;
+                                    (70..=210).contains(&luma)
                                 })
-                                .await;
-                        }
+                                .or_else(|| colors.first())
+                                .map(|c| [c.r, c.g, c.b])
+                        });
+                        let dimensions = (img.width(), img.height());
+                        let art_normal = with_rounded_corners(img.clone(), ART_RADIUS_NORMAL);
+                        let art_full = with_rounded_corners(img.clone(), ART_RADIUS_FULL);
+                        let _ = t
+                            .send(AppMsg::ArtworkDecoded {
+                                img,
+                                art_normal,
+                                art_full,
+                                accent,
+                                dimensions,
+                            })
+                            .await;
+                        Some(())
+                    }
+                    .await;
+                    if ok.is_none() {
+                        let _ = t.send(AppMsg::ArtworkFetchFailed(url)).await;
                     }
                 });
             }
@@ -1018,7 +1027,10 @@ async fn handle_msg(
         AppMsg::FolderArtworkResolved(folder_id, url) => {
             app.folder_artwork.insert(folder_id, url);
         }
-        AppMsg::ArtworkDecoded { .. } | AppMsg::ThumbnailLoaded(..) | AppMsg::ThumbnailFailed(_) => {
+        AppMsg::ArtworkDecoded { .. }
+        | AppMsg::ThumbnailLoaded(..)
+        | AppMsg::ThumbnailFailed(_)
+        | AppMsg::ArtworkFetchFailed(_) => {
             // handled inline in the event loop
         }
     }

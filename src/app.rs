@@ -544,6 +544,7 @@ pub enum AppMsg {
     },
     ThumbnailLoaded(String, image::DynamicImage, ratatui_image::protocol::StatefulProtocol), // url, pre-resized image, pre-encoded protocol
     ThumbnailFailed(String),                      // url
+    ArtworkFetchFailed(String),                   // url — resets retry gate so next poll retries
     ArtistArtworkResolved(String, Option<String>), // artist_id, resolved cover url (None = no art)
     FolderArtworkResolved(u32, Option<String>),    // folder_id, resolved cover url (None = no art)
     PlayerVolumesLoaded(HashMap<String, u8>),
