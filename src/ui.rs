@@ -2097,9 +2097,13 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
     let accent = focus_border_color(app.effective_accent());
     let player_icon = icon_player_dot(app.use_nerd_icons);
     let left_title = Line::from(vec![
+        Span::styled(" Now Playing ".to_string(), Style::default().fg(mid)),
+    ]);
+    let center_title = Line::from(vec![
         Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
         Span::styled(format!("{} ", player_name), Style::default().fg(Color::White)),
-    ]);
+    ])
+    .alignment(Alignment::Center);
     let block = if let Some(np) = &app.now_playing {
         let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
         let globe = if app.global_volume_control {
@@ -2121,6 +2125,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(accent))
             .title(left_title)
+            .title(center_title)
             .title(right_title)
     } else {
         Block::default()
@@ -2128,6 +2133,7 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(accent))
             .title(left_title)
+            .title(center_title)
     };
     let inner = render_bordered_panel(f, block, area);
 
@@ -2594,9 +2600,13 @@ fn draw_full_art_mode(
         .unwrap_or_else(|| "Now Playing".to_string());
     let player_icon = icon_player_dot(app.use_nerd_icons);
     let left_title = Line::from(vec![
+        Span::styled(" Now Playing ".to_string(), Style::default().fg(mid)),
+    ]);
+    let center_title = Line::from(vec![
         Span::styled(format!(" {} ", player_icon), Style::default().fg(mid)),
         Span::styled(format!("{} ", player_name), Style::default().fg(Color::White)),
-    ]);
+    ])
+    .alignment(Alignment::Center);
     let np_block = if let Some(np) = &app.now_playing {
         let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
         let globe = if app.global_volume_control {
@@ -2618,6 +2628,7 @@ fn draw_full_art_mode(
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(fc))
             .title(left_title)
+            .title(center_title)
             .title(right_title)
     } else {
         Block::default()
@@ -2625,6 +2636,7 @@ fn draw_full_art_mode(
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(fc))
             .title(left_title)
+            .title(center_title)
     };
     let np_inner = np_block.inner(info_rows[0]);
     f.render_widget(np_block, info_rows[0]);
