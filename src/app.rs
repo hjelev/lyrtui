@@ -509,6 +509,11 @@ impl App {
         self.active_player.clone()
     }
 
+    /// Ids of every known player, cloned. Used by the "all players" volume/power/mute actions.
+    pub fn player_ids(&self) -> Vec<String> {
+        self.players.iter().map(|p| p.playerid.clone()).collect()
+    }
+
     pub fn is_playing(&self) -> bool {
         self.now_playing
             .as_ref()
