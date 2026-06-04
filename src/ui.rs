@@ -617,7 +617,7 @@ pub fn draw(
     }
 
     if let Some(modal) = &app.config_modal {
-        draw_config_modal(f, modal, app.effective_accent());
+        draw_config_modal(f, modal, app.effective_accent(), app.use_nerd_icons);
     }
 
     if let Some(modal) = &app.sync_modal {
@@ -630,11 +630,12 @@ pub fn draw(
             app.queue.len(),
             app.clear_queue_selected_button,
             app.effective_accent(),
+            app.use_nerd_icons,
         );
     }
 
     if app.confirm_quit {
-        draw_confirm_quit(f, app.quit_selected_button, app.effective_accent());
+        draw_confirm_quit(f, app.quit_selected_button, app.effective_accent(), app.use_nerd_icons);
     }
 
     if let Some(idx) = app.confirm_delete_queue_item {
@@ -2835,30 +2836,48 @@ fn render_two_button_dialog(
     accent_color: Color,
     left_label: &str,
     right_label: &str,
+    nerd: bool,
 ) {
     let btn_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(row);
-    let btn_style = |selected: bool| {
+    render_pill_dialog_button(f, btn_cols[0], left_label, selected_button == 0, accent_color, nerd);
+    render_pill_dialog_button(f, btn_cols[1], right_label, selected_button == 1, accent_color, nerd);
+}
+
+/// Render a single centered dialog button. In nerd mode it draws a rounded pill
+/// (endcaps + padded label); otherwise the flat `[ Label ]` chip. Selected uses
+/// the accent fill, unselected a muted pill background.
+fn render_pill_dialog_button(
+    f: &mut Frame,
+    cell: Rect,
+    label: &str,
+    selected: bool,
+    accent_color: Color,
+    nerd: bool,
+) {
+    let line = if nerd {
+        let bg = if selected { accent_color } else { PILL_BG_UNFOCUSED };
+        let fg = if selected { Color::Black } else { Color::White };
+        let mut label_style = Style::default().fg(fg).bg(bg);
         if selected {
+            label_style = label_style.bold();
+        }
+        Line::from(vec![
+            pill_endcap_left(bg, true),
+            Span::styled(format!(" {} ", label), label_style),
+            pill_endcap_right(bg, true),
+        ])
+    } else {
+        let style = if selected {
             Style::default().fg(Color::Black).bg(accent_color).bold()
         } else {
             Style::default().fg(Color::White)
-        }
+        };
+        Line::from(Span::styled(format!("[ {} ]", label), style))
     };
-    f.render_widget(
-        Paragraph::new(left_label)
-            .alignment(Alignment::Center)
-            .style(btn_style(selected_button == 0)),
-        btn_cols[0],
-    );
-    f.render_widget(
-        Paragraph::new(right_label)
-            .alignment(Alignment::Center)
-            .style(btn_style(selected_button == 1)),
-        btn_cols[1],
-    );
+    f.render_widget(Paragraph::new(line).alignment(Alignment::Center), cell);
 }
 
 /// Render `block` into `area` and return its inner area. Pairs the two-step
@@ -3324,6 +3343,7 @@ fn draw_confirm_clear_queue(
     queue_len: usize,
     selected_button: u8,
     accent: Option<[u8; 3]>,
+    nerd: bool,
 ) {
     let area = f.area();
     let popup = centered_rect_abs(44, 7, area);
@@ -3353,7 +3373,7 @@ fn draw_confirm_clear_queue(
     .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    render_two_button_dialog(f, rows[3], selected_button, ac, "[ OK ]", "[ Cancel ]");
+    render_two_button_dialog(f, rows[3], selected_button, ac, "OK", "Cancel", nerd);
 }
 
 /// Returns (popup_rect, [ok_button_rect, cancel_button_rect]).
@@ -3370,7 +3390,7 @@ pub fn compute_clear_queue_button_rects(area: Rect) -> (Rect, [Rect; 2]) {
     (popup, [ok_rect, cancel_rect])
 }
 
-fn draw_confirm_quit(f: &mut Frame, selected_button: u8, accent: Option<[u8; 3]>) {
+fn draw_confirm_quit(f: &mut Frame, selected_button: u8, accent: Option<[u8; 3]>, nerd: bool) {
     let area = f.area();
     let popup = centered_rect_abs(44, 7, area);
 
@@ -3395,7 +3415,7 @@ fn draw_confirm_quit(f: &mut Frame, selected_button: u8, accent: Option<[u8; 3]>
         .style(Style::default().fg(Color::White));
     f.render_widget(msg, rows[1]);
 
-    render_two_button_dialog(f, rows[3], selected_button, ac, "[ Quit ]", "[ Cancel ]");
+    render_two_button_dialog(f, rows[3], selected_button, ac, "Quit", "Cancel", nerd);
 }
 
 /// Returns (popup_rect, [quit_button_rect, cancel_button_rect]) for the quit dialog.
@@ -3692,7 +3712,7 @@ pub fn compute_delete_queue_button_rects(area: Rect) -> (Rect, [Rect; 5]) {
     (popup, rects)
 }
 
-fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>) {
+fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>, nerd: bool) {
     use crate::app::FieldKind;
 
     // Right-align every field label to this width so all colons share one column.
@@ -3880,25 +3900,34 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         let is_selected = modal.field_kind(modal.selected_field) == FieldKind::ScanButton;
         let no_results =
             modal.scan_attempted && !modal.is_scanning && modal.discovered_servers.is_empty();
-        let (btn_text, btn_style) = if modal.is_scanning {
+        let (btn_text, mut btn_style) = if modal.is_scanning {
             (
-                "[ Scanning... ]",
+                "Scanning...",
                 Style::default().fg(accent_dim).add_modifier(Modifier::DIM),
             )
         } else if no_results {
-            ("[ No servers found ]", Style::default().fg(accent_dim))
+            ("No servers found", Style::default().fg(accent_dim))
         } else if is_selected {
             (
-                "[ Scan Servers ]",
+                "Scan Servers",
                 Style::default().fg(Color::Black).bg(accent_bright).bold(),
             )
         } else {
-            ("[ Scan Servers ]", Style::default().fg(Color::White))
+            ("Scan Servers", Style::default().fg(Color::White))
+        };
+        let line = if nerd {
+            let bg = if is_selected { accent_bright } else { PILL_BG_UNFOCUSED };
+            btn_style = btn_style.bg(bg);
+            Line::from(vec![
+                pill_endcap_left(bg, true),
+                Span::styled(format!(" {} ", btn_text), btn_style),
+                pill_endcap_right(bg, true),
+            ])
+        } else {
+            Line::from(Span::styled(format!("[ {} ]", btn_text), btn_style))
         };
         f.render_widget(
-            Paragraph::new(btn_text)
-                .alignment(Alignment::Center)
-                .style(btn_style),
+            Paragraph::new(line).alignment(Alignment::Center),
             rows[row_scan],
         );
     }
@@ -4008,29 +4037,10 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(rows[row_buttons]);
 
-    let ok_style = if modal.field_kind(modal.selected_field) == FieldKind::OkButton {
-        Style::default().fg(Color::Black).bg(accent_bright).bold()
-    } else {
-        Style::default().fg(Color::White)
-    };
-    let cancel_style = if modal.field_kind(modal.selected_field) == FieldKind::CancelButton {
-        Style::default().fg(Color::Black).bg(accent_bright).bold()
-    } else {
-        Style::default().fg(Color::White)
-    };
-
-    f.render_widget(
-        Paragraph::new("[ OK ]")
-            .alignment(Alignment::Center)
-            .style(ok_style),
-        btn_cols[0],
-    );
-    f.render_widget(
-        Paragraph::new("[ Cancel ]")
-            .alignment(Alignment::Center)
-            .style(cancel_style),
-        btn_cols[1],
-    );
+    let ok_selected = modal.field_kind(modal.selected_field) == FieldKind::OkButton;
+    let cancel_selected = modal.field_kind(modal.selected_field) == FieldKind::CancelButton;
+    render_pill_dialog_button(f, btn_cols[0], "OK", ok_selected, accent_bright, nerd);
+    render_pill_dialog_button(f, btn_cols[1], "Cancel", cancel_selected, accent_bright, nerd);
 
     // Place the terminal's native blinking cursor at the edit position. Every label shares
     // the same prefix width ("  " + CONFIG_LABEL_W + ": "), so the value always starts there.
