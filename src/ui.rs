@@ -565,6 +565,7 @@ pub fn draw(
                         ("q", "quit"),
                     ],
                     app.effective_accent(),
+                    app.use_nerd_icons,
                 )
             } else if matches!(app.main_view, MainView::Search) {
                 if app.search_input_active {
@@ -578,6 +579,7 @@ pub fn draw(
                             ("q", "quit"),
                         ],
                         app.effective_accent(),
+                        app.use_nerd_icons,
                     )
                 } else {
                     hint_line(
@@ -588,6 +590,7 @@ pub fn draw(
                             ("q", "quit"),
                         ],
                         app.effective_accent(),
+                        app.use_nerd_icons,
                     )
                 }
             } else {
@@ -602,6 +605,7 @@ pub fn draw(
                         ("q", "quit"),
                     ],
                     app.effective_accent(),
+                    app.use_nerd_icons,
                 )
             };
             f.render_widget(Paragraph::new(footer), notif_area);
@@ -2127,7 +2131,8 @@ fn shortcut(key: &'static str, desc: &'static str, mid: Color) -> Line<'static> 
 }
 
 /// Builds a styled hint line: keys are rendered as dark-background chips, descriptions beside them.
-fn hint_line(pairs: &[(&str, &str)], accent: Option<[u8; 3]>) -> Line<'static> {
+/// In nerd mode the chips use pill rounded endcaps.
+fn hint_line(pairs: &[(&str, &str)], accent: Option<[u8; 3]>, nerd: bool) -> Line<'static> {
     let dim = mid_accent_color(accent);
     let chip_bg = btn_bg_color(accent);
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -2135,10 +2140,19 @@ fn hint_line(pairs: &[(&str, &str)], accent: Option<[u8; 3]>) -> Line<'static> {
         if i > 0 {
             spans.push(Span::styled("  ", Style::default().fg(dim)));
         }
-        spans.push(Span::styled(
-            format!(" {key} "),
-            Style::default().fg(Color::White).bg(chip_bg),
-        ));
+        if nerd {
+            spans.push(pill_endcap_left(chip_bg, true));
+            spans.push(Span::styled(
+                key.to_string(),
+                Style::default().fg(Color::White).bg(chip_bg),
+            ));
+            spans.push(pill_endcap_right(chip_bg, true));
+        } else {
+            spans.push(Span::styled(
+                format!(" {key} "),
+                Style::default().fg(Color::White).bg(chip_bg),
+            ));
+        }
         spans.push(Span::styled(format!(" {action}"), Style::default().fg(dim)));
     }
     Line::from(spans)
@@ -2738,6 +2752,7 @@ fn draw_full_art_mode(
             ("q", "quit"),
         ],
         app.effective_accent(),
+        app.use_nerd_icons,
     );
     f.render_widget(Paragraph::new(footer), footer_area);
 }
