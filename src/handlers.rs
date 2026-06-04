@@ -135,10 +135,10 @@ fn set_volume_from_click(
     let nv = (frac * 100.0).round() as u8;
     app.player_volumes.insert(pid.to_string(), nv);
     app.volume_pending.insert(pid.to_string(), std::time::Instant::now());
-    if app.active_player.as_deref() == Some(pid) {
-        if let Some(np) = app.now_playing.as_mut() {
-            np.volume = nv;
-        }
+    if app.active_player.as_deref() == Some(pid)
+        && let Some(np) = app.now_playing.as_mut()
+    {
+        np.volume = nv;
     }
     let _ = vol_sync_tx.try_send((pid.to_string(), nv));
 }
@@ -318,17 +318,17 @@ pub async fn handle_mouse_event(
     if app.context_menu.is_some() {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                if let Some(m) = app.context_menu.as_mut() {
-                    if m.selected > 0 {
-                        m.selected -= 1;
-                    }
+                if let Some(m) = app.context_menu.as_mut()
+                    && m.selected > 0
+                {
+                    m.selected -= 1;
                 }
             }
             MouseEventKind::ScrollDown => {
-                if let Some(m) = app.context_menu.as_mut() {
-                    if m.selected + 1 < m.option_count() {
-                        m.selected += 1;
-                    }
+                if let Some(m) = app.context_menu.as_mut()
+                    && m.selected + 1 < m.option_count()
+                {
+                    m.selected += 1;
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
@@ -605,7 +605,7 @@ pub async fn handle_mouse_event(
                             let pids: Vec<String> =
                                 app.players.iter().map(|p| p.playerid.clone()).collect();
                             for pid in &pids {
-                                set_volume_from_click(app, vol_sync_tx, col, bar, &pid);
+                                set_volume_from_click(app, vol_sync_tx, col, bar, pid);
                             }
                             app.players_focus_global = true;
                         } else if col >= vol_str_start_x && col < vol_str_start_x + vol_str_w as u16
@@ -1853,6 +1853,7 @@ fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsCl
     let auto_discover = modal.auto_discover;
     let broadcast_mask = modal.broadcast_mask.trim().to_string();
     let disable_auto_colors = modal.disable_auto_colors;
+    let accent_lightness = modal.accent_lightness;
     let image_protocol = IMAGE_PROTOCOLS[modal.image_protocol_idx].to_string();
     // immutable borrow of modal ends here; mutable borrows below are now allowed
 
@@ -1872,6 +1873,7 @@ fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsCl
             cfg.auto_discover = auto_discover;
             cfg.broadcast_mask = broadcast_mask;
             cfg.disable_auto_colors = disable_auto_colors;
+            cfg.accent_lightness = accent_lightness;
             cfg.image_protocol = image_protocol;
             cfg.username = if username.is_empty() {
                 None
@@ -1889,6 +1891,7 @@ fn apply_config_save(app: &mut App, cfg: &mut config::Config, client: &Arc<LmsCl
                     client.update_credentials(cfg.credentials());
                     app.use_nerd_icons = use_nerd_icons;
                     app.disable_auto_colors = disable_auto_colors;
+                    app.accent_lightness = accent_lightness;
                     app.config_modal = None;
                     app.connection = ConnectionState::Reconnecting;
                     app.players = vec![];
@@ -1931,6 +1934,11 @@ fn activate_config_field(
         FieldKind::ToggleColors => {
             if let Some(m) = app.config_modal.as_mut() {
                 m.disable_auto_colors ^= true;
+            }
+        }
+        FieldKind::SpinnerLightness => {
+            if let Some(m) = app.config_modal.as_mut() {
+                m.accent_lightness = (m.accent_lightness + 5).min(90);
             }
         }
         FieldKind::SelectorProtocol => {
@@ -2097,7 +2105,7 @@ pub fn handle_config_key(
                 activate_config_field(app, selected, cfg, client, tx);
             }
             // Left/Right navigate the field list like Up/Down, except on the image-protocol
-            // selector where they cycle its value (it renders inline "< >" arrows).
+            // selector and accent-lightness spinner where they cycle/adjust the value.
             KeyCode::Left => {
                 let kind = app.config_modal.as_ref().map(|m| m.field_kind(selected));
                 if let Some(FieldKind::SelectorProtocol) = kind
@@ -2108,6 +2116,10 @@ pub fn handle_config_key(
                     } else {
                         modal.image_protocol_idx - 1
                     };
+                } else if let Some(FieldKind::SpinnerLightness) = kind
+                    && let Some(modal) = app.config_modal.as_mut()
+                {
+                    modal.accent_lightness = modal.accent_lightness.saturating_sub(5).max(10);
                 } else if let Some(modal) = app.config_modal.as_mut()
                     && modal.selected_field > 0
                 {
@@ -2121,6 +2133,10 @@ pub fn handle_config_key(
                 {
                     modal.image_protocol_idx =
                         (modal.image_protocol_idx + 1) % IMAGE_PROTOCOLS.len();
+                } else if let Some(FieldKind::SpinnerLightness) = kind
+                    && let Some(modal) = app.config_modal.as_mut()
+                {
+                    modal.accent_lightness = (modal.accent_lightness + 5).min(90);
                 } else if let Some(modal) = app.config_modal.as_mut() {
                     let max = modal.field_count() - 1;
                     if modal.selected_field < max {
@@ -2138,6 +2154,9 @@ pub fn handle_config_key(
                         }
                         Some(FieldKind::ToggleColors) => {
                             modal.disable_auto_colors = !modal.disable_auto_colors
+                        }
+                        Some(FieldKind::SpinnerLightness) => {
+                            modal.accent_lightness = (modal.accent_lightness + 5).min(90);
                         }
                         Some(FieldKind::SelectorProtocol) => {
                             modal.image_protocol_idx =

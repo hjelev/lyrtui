@@ -88,6 +88,7 @@ pub enum FieldKind {
     ScanButton,
     DiscoveredServer(usize), // index into discovered_servers
     ToggleColors,
+    SpinnerLightness,
     SelectorProtocol,
     OkButton,
     CancelButton,
@@ -103,13 +104,15 @@ pub struct ConfigModal {
     pub auto_discover: bool,
     pub broadcast_mask: String,
     pub disable_auto_colors: bool,
+    pub accent_lightness: u8,
     pub image_protocol_idx: usize, // index into IMAGE_PROTOCOLS
     pub discovered_servers: Vec<String>,
     pub is_scanning: bool,
     pub scan_attempted: bool,
     // Field layout: 0=host 1=port 2=username 3=password 4=auto_discover 5=broadcast_mask
     //   6=scan_button 7..=6+N=discovered_servers
-    //   7+N=nerd_icons 8+N=disable_auto_colors 9+N=image_protocol 10+N=OK 11+N=Cancel
+    //   7+N=nerd_icons 8+N=disable_auto_colors 9+N=accent_lightness 10+N=image_protocol
+    //   11+N=OK 12+N=Cancel
     pub selected_field: usize,
     pub editing: bool,
     pub cursor_pos: usize,
@@ -127,6 +130,7 @@ impl ConfigModal {
         auto_discover: bool,
         broadcast_mask: &str,
         disable_auto_colors: bool,
+        accent_lightness: u8,
         image_protocol: &str,
     ) -> Self {
         let image_protocol_idx = IMAGE_PROTOCOLS
@@ -142,6 +146,7 @@ impl ConfigModal {
             auto_discover,
             broadcast_mask: broadcast_mask.to_string(),
             disable_auto_colors,
+            accent_lightness,
             image_protocol_idx,
             discovered_servers: Vec::new(),
             is_scanning: false,
@@ -154,7 +159,7 @@ impl ConfigModal {
     }
 
     pub fn field_count(&self) -> usize {
-        12 + self.discovered_servers.len()
+        13 + self.discovered_servers.len()
     }
 
     pub fn field_kind(&self, idx: usize) -> FieldKind {
@@ -170,8 +175,9 @@ impl ConfigModal {
             i if i >= 7 && i <= 6 + n => FieldKind::DiscoveredServer(i - 7),
             i if i == 7 + n => FieldKind::ToggleNerd,
             i if i == 8 + n => FieldKind::ToggleColors,
-            i if i == 9 + n => FieldKind::SelectorProtocol,
-            i if i == 10 + n => FieldKind::OkButton,
+            i if i == 9 + n => FieldKind::SpinnerLightness,
+            i if i == 10 + n => FieldKind::SelectorProtocol,
+            i if i == 11 + n => FieldKind::OkButton,
             _ => FieldKind::CancelButton,
         }
     }
@@ -373,6 +379,7 @@ pub struct App {
     pub full_art_mode: bool,
     pub accent_color: Option<[u8; 3]>,
     pub disable_auto_colors: bool,
+    pub accent_lightness: u8,
 
     /// True while a background navigation fetch is in-flight (triggers loading indicator in UI).
     pub is_loading: bool,
@@ -474,6 +481,7 @@ impl App {
             full_art_mode: false,
             accent_color: None,
             disable_auto_colors: false,
+            accent_lightness: 65,
             help_scroll: 0,
             help_visible_lines: Cell::new(u16::MAX),
             art_image_size: None,
@@ -513,6 +521,7 @@ impl App {
             None
         } else {
             self.accent_color
+                .map(|c| crate::utils::normalize_accent_lightness(c, self.accent_lightness))
         }
     }
 }

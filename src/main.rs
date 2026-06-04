@@ -152,6 +152,7 @@ async fn run(
         app.focus_sidebar = false;
     }
     app.disable_auto_colors = cfg.disable_auto_colors;
+    app.accent_lightness = cfg.accent_lightness;
     // Compute Now Playing panel height: art column is 18 cols; height = ceil(18 * fw / fh) + 2 borders.
     // art_col_w is the actual cell width the square image fills (inner_h * fh / fw).
     let base_status_height;
@@ -488,6 +489,7 @@ async fn run(
                             cfg.auto_discover,
                             &cfg.broadcast_mask,
                             cfg.disable_auto_colors,
+                            cfg.accent_lightness,
                             &cfg.image_protocol,
                         ));
                     } else {

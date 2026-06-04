@@ -3354,17 +3354,20 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
 }
 
 /// Returns (popup_rect, field_rects) where `field_rects[i]` is the clickable row for config
-/// field index `i` (0=host … 9+N=image-protocol, with N discovered-server rows in between).
+/// field index `i` (0=host … 10+N=image-protocol, with N discovered-server rows in between).
 /// Must mirror `draw_config_modal`'s dynamic layout exactly so click hit-testing lands on the
 /// same rows that are rendered. OK/Cancel are returned by `compute_config_modal_button_rects`.
 pub fn compute_config_modal_rects(area: Rect, n_servers: usize) -> (Rect, Vec<Rect>) {
-    let popup = centered_rect_abs(54, 20 + n_servers as u16, area);
+    let popup = centered_rect_abs(54, 21 + n_servers as u16, area);
     let inner_x = popup.x + 1;
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
-    // Offsets mirror the renderer's constraint rows (top pad=0, divider=5, scan=9):
-    //   host..pass = 1..4, nerd=6, auto=7, mask=8, scan=9,
-    //   discovered servers = 10..9+N, disable-auto-colors = 10+N, image-protocol = 11+N.
+    // Offsets mirror the renderer's constraint rows:
+    //   [0] pad, [1] host, [2] port, [3] username, [4] password,
+    //   [5] auto-discover, [6] broadcast-mask, [7] scan-button,
+    //   [8..7+N] discovered servers, [8+N] divider (not clickable),
+    //   [9+N] nerd-icons, [10+N] disable-auto-colors, [11+N] accent-lightness,
+    //   [12+N] image-protocol.
     let row = |off: u16| Rect::new(inner_x, inner_y + off, inner_w, 1);
     let mut rects = vec![
         row(1), // 0 host
@@ -3379,9 +3382,10 @@ pub fn compute_config_modal_rects(area: Rect, n_servers: usize) -> (Rect, Vec<Re
         rects.push(row(8 + j)); // 7+j discovered server
     }
     // [8+N] divider sits here (not clickable)
-    rects.push(row(9 + n_servers as u16)); // 7+N nerd-icons
+    rects.push(row(9 + n_servers as u16));  // 7+N nerd-icons
     rects.push(row(10 + n_servers as u16)); // 8+N disable-auto-colors
-    rects.push(row(11 + n_servers as u16)); // 9+N image-protocol
+    rects.push(row(11 + n_servers as u16)); // 9+N accent-lightness
+    rects.push(row(12 + n_servers as u16)); // 10+N image-protocol
     (popup, rects)
 }
 
@@ -3767,7 +3771,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     let area = f.area();
     let n_servers = modal.discovered_servers.len();
     // +1 for scan button row, +n_servers for server entries, +1 base for header growth
-    let popup_height = 20u16 + n_servers as u16;
+    let popup_height = 21u16 + n_servers as u16;
     let popup = centered_rect_abs(54, popup_height, area);
 
     f.render_widget(Clear, popup);
@@ -3788,8 +3792,8 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     // Build constraints dynamically:
     // [0] pad | [1] host | [2] port | [3] username | [4] password
     // [5] auto-discover | [6] broadcast-mask | [7] scan-button | [8..7+N] discovered servers
-    // [8+N] divider | [9+N] nerd-icons | [10+N] disable-auto-colors | [11+N] image-protocol
-    // [12+N] error | [13+N] spacer | [14+N] help/buttons
+    // [8+N] divider | [9+N] nerd-icons | [10+N] disable-auto-colors | [11+N] accent-lightness
+    // [12+N] image-protocol | [13+N] error | [14+N] spacer | [15+N] help/buttons
     let mut constraints = vec![
         Constraint::Length(1), // [0] top pad
         Constraint::Length(1), // [1] host
@@ -3806,6 +3810,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         constraints.push(Constraint::Length(1)); // discovered server entry
     }
     constraints.push(Constraint::Length(1)); // disable-auto-colors
+    constraints.push(Constraint::Length(1)); // accent-lightness
     constraints.push(Constraint::Length(1)); // image-protocol
     constraints.push(Constraint::Length(1)); // error
     constraints.push(Constraint::Min(0)); // spacer
@@ -3818,7 +3823,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
 
     // Row indices. Group 1 (above divider): host..password, auto-discover, broadcast-mask,
     // scan-button, then the N discovered-server rows. Divider. Group 2: nerd-icons,
-    // disable-auto-colors, image-protocol. Then error, flexible spacer, buttons.
+    // disable-auto-colors, accent-lightness, image-protocol. Then error, flexible spacer, buttons.
     let row_auto = 5usize;
     let row_mask = 6usize;
     let row_scan = 7usize;
@@ -3826,9 +3831,10 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     let row_divider = 8 + n_servers;
     let row_nerd = 9 + n_servers;
     let row_colors = 10 + n_servers;
-    let row_proto = 11 + n_servers;
-    let row_error = 12 + n_servers;
-    let row_buttons = 14 + n_servers;
+    let row_lightness = 11 + n_servers;
+    let row_proto = 12 + n_servers;
+    let row_error = 13 + n_servers;
+    let row_buttons = 15 + n_servers;
 
     // Text input fields: (label, value, field_index)
     let pass_masked = "*".repeat(modal.password.len());
@@ -4003,6 +4009,35 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         modal.field_kind(modal.selected_field) == FieldKind::ToggleColors,
     );
 
+    // Accent lightness spinner: < NN% >
+    {
+        let is_selected =
+            modal.field_kind(modal.selected_field) == FieldKind::SpinnerLightness;
+        let val_style = if is_selected {
+            Style::default()
+                .fg(accent_bright)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let lbl_style = if is_selected {
+            Style::default().fg(accent_bright)
+        } else {
+            Style::default().fg(accent_mid)
+        };
+        let val_str = format!("{}%", modal.accent_lightness);
+        let line = Line::from(vec![
+            Span::styled(
+                format!("  {:>w$}: ", "Accent lightness", w = CONFIG_LABEL_W),
+                lbl_style,
+            ),
+            Span::styled(if is_selected { "< " } else { "  " }, lbl_style),
+            Span::styled(val_str, val_style),
+            Span::styled(if is_selected { " >" } else { "  " }, lbl_style),
+        ]);
+        f.render_widget(Paragraph::new(line), rows[row_lightness]);
+    }
+
     // Image protocol selector: < protocol >
     {
         let is_selected = modal.field_kind(modal.selected_field) == FieldKind::SelectorProtocol;
@@ -4086,7 +4121,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
 /// last inner row by the layout's flexible spacer, so their position is `popup.height - 2`
 /// regardless of how many discovered-server rows are present.
 pub fn compute_config_modal_button_rects(area: Rect, n_servers: usize) -> (Rect, [Rect; 2]) {
-    let popup = centered_rect_abs(54, 20 + n_servers as u16, area);
+    let popup = centered_rect_abs(54, 21 + n_servers as u16, area);
     let inner_x = popup.x + 1;
     let inner_w = popup.width.saturating_sub(2);
     let btn_y = popup.y + popup.height.saturating_sub(2);

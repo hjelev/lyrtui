@@ -5,7 +5,7 @@
 ___
 
 <p align="center">
-  <a href="https://github.com/hjelev/lyrtui/actions"><img src="https://github.com/hjelev/lyrtui/actions/workflows/release.yml/badge.svg" alt="Build Status"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/v/lyrtui.svg" alt="Crates.io Version"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/d/lyrtui.svg" alt="Crates.io Downloads"></a>&nbsp;<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+<a href="https://github.com/hjelev/lyrtui/actions"><img src="https://github.com/hjelev/lyrtui/actions/workflows/release.yml/badge.svg" alt="Build Status"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/v/lyrtui.svg" alt="Crates.io Version"></a>&nbsp;<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/d/lyrtui.svg?label=crates%20downloads" alt="Crates.io Downloads"></a>&nbsp;<a href="https://github.com/hjelev/lyrtui/releases"><img src="https://img.shields.io/github/downloads/hjelev/lyrtui/total?color=2ea44f&label=github%20downloads" alt="GitHub Downloads"></a>
 </p>
 
 ![lyrtui screenshot](screenshots/screenshot.png)

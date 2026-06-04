@@ -253,6 +253,60 @@ pub fn update_status_height(app: &mut App, term_height: u16, base_height: u16) {
     app.art_col_w = ((inner_h as u32 * fh) / fw).max(4) as u16;
 }
 
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
+    if (max - min).abs() < 1e-6 {
+        return (0.0, 0.0, l);
+    }
+    let d = max - min;
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let h = if (max - r).abs() < 1e-6 {
+        (g - b) / d + if g < b { 6.0 } else { 0.0 }
+    } else if (max - g).abs() < 1e-6 {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    (h / 6.0, s, l)
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    if s < 1e-6 {
+        let v = (l * 255.0).round() as u8;
+        return (v, v, v);
+    }
+    fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
+        if t < 0.0 { t += 1.0; }
+        if t > 1.0 { t -= 1.0; }
+        if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
+        if t < 0.5 { return q; }
+        if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+        p
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let r = (hue_to_rgb(p, q, h + 1.0 / 3.0) * 255.0).round() as u8;
+    let g = (hue_to_rgb(p, q, h) * 255.0).round() as u8;
+    let b = (hue_to_rgb(p, q, h - 1.0 / 3.0) * 255.0).round() as u8;
+    (r, g, b)
+}
+
+/// Normalize an accent color to the given target lightness (0–100), preserving hue and
+/// saturation. Desaturated colors are given a minimum saturation of 0.15 so they don't
+/// become indistinguishable gray blobs at any lightness.
+pub fn normalize_accent_lightness(color: [u8; 3], target_l: u8) -> [u8; 3] {
+    let (h, s, _) = rgb_to_hsl(color[0], color[1], color[2]);
+    let s = s.max(0.15);
+    let l = (target_l as f32 / 100.0).clamp(0.0, 1.0);
+    let (r, g, b) = hsl_to_rgb(h, s, l);
+    [r, g, b]
+}
+
 pub fn main_list_len(app: &App) -> usize {
     if app.full_art_mode {
         return app.queue.len();

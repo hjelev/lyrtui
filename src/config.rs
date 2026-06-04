@@ -24,6 +24,8 @@ pub struct Config {
     pub full_art_mode: bool,
     #[serde(default)]
     pub disable_auto_colors: bool,
+    #[serde(default = "default_accent_lightness")]
+    pub accent_lightness: u8,
     #[serde(default = "default_image_protocol")]
     pub image_protocol: String,
 }
@@ -44,6 +46,10 @@ fn default_broadcast_mask() -> String {
     "255.255.255.255".to_string()
 }
 
+fn default_accent_lightness() -> u8 {
+    65
+}
+
 fn default_image_protocol() -> String {
     "auto".to_string()
 }
@@ -62,6 +68,7 @@ impl Default for Config {
             global_volume_control: false,
             full_art_mode: false,
             disable_auto_colors: false,
+            accent_lightness: default_accent_lightness(),
             image_protocol: default_image_protocol(),
         }
     }
