@@ -1,16 +1,61 @@
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
-use std::time::Duration;
+use std::io::Write;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 pub enum InputEvent {
     Key(KeyEvent),
     Mouse(MouseEvent),
     Resize,
     Tick,
+    /// The input stream is producing a continuous flood of events we drop (a half-closed/EOF
+    /// stdin, a detached session, or garbled escape sequences). Signals the main loop to exit
+    /// cleanly instead of spinning a CPU core at 100%.
+    Disconnected,
+}
+
+/// Cap on same-direction scroll events drained per wheel tick, so a stuck terminal/mouse can't
+/// spin the drain loop indefinitely.
+const MAX_SCROLL_DRAIN: u32 = 64;
+
+/// If a single `poll_event` call reads this many dropped (non-actionable) events without the
+/// tick budget elapsing, the input stream is treated as broken. A real user cannot generate
+/// this many dropped events inside one ~250 ms tick; a half-closed/EOF stdin produces them
+/// instantly and unboundedly.
+const MAX_DROPPED_EVENTS: u32 = 1024;
+
+/// Whether `LYRTUI_DEBUG_EVENTS` is set. Evaluated once; the hot path is a single load when off.
+fn debug_events_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("LYRTUI_DEBUG_EVENTS").is_some())
+}
+
+/// Append a diagnostic line to `<tmp>/lyrtui-events.log` when `LYRTUI_DEBUG_EVENTS` is set.
+/// No-op (single bool check) otherwise. Used to pinpoint a flooding event kind if a hang recurs.
+fn log_event_debug(msg: &str) {
+    if !debug_events_enabled() {
+        return;
+    }
+    let path = std::env::temp_dir().join("lyrtui-events.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{:?} {msg}", std::time::SystemTime::now());
+    }
 }
 
 pub fn poll_event(tick_rate: Duration) -> Result<InputEvent> {
-    if event::poll(tick_rate)? {
+    // Treat `tick_rate` as a hard budget. Events we drop (key Release, focus change, bracketed
+    // paste, partial/garbled escape sequences, EOF spam) return from `event::read` instantly and
+    // do NOT consume the poll timeout. Returning `Tick` on each one would let a continuous stream
+    // bypass the budget and spin the outer loop at 100% CPU, so instead we keep waiting within the
+    // deadline and bail out as `Disconnected` if the stream floods without bound.
+    let deadline = Instant::now() + tick_rate;
+    let mut dropped: u32 = 0;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() || !event::poll(remaining)? {
+            return Ok(InputEvent::Tick);
+        }
         match event::read()? {
             // Filter Release events: on Windows, crossterm emits both Press and Release for each
             // keystroke. Processing Release would cause each key to fire twice (e.g., 'c' opens
@@ -20,8 +65,12 @@ pub fn poll_event(tick_rate: Duration) -> Result<InputEvent> {
             }
             Event::Mouse(m) => {
                 if matches!(m.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
-                    // Drain extra same-direction scroll events the OS sends per wheel tick
-                    while event::poll(Duration::ZERO)? {
+                    // Drain extra same-direction scroll events the OS sends per wheel tick.
+                    // Bounded so a stuck terminal/mouse can't spin this at 100% CPU.
+                    for _ in 0..MAX_SCROLL_DRAIN {
+                        if !event::poll(Duration::ZERO)? {
+                            break;
+                        }
                         match event::read()? {
                             Event::Mouse(next) if next.kind == m.kind => {}
                             _ => break,
@@ -31,10 +80,16 @@ pub fn poll_event(tick_rate: Duration) -> Result<InputEvent> {
                 return Ok(InputEvent::Mouse(m));
             }
             Event::Resize(_, _) => return Ok(InputEvent::Resize),
-            _ => {}
+            other => {
+                dropped += 1;
+                log_event_debug(&format!("dropped #{dropped}: {other:?}"));
+                if dropped >= MAX_DROPPED_EVENTS {
+                    log_event_debug("input stream flooded with dropped events; disconnecting");
+                    return Ok(InputEvent::Disconnected);
+                }
+            }
         }
     }
-    Ok(InputEvent::Tick)
 }
 
 // Actions that map to app behavior

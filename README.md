@@ -187,6 +187,13 @@ Set `use_nerd_icons = true` to enable Nerd Font glyphs in the sidebar, now-playi
 
 lyrtui extracts a dominant color from the current track's album art and uses it as the accent color for the progress bar, UI borders, and scrollbars. No configuration required — it updates automatically when the track changes.
 
+#### Troubleshooting
+
+If the input stream floods with events lyrtui can't act on (e.g. a detached terminal/SSH
+session or garbled escape sequences), the app exits cleanly rather than spinning a CPU core.
+Set `LYRTUI_DEBUG_EVENTS=1` to log dropped-event diagnostics to `<tmpdir>/lyrtui-events.log`
+(e.g. `/tmp/lyrtui-events.log`) for inspection.
+
 ## Architecture
 
 ```

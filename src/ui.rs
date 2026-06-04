@@ -1579,6 +1579,53 @@ fn draw_favourites(
     );
 }
 
+/// Build the `(line1, line2, duration)` tuple for one search-result row: an icon span + white
+/// name on the first line, a `mid`-colored subtitle on the second, and an optional duration.
+fn search_row(
+    icon: &'static str,
+    icon_color: Color,
+    name: String,
+    subtitle: String,
+    duration: Option<String>,
+    mid: Color,
+) -> (Line<'static>, Line<'static>, Option<String>) {
+    (
+        Line::from(vec![
+            Span::styled(icon, Style::default().fg(icon_color)),
+            Span::styled(name, Style::default().fg(Color::White)),
+        ]),
+        Line::from(Span::styled(subtitle, Style::default().fg(mid))),
+        duration,
+    )
+}
+
+/// Render the rounded search input box (icon + query) into `area` and place the caret when
+/// `active`. `border_style` is computed by the caller (the two search views differ there).
+fn render_search_input(
+    f: &mut Frame,
+    area: Rect,
+    query: &str,
+    active: bool,
+    cursor_pos: usize,
+    nerd_icons: bool,
+    border_style: Style,
+) {
+    let search_icon = if nerd_icons { "\u{F002}" } else { "/" }; // nf-fa-search
+    let input = Paragraph::new(format!(" {} {}", search_icon, query))
+        .style(Style::default().fg(Color::White))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(border_style),
+        );
+    f.render_widget(input, area);
+    if active {
+        // prefix inside block: left border(1) + " icon "(3) + cursor_pos
+        f.set_cursor_position((area.x + 1 + 3 + cursor_pos as u16, area.y + 1));
+    }
+}
+
 fn draw_search(
     f: &mut Frame,
     app: &App,
@@ -1615,24 +1662,15 @@ fn draw_search(
     } else {
         Style::default().fg(unfocus_border_color(accent))
     };
-    let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" }; // nf-fa-search
-    let input_text = format!(" {} {}", search_icon, app.search_query);
-    let input = Paragraph::new(input_text)
-        .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(input_border_style),
-        );
-    f.render_widget(input, chunks[0]);
-    if app.search_input_active {
-        // prefix inside block: left border(1) + " icon "(3) + cursor_pos
-        f.set_cursor_position((
-            chunks[0].x + 1 + 3 + app.search_cursor_pos as u16,
-            chunks[0].y + 1,
-        ));
-    }
+    render_search_input(
+        f,
+        chunks[0],
+        &app.search_query,
+        app.search_input_active,
+        app.search_cursor_pos,
+        app.use_nerd_icons,
+        input_border_style,
+    );
 
     // Scope tab bar
     {
@@ -1745,76 +1783,53 @@ fn draw_search(
         render_thumbnail(f, thumbnails, thumb_url.as_deref(), thumb_rect, thumb_bg);
 
         let (line1, line2, duration) = match &app.search_results[vis_i] {
-            SearchResultItem::Artist(a) => (
-                Line::from(vec![
-                    Span::styled(
-                        if app.use_nerd_icons {
-                            "\u{F007} "
-                        } else {
-                            "▸ "
-                        }, // nf-fa-user
-                        Style::default().fg(focus_border_color(accent)),
-                    ),
-                    Span::styled(a.artist.clone(), Style::default().fg(Color::White)),
-                ]),
-                Line::from(Span::styled("artist", Style::default().fg(mid))),
+            SearchResultItem::Artist(a) => search_row(
+                if app.use_nerd_icons { "\u{F007} " } else { "▸ " }, // nf-fa-user
+                focus_border_color(accent),
+                a.artist.clone(),
+                "artist".to_string(),
                 None,
+                mid,
             ),
-            SearchResultItem::Album(alb) => (
-                Line::from(vec![
-                    Span::styled(
-                        if app.use_nerd_icons {
-                            "\u{EDE9} "
-                        } else {
-                            "▸ "
-                        }, // nf-fa-compact_disc
-                        Style::default().fg(focus_border_color(accent)),
-                    ),
-                    Span::styled(alb.album.clone(), Style::default().fg(Color::White)),
-                ]),
-                Line::from(Span::styled(
-                    format!("album  {}", alb.artist.as_deref().unwrap_or("")),
-                    Style::default().fg(mid),
-                )),
+            SearchResultItem::Album(alb) => search_row(
+                if app.use_nerd_icons { "\u{EDE9} " } else { "▸ " }, // nf-fa-compact_disc
+                focus_border_color(accent),
+                alb.album.clone(),
+                format!("album  {}", alb.artist.as_deref().unwrap_or("")),
                 None,
+                mid,
             ),
-            SearchResultItem::Track(t) => (
-                Line::from(vec![
-                    Span::styled(
-                        "▶ ",
-                        Style::default().fg(focus_border_color(accent)),
-                    ),
-                    Span::styled(t.title.clone(), Style::default().fg(Color::White)),
-                ]),
-                Line::from(Span::styled(
-                    t.artist.as_deref().unwrap_or("").to_string(),
-                    Style::default().fg(mid),
-                )),
+            SearchResultItem::Track(t) => search_row(
+                "▶ ",
+                focus_border_color(accent),
+                t.title.clone(),
+                t.artist.as_deref().unwrap_or("").to_string(),
                 t.duration.map(format_duration),
+                mid,
             ),
-            SearchResultItem::Playlist(pl) => (
-                Line::from(vec![
-                    Span::styled("▸ ", Style::default().fg(Color::Rgb(220, 180, 80))),
-                    Span::styled(pl.name.clone(), Style::default().fg(Color::White)),
-                ]),
-                Line::from(Span::styled("playlist", Style::default().fg(mid))),
+            SearchResultItem::Playlist(pl) => search_row(
+                "▸ ",
+                Color::Rgb(220, 180, 80),
+                pl.name.clone(),
+                "playlist".to_string(),
                 None,
+                mid,
             ),
-            SearchResultItem::AppItem(item) => (
-                Line::from(vec![
-                    Span::styled("▸ ", Style::default().fg(Color::Rgb(180, 120, 220))),
-                    Span::styled(item.name.clone(), Style::default().fg(Color::White)),
-                ]),
-                Line::from(Span::styled("app", Style::default().fg(mid))),
+            SearchResultItem::AppItem(item) => search_row(
+                "▸ ",
+                Color::Rgb(180, 120, 220),
+                item.name.clone(),
+                "app".to_string(),
                 None,
+                mid,
             ),
-            SearchResultItem::RadioItem(item) => (
-                Line::from(vec![
-                    Span::styled("▸ ", Style::default().fg(Color::Rgb(100, 180, 220))),
-                    Span::styled(item.name.clone(), Style::default().fg(Color::White)),
-                ]),
-                Line::from(Span::styled("radio", Style::default().fg(mid))),
+            SearchResultItem::RadioItem(item) => search_row(
+                "▸ ",
+                Color::Rgb(100, 180, 220),
+                item.name.clone(),
+                "radio".to_string(),
                 None,
+                mid,
             ),
         };
 
@@ -1898,23 +1913,15 @@ fn draw_app_search(
     } else {
         Style::default().fg(unfocus_border_color(raw_accent))
     };
-    let search_icon = if app.use_nerd_icons { "\u{F002}" } else { "/" };
-    let input_text = format!(" {} {}", search_icon, app.app_search_query);
-    let input = Paragraph::new(input_text)
-        .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(input_border_style),
-        );
-    f.render_widget(input, chunks[0]);
-    if app.app_search_input_active {
-        f.set_cursor_position((
-            chunks[0].x + 1 + 3 + app.app_search_cursor_pos as u16,
-            chunks[0].y + 1,
-        ));
-    }
+    render_search_input(
+        f,
+        chunks[0],
+        &app.app_search_query,
+        app.app_search_input_active,
+        app.app_search_cursor_pos,
+        app.use_nerd_icons,
+        input_border_style,
+    );
 
     let results_area = chunks[1];
 
@@ -2158,6 +2165,26 @@ fn hint_line(pairs: &[(&str, &str)], accent: Option<[u8; 3]>, nerd: bool) -> Lin
     Line::from(spans)
 }
 
+/// Rounded bordered block for the Now Playing panel: left + center titles always, plus an
+/// optional right title (volume/globe), all bordered in `color`.
+fn now_playing_block<'a>(
+    color: Color,
+    left: Line<'a>,
+    center: Line<'a>,
+    right: Option<Line<'a>>,
+) -> Block<'a> {
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(color))
+        .title(left)
+        .title(center);
+    if let Some(right) = right {
+        block = block.title(right);
+    }
+    block
+}
+
 fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut StatefulProtocol>) {
     let player_name = app
         .active_player
@@ -2176,14 +2203,14 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
         Span::styled(format!("{} ", player_name), Style::default().fg(accent)),
     ])
     .alignment(Alignment::Center);
-    let block = if let Some(np) = &app.now_playing {
+    let right_title = app.now_playing.as_ref().map(|np| {
         let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
         let globe = if app.global_volume_control {
             icon_globe(app.use_nerd_icons)
         } else {
             ""
         };
-        let right_title = Line::from(vec![
+        Line::from(vec![
             Span::styled(format!(" {} ", vol_icon), Style::default().fg(mid)),
             Span::styled(format!("{}%", np.volume), Style::default().fg(accent)),
             Span::styled(
@@ -2191,22 +2218,9 @@ fn draw_statusbar(f: &mut Frame, app: &App, area: Rect, album_art: Option<&mut S
                 Style::default().fg(accent),
             ),
         ])
-        .alignment(Alignment::Right);
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(accent))
-            .title(left_title)
-            .title(center_title)
-            .title(right_title)
-    } else {
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(accent))
-            .title(left_title)
-            .title(center_title)
-    };
+        .alignment(Alignment::Right)
+    });
+    let block = now_playing_block(accent, left_title, center_title, right_title);
     let inner = render_bordered_panel(f, block, area);
 
     let Some(np) = &app.now_playing else {
@@ -2698,14 +2712,14 @@ fn draw_full_art_mode(
         Span::styled(format!("{} ", player_name), Style::default().fg(fc)),
     ])
     .alignment(Alignment::Center);
-    let np_block = if let Some(np) = &app.now_playing {
+    let right_title = app.now_playing.as_ref().map(|np| {
         let vol_icon = icon_vol_or_mute(app.use_nerd_icons, np.volume);
         let globe = if app.global_volume_control {
             icon_globe(app.use_nerd_icons)
         } else {
             ""
         };
-        let right_title = Line::from(vec![
+        Line::from(vec![
             Span::styled(format!(" {} ", vol_icon), Style::default().fg(mid)),
             Span::styled(format!("{}%", np.volume), Style::default().fg(fc)),
             Span::styled(
@@ -2713,22 +2727,9 @@ fn draw_full_art_mode(
                 Style::default().fg(fc),
             ),
         ])
-        .alignment(Alignment::Right);
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(fc))
-            .title(left_title)
-            .title(center_title)
-            .title(right_title)
-    } else {
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(fc))
-            .title(left_title)
-            .title(center_title)
-    };
+        .alignment(Alignment::Right)
+    });
+    let np_block = now_playing_block(fc, left_title, center_title, right_title);
     let np_inner = np_block.inner(info_rows[0]);
     f.render_widget(np_block, info_rows[0]);
 

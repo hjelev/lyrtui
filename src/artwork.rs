@@ -39,16 +39,22 @@ pub(crate) fn with_rounded_corners(img: DynamicImage, radius_pct: u32) -> Dynami
     DynamicImage::ImageRgba8(rgba)
 }
 
-pub fn apply_image_protocol(picker: &mut Picker, protocol: &str) {
+/// Apply the configured image protocol to `picker`. `auto_protocol` is the protocol detected at
+/// startup via `Picker::from_query_stdio()`; selecting "auto" restores it so switching back from a
+/// manually-forced (possibly unsupported) protocol re-discovers the best mode without a restart.
+pub fn apply_image_protocol(picker: &mut Picker, protocol: &str, auto_protocol: ProtocolType) {
     match protocol {
         "halfblocks" => picker.set_protocol_type(ProtocolType::Halfblocks),
         "sixel" => picker.set_protocol_type(ProtocolType::Sixel),
         "kitty" => picker.set_protocol_type(ProtocolType::Kitty),
         "iterm2" => picker.set_protocol_type(ProtocolType::Iterm2),
         _ => {
-            // "auto" or unknown: on Windows, terminal graphics protocols aren't supported
+            // "auto" or unknown: restore the protocol detected at startup. On Windows, terminal
+            // graphics protocols aren't supported, so fall back to halfblocks.
             if cfg!(target_os = "windows") {
                 picker.set_protocol_type(ProtocolType::Halfblocks);
+            } else {
+                picker.set_protocol_type(auto_protocol);
             }
         }
     }

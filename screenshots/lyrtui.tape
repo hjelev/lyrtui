@@ -3,30 +3,35 @@ Output lyrtui.gif
 Set FontFamily "JetBrainsMono Nerd Font"
 Set FontSize 14
 Type "cargo run"
+Enter
 
 #My Music
-Enter
 Sleep 1s
-Enter
+Type "1"
 Sleep 1s
-Enter
-Sleep 1s
-Down
+Down 7
 Sleep 2s
-Backspace
-Sleep 1s
-Down
-Sleep 1s
 Enter
-Sleep 1s
-Down
-Sleep 1s
-Enter
-Sleep 0.5s
+Sleep 2s
 Down 5
-Sleep 0.5s
-Enter
+Sleep 1s
+Down 5
 Sleep 2s
+Down 10
+Sleep 2s
+
+# Enter
+# Sleep 2s
+# Down 5
+# Sleep 1s
+# Down 5
+# Sleep 2s
+# Down 10
+# Sleep 2s
+# Enter
+# Sleep 1s
+# Enter
+# Sleep 3s
 
 #Search
 Type "2"
@@ -46,49 +51,49 @@ Sleep 1s
 Enter
 Sleep 3s
 
-#Radio
-Type "3"
-Sleep 1s
-Down
-Sleep 0.5s
-Enter
-Sleep 1s
-Down
-Sleep 0.5s
-Enter
-Sleep 1s
-Down 10
-Sleep 1s
-Down 9
-Sleep 1s
-Enter
-Sleep 1s
-Enter
-Sleep 2s
+# #Radio
+# Type "3"
+# Sleep 1s
+# Down
+# Sleep 0.5s
+# Enter
+# Sleep 1s
+# Down
+# Sleep 0.5s
+# Enter
+# Sleep 1s
+# Down 10
+# Sleep 1s
+# Down 9
+# Sleep 1s
+# Enter
+# Sleep 1s
+# Enter
+# Sleep 2s
 
-#Apps
-Type "4"
-Sleep 1s
-Enter
-Sleep 3s
-#Backspace
-#Sleep 1
-Down
-Sleep 0.5s
-Enter
-Sleep 3s
-Type "Bob Marley"
-Sleep 1s
-Enter
-Sleep 2s
-Down 3
-Sleep 0.5s
-Enter
-Sleep 4s
-Down 20
-Sleep 1s
-Down 10
-Sleep 3s
+# #Apps
+# Type "4"
+# Sleep 1s
+# Enter
+# Sleep 3s
+# #Backspace
+# #Sleep 1
+# Down
+# Sleep 1s
+# Enter
+# Sleep 2s
+# Type "Bob Marley"
+# Sleep 2s
+# Enter
+# Sleep 2s
+# Down 3
+# Sleep 0.5s
+# Enter
+# Sleep 4s
+# Down 20
+# Sleep 1s
+# Down 10
+# Sleep 3s
 
 
 #Type "5"

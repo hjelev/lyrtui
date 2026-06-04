@@ -118,11 +118,13 @@ Config file: ~/.config/lyrtui/config.toml
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     // Picker must be created after EnterAlternateScreen, before reading events.
     let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-    artwork::apply_image_protocol(&mut picker, &cfg.image_protocol);
+    // Remember the auto-detected protocol so switching back to "auto" can restore it at runtime.
+    let auto_protocol = picker.protocol_type();
+    artwork::apply_image_protocol(&mut picker, &cfg.image_protocol, auto_protocol);
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run(&mut terminal, client, cfg, picker).await;
+    let result = run(&mut terminal, client, cfg, picker, auto_protocol).await;
 
     execute!(
         terminal.backend_mut(),
@@ -140,6 +142,7 @@ async fn run(
     client: Arc<LmsClient>,
     cfg: config::Config,
     mut picker: Picker,
+    auto_protocol: ratatui_image::picker::ProtocolType,
 ) -> Result<()> {
     let mut cfg = cfg;
     let (tx, mut rx) = mpsc::channel::<AppMsg>(64);
@@ -426,7 +429,7 @@ async fn run(
                     let prev_protocol = cfg.image_protocol.clone();
                     handlers::handle_config_key(&mut app, key, &mut cfg, &client, &tx);
                     if cfg.image_protocol != prev_protocol {
-                        artwork::apply_image_protocol(&mut picker, &cfg.image_protocol);
+                        artwork::apply_image_protocol(&mut picker, &cfg.image_protocol, auto_protocol);
                         artwork::refresh_album_art(
                             &last_artwork_image,
                             &mut picker,
@@ -553,6 +556,7 @@ async fn run(
                     needs_redraw = true;
                 }
             }
+            InputEvent::Disconnected => break,
         }
 
         // When an overlay closes its Clear widget may overwrite image cells, causing terminals

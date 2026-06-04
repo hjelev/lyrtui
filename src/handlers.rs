@@ -19,6 +19,13 @@ fn point_in(col: u16, row: u16, area: Rect) -> bool {
     col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height
 }
 
+/// Map a clicked terminal `row` to a list index, given the list's first/last inner rows
+/// (`[top, bot)`), the rendered scroll `offset`, and the per-item row height. Returns `None`
+/// when the row is outside the list area.
+fn list_index_at_row(row: u16, top: u16, bot: u16, offset: usize, row_h: u16) -> Option<usize> {
+    (row >= top && row < bot).then(|| offset + (row - top) as usize / row_h as usize)
+}
+
 const HELP_CONTENT_LINES: u16 = 18; // tallest column in draw_help (left); keep in sync
 
 const SEARCH_SCOPES: [SearchScope; 4] = [
@@ -630,13 +637,12 @@ pub async fn handle_mouse_event(
                 app.focus_sidebar = true;
                 let inner_top = sidebar_area.y + 1;
                 let inner_bot = sidebar_area.y + sidebar_area.height.saturating_sub(1);
-                if row >= inner_top && row < inner_bot {
-                    let rel = (row - inner_top) as usize;
-                    let idx = sidebar_state.offset() + rel;
-                    if idx < app.sidebar_items.len() {
-                        app.sidebar_selected = idx;
-                        handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
-                    }
+                if let Some(idx) =
+                    list_index_at_row(row, inner_top, inner_bot, sidebar_state.offset(), 1)
+                    && idx < app.sidebar_items.len()
+                {
+                    app.sidebar_selected = idx;
+                    handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
                 }
             } else if point_in(col, row, main_area) {
                 app.focus_sidebar = false;
@@ -744,44 +750,42 @@ pub async fn handle_mouse_event(
                     }
                     // Results start after border(1) + input(3) + tab(1) = 5 rows from main_area.y
                     let results_top = main_area.y + 5;
-                    if row >= results_top && row < inner_bot {
-                        let rel = (row - results_top) as usize;
-                        let idx = main_state.offset() + rel / 2;
-                        if idx < app.search_results.len() {
-                            let is_double = is_double_click(last_main_click, idx);
-                            *last_main_click = Some((Instant::now(), idx));
-                            app.main_selected = idx;
-                            if is_double || !utils::is_main_item_playable(app) {
-                                handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
-                            } else {
-                                let (add, replace) = utils::compute_parent_labels(app);
-                                app.context_menu = Some(ContextMenu::new(add, replace));
-                            }
-                        }
-                    }
-                    return;
-                }
-
-                if row >= inner_top && row < inner_bot {
-                    let rel = (row - inner_top) as usize;
-                    let row_h = if utils::uses_two_row_layout(&app.main_view) {
-                        2
-                    } else {
-                        1
-                    };
-                    let idx = main_state.offset() + rel / row_h;
-                    if idx < utils::main_list_len(app) {
+                    if let Some(idx) =
+                        list_index_at_row(row, results_top, inner_bot, main_state.offset(), 2)
+                        && idx < app.search_results.len()
+                    {
                         let is_double = is_double_click(last_main_click, idx);
                         *last_main_click = Some((Instant::now(), idx));
-
                         app.main_selected = idx;
-
                         if is_double || !utils::is_main_item_playable(app) {
                             handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
                         } else {
                             let (add, replace) = utils::compute_parent_labels(app);
                             app.context_menu = Some(ContextMenu::new(add, replace));
                         }
+                    }
+                    return;
+                }
+
+                let row_h = if utils::uses_two_row_layout(&app.main_view) {
+                    2
+                } else {
+                    1
+                };
+                if let Some(idx) =
+                    list_index_at_row(row, inner_top, inner_bot, main_state.offset(), row_h)
+                    && idx < utils::main_list_len(app)
+                {
+                    let is_double = is_double_click(last_main_click, idx);
+                    *last_main_click = Some((Instant::now(), idx));
+
+                    app.main_selected = idx;
+
+                    if is_double || !utils::is_main_item_playable(app) {
+                        handle_action(app, Action::Select, client, tx, vol_sync_tx).await;
+                    } else {
+                        let (add, replace) = utils::compute_parent_labels(app);
+                        app.context_menu = Some(ContextMenu::new(add, replace));
                     }
                 }
             }
@@ -3125,39 +3129,40 @@ fn input_delete(s: &mut String, cursor: usize) {
     }
 }
 
+/// Handle a caret/edit key (Char/Backspace/Delete/Left/Right/Home/End) against a text field.
+/// Returns `true` if the key was consumed, `false` if the caller should handle it.
+fn handle_text_edit_key(key: KeyCode, query: &mut String, cursor: &mut usize) -> bool {
+    match key {
+        KeyCode::Char(c) => input_insert(query, cursor, c),
+        KeyCode::Backspace => input_backspace(query, cursor),
+        KeyCode::Delete => input_delete(query, *cursor),
+        KeyCode::Left => {
+            if *cursor > 0 {
+                *cursor -= 1;
+            }
+        }
+        KeyCode::Right => {
+            if *cursor < query.chars().count() {
+                *cursor += 1;
+            }
+        }
+        KeyCode::Home => *cursor = 0,
+        KeyCode::End => *cursor = query.chars().count(),
+        _ => return false,
+    }
+    true
+}
+
 pub async fn handle_search_input_key(
     app: &mut App,
     key: KeyEvent,
     client: &Arc<LmsClient>,
     tx: &mpsc::Sender<AppMsg>,
 ) {
+    if handle_text_edit_key(key.code, &mut app.search_query, &mut app.search_cursor_pos) {
+        return;
+    }
     match key.code {
-        KeyCode::Char(c) => {
-            input_insert(&mut app.search_query, &mut app.search_cursor_pos, c);
-        }
-        KeyCode::Backspace => {
-            input_backspace(&mut app.search_query, &mut app.search_cursor_pos);
-        }
-        KeyCode::Delete => {
-            input_delete(&mut app.search_query, app.search_cursor_pos);
-        }
-        KeyCode::Left => {
-            if app.search_cursor_pos > 0 {
-                app.search_cursor_pos -= 1;
-            }
-        }
-        KeyCode::Right => {
-            let char_len = app.search_query.chars().count();
-            if app.search_cursor_pos < char_len {
-                app.search_cursor_pos += 1;
-            }
-        }
-        KeyCode::Home => {
-            app.search_cursor_pos = 0;
-        }
-        KeyCode::End => {
-            app.search_cursor_pos = app.search_query.chars().count();
-        }
         KeyCode::Enter => {
             if !app.search_query.is_empty() {
                 app.search_results = vec![];
@@ -3200,37 +3205,14 @@ pub async fn handle_app_search_input_key(
     };
     let cmd = cmd.clone();
     let item_id = item_id.clone();
+    if handle_text_edit_key(
+        key.code,
+        &mut app.app_search_query,
+        &mut app.app_search_cursor_pos,
+    ) {
+        return;
+    }
     match key.code {
-        KeyCode::Char(c) => {
-            input_insert(
-                &mut app.app_search_query,
-                &mut app.app_search_cursor_pos,
-                c,
-            );
-        }
-        KeyCode::Backspace => {
-            input_backspace(&mut app.app_search_query, &mut app.app_search_cursor_pos);
-        }
-        KeyCode::Delete => {
-            input_delete(&mut app.app_search_query, app.app_search_cursor_pos);
-        }
-        KeyCode::Left => {
-            if app.app_search_cursor_pos > 0 {
-                app.app_search_cursor_pos -= 1;
-            }
-        }
-        KeyCode::Right => {
-            let char_len = app.app_search_query.chars().count();
-            if app.app_search_cursor_pos < char_len {
-                app.app_search_cursor_pos += 1;
-            }
-        }
-        KeyCode::Home => {
-            app.app_search_cursor_pos = 0;
-        }
-        KeyCode::End => {
-            app.app_search_cursor_pos = app.app_search_query.chars().count();
-        }
         KeyCode::Enter => {
             if !app.app_search_query.is_empty() {
                 app.app_search_results = vec![];

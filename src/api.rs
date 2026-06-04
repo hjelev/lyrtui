@@ -222,15 +222,11 @@ impl LmsClient {
     }
 
     pub async fn get_players(&self) -> Result<Vec<Player>> {
-        let mut result = self
-            .rpc("", &[json!("players"), json!(0), json!(LIMIT_PLAYERS)])
-            .await?;
-        let count = result["count"].as_u64().unwrap_or(0);
-        if count == 0 {
-            return Ok(vec![]);
-        }
-        let players: Vec<Player> = serde_json::from_value(result["players_loop"].take())?;
-        Ok(players)
+        self.fetch_list(
+            &[json!("players"), json!(0), json!(LIMIT_PLAYERS)],
+            "players_loop",
+        )
+        .await
     }
 
     pub async fn get_now_playing(&self, player_id: &str) -> Result<NowPlaying> {
@@ -387,21 +383,17 @@ impl LmsClient {
     }
 
     pub async fn get_popular_albums(&self, limit: usize) -> Result<Vec<Album>> {
-        let mut result = self
-            .rpc(
-                "",
-                &[
-                    json!("albums"),
-                    json!(0),
-                    json!(limit),
-                    json!("sort:new"),
-                    json!("tags:alj"),
-                ],
-            )
-            .await?;
-        let albums: Vec<Album> =
-            serde_json::from_value(result["albums_loop"].take()).unwrap_or_default();
-        Ok(albums)
+        self.fetch_list(
+            &[
+                json!("albums"),
+                json!(0),
+                json!(limit),
+                json!("sort:new"),
+                json!("tags:alj"),
+            ],
+            "albums_loop",
+        )
+        .await
     }
 
     /// Resolve a representative cover-art URL for an artist by looking up the coverid of their
@@ -445,44 +437,43 @@ impl LmsClient {
         .await
     }
 
+    /// Fire-and-forget control RPC: send `params` to `player_id` and discard the result.
+    async fn control(&self, player_id: &str, params: &[Value]) -> Result<()> {
+        self.rpc(player_id, params).await?;
+        Ok(())
+    }
+
     // Playback controls
     pub async fn play(&self, player_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("play")]).await?;
-        Ok(())
+        self.control(player_id, &[json!("play")]).await
     }
 
     pub async fn pause(&self, player_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("pause")]).await?;
-        Ok(())
+        self.control(player_id, &[json!("pause")]).await
     }
 
     pub async fn stop(&self, player_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("stop")]).await?;
-        Ok(())
+        self.control(player_id, &[json!("stop")]).await
     }
 
     pub async fn next(&self, player_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("index"), json!("+1")])
-            .await?;
-        Ok(())
+        self.control(player_id, &[json!("playlist"), json!("index"), json!("+1")])
+            .await
     }
 
     pub async fn prev(&self, player_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("playlist"), json!("index"), json!("-1")])
-            .await?;
-        Ok(())
+        self.control(player_id, &[json!("playlist"), json!("index"), json!("-1")])
+            .await
     }
 
     pub async fn seek(&self, player_id: &str, seconds: f64) -> Result<()> {
-        self.rpc(player_id, &[json!("time"), json!(seconds.max(0.0).floor())])
-            .await?;
-        Ok(())
+        self.control(player_id, &[json!("time"), json!(seconds.max(0.0).floor())])
+            .await
     }
 
     pub async fn set_volume(&self, player_id: &str, volume: u8) -> Result<()> {
-        self.rpc(player_id, &[json!("mixer"), json!("volume"), json!(volume)])
-            .await?;
-        Ok(())
+        self.control(player_id, &[json!("mixer"), json!("volume"), json!(volume)])
+            .await
     }
 
     /// Fetch volume and sync-group info for a player in a single RPC call.
@@ -512,38 +503,33 @@ impl LmsClient {
     }
 
     pub async fn sync_with(&self, player_id: &str, target_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("sync"), json!(target_id)])
-            .await?;
-        Ok(())
+        self.control(player_id, &[json!("sync"), json!(target_id)])
+            .await
     }
 
     pub async fn unsync(&self, player_id: &str) -> Result<()> {
-        self.rpc(player_id, &[json!("sync"), json!("-")]).await?;
-        Ok(())
+        self.control(player_id, &[json!("sync"), json!("-")]).await
     }
 
     pub async fn set_power(&self, player_id: &str, on: bool) -> Result<()> {
-        self.rpc(player_id, &[json!("power"), json!(if on { 1 } else { 0 })])
-            .await?;
-        Ok(())
+        self.control(player_id, &[json!("power"), json!(if on { 1 } else { 0 })])
+            .await
     }
 
     pub async fn set_shuffle(&self, player_id: &str, value: u8) -> Result<()> {
-        self.rpc(
+        self.control(
             player_id,
             &[json!("playlist"), json!("shuffle"), json!(value)],
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     pub async fn set_repeat(&self, player_id: &str, value: u8) -> Result<()> {
-        self.rpc(
+        self.control(
             player_id,
             &[json!("playlist"), json!("repeat"), json!(value)],
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     async fn playlistcontrol(
