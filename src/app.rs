@@ -34,6 +34,36 @@ pub enum LibraryView {
     PopularAlbums,
 }
 
+/// The entries of the "My Music" landing menu, in display order. `ALL` is the single source of
+/// truth for that order, shared by the renderer (`ui::draw_my_music`) and the selection handler
+/// (`handlers::handle_main_select`) so the menu layout and the per-row action can never drift
+/// out of sync. Both sides `match` exhaustively on the variants, so adding or reordering an
+/// entry is compiler-enforced to be reflected in both places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MyMusicEntry {
+    Artists,
+    AlbumArtists,
+    RecentlyPlayedArtists,
+    Albums,
+    PopularAlbums,
+    Tracks,
+    Playlists,
+    Folders,
+}
+
+impl MyMusicEntry {
+    pub const ALL: [MyMusicEntry; 8] = [
+        MyMusicEntry::Artists,
+        MyMusicEntry::AlbumArtists,
+        MyMusicEntry::RecentlyPlayedArtists,
+        MyMusicEntry::Albums,
+        MyMusicEntry::PopularAlbums,
+        MyMusicEntry::Tracks,
+        MyMusicEntry::Playlists,
+        MyMusicEntry::Folders,
+    ];
+}
+
 #[derive(Debug, Clone)]
 pub enum MainView {
     Library(LibraryView),

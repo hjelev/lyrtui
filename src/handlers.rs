@@ -9,7 +9,7 @@ use ratatui::widgets::ListState;
 use crate::api::{FolderItemType, LmsClient};
 use crate::app::{
     App, AppMsg, ConnectionState, ContextMenu, FieldKind, FolderNav, IMAGE_PROTOCOLS, LibraryView,
-    MainView, RadioNav, SearchResultItem, SearchScope, SidebarItem, SyncModal,
+    MainView, MyMusicEntry, RadioNav, SearchResultItem, SearchScope, SidebarItem, SyncModal,
 };
 use crate::discovery;
 use crate::events::Action;
@@ -2254,69 +2254,70 @@ pub fn handle_config_key(
 
 pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
     match app.main_view.clone() {
-        MainView::MyMusic => match app.main_selected {
-            0 => {
-                app.main_view = MainView::Library(LibraryView::Artists);
-                app.main_selected = 0;
-            }
-            1 => {
-                app.main_view = MainView::Library(LibraryView::AlbumArtists);
-                app.main_selected = 0;
-            }
-            2 => {
-                app.is_loading = true;
-                background::load_recent_artists(50, client.clone(), tx.clone());
-                app.main_view = MainView::Library(LibraryView::RecentlyPlayedArtists);
-                app.main_selected = 0;
-            }
-            3 => {
-                app.is_loading = true;
-                background::load_albums(None, client.clone(), tx.clone());
-                app.main_view = MainView::Library(LibraryView::Albums { artist_id: None });
-                app.main_selected = 0;
-            }
-            4 => {
-                app.is_loading = true;
-                background::load_popular_albums(50, client.clone(), tx.clone());
-                app.main_view = MainView::Library(LibraryView::PopularAlbums);
-                app.main_selected = 0;
-            }
-            5 => {
-                app.is_loading = true;
-                background::load_all_tracks(client.clone(), tx.clone());
-                app.main_view = MainView::Library(LibraryView::Tracks { album_id: None });
-                app.main_selected = 0;
-            }
-            6 => {
-                app.is_loading = true;
-                background::load_playlists(client.clone(), tx.clone());
-                app.main_view = MainView::Library(LibraryView::Playlists);
-                app.main_selected = 0;
-            }
-            7 => {
-                app.folder_items = vec![];
-                app.folder_nav_stack = vec![];
-                app.folder_title = "Folders".to_string();
-                app.main_view = MainView::Library(LibraryView::Folder { folder_id: None });
-                app.main_selected = 0;
-                app.is_loading = true;
-                background::load_folder_items(None, client.clone(), tx.clone());
-            }
-            _ => {}
-        },
-        MainView::Library(LibraryView::Artists) => {
-            if let Some(artist) = app.artists.get(app.main_selected) {
-                let id = utils::json_id_to_string(&artist.id);
-                app.is_loading = true;
-                background::load_albums(Some(id.clone()), client.clone(), tx.clone());
-                app.main_view = MainView::Library(LibraryView::Albums {
-                    artist_id: Some(id),
-                });
-                app.main_selected = 0;
+        MainView::MyMusic => {
+            // Map the selected row through the shared MyMusicEntry order (single source of truth
+            // with ui::draw_my_music) rather than matching raw indices.
+            let Some(&entry) = MyMusicEntry::ALL.get(app.main_selected) else {
+                return;
+            };
+            match entry {
+                MyMusicEntry::Artists => {
+                    app.main_view = MainView::Library(LibraryView::Artists);
+                    app.main_selected = 0;
+                }
+                MyMusicEntry::AlbumArtists => {
+                    app.main_view = MainView::Library(LibraryView::AlbumArtists);
+                    app.main_selected = 0;
+                }
+                MyMusicEntry::RecentlyPlayedArtists => {
+                    app.is_loading = true;
+                    background::load_recent_artists(50, client.clone(), tx.clone());
+                    app.main_view = MainView::Library(LibraryView::RecentlyPlayedArtists);
+                    app.main_selected = 0;
+                }
+                MyMusicEntry::Albums => {
+                    app.is_loading = true;
+                    background::load_albums(None, client.clone(), tx.clone());
+                    app.main_view = MainView::Library(LibraryView::Albums { artist_id: None });
+                    app.main_selected = 0;
+                }
+                MyMusicEntry::PopularAlbums => {
+                    app.is_loading = true;
+                    background::load_popular_albums(50, client.clone(), tx.clone());
+                    app.main_view = MainView::Library(LibraryView::PopularAlbums);
+                    app.main_selected = 0;
+                }
+                MyMusicEntry::Tracks => {
+                    app.is_loading = true;
+                    background::load_all_tracks(client.clone(), tx.clone());
+                    app.main_view = MainView::Library(LibraryView::Tracks { album_id: None });
+                    app.main_selected = 0;
+                }
+                MyMusicEntry::Playlists => {
+                    app.is_loading = true;
+                    background::load_playlists(client.clone(), tx.clone());
+                    app.main_view = MainView::Library(LibraryView::Playlists);
+                    app.main_selected = 0;
+                }
+                MyMusicEntry::Folders => {
+                    app.folder_items = vec![];
+                    app.folder_nav_stack = vec![];
+                    app.folder_title = "Folders".to_string();
+                    app.main_view = MainView::Library(LibraryView::Folder { folder_id: None });
+                    app.main_selected = 0;
+                    app.is_loading = true;
+                    background::load_folder_items(None, client.clone(), tx.clone());
+                }
             }
         }
-        MainView::Library(LibraryView::AlbumArtists) => {
-            if let Some(artist) = app.album_artists.get(app.main_selected) {
+        // Both artist lists drill into the same Albums view; they differ only in source vec.
+        MainView::Library(view @ (LibraryView::Artists | LibraryView::AlbumArtists)) => {
+            let artist = if matches!(view, LibraryView::AlbumArtists) {
+                app.album_artists.get(app.main_selected)
+            } else {
+                app.artists.get(app.main_selected)
+            };
+            if let Some(artist) = artist {
                 let id = utils::json_id_to_string(&artist.id);
                 app.is_loading = true;
                 background::load_albums(Some(id.clone()), client.clone(), tx.clone());

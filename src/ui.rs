@@ -1,7 +1,7 @@
 use crate::api::{FolderItemType, NowPlaying, Track};
 use crate::app::{
-    App, ConfigModal, ConnectionState, IMAGE_PROTOCOLS, LibraryView, MainView, SearchResultItem,
-    SearchScope, SidebarItem, SyncModal,
+    App, ConfigModal, ConnectionState, IMAGE_PROTOCOLS, LibraryView, MainView, MyMusicEntry,
+    SearchResultItem, SearchScope, SidebarItem, SyncModal,
 };
 use ratatui::{
     Frame,
@@ -774,6 +774,28 @@ fn draw_main(
     }
 }
 
+/// Display metadata (icon, label, subtitle) for a "My Music" menu entry. The order of the menu
+/// lives in `MyMusicEntry::ALL`; this only maps each entry to how it renders.
+fn my_music_entry_display(
+    entry: MyMusicEntry,
+    nerd: bool,
+) -> (&'static str, &'static str, &'static str) {
+    let (nerd_icon, label, sub) = match entry {
+        MyMusicEntry::Artists => ("\u{F0C0}", "Artists", "your music library by artist"), // nf-fa-users
+        MyMusicEntry::AlbumArtists => ("\u{F2BD}", "Album Artists", "artists with full albums"), // nf-fa-user_circle
+        MyMusicEntry::RecentlyPlayedArtists => {
+            ("\u{F017}", "Recently Played Artists", "artists you played lately") // nf-fa-clock-o
+        }
+        MyMusicEntry::Albums => ("\u{EDE9}", "Albums", "all albums"), // nf-cod-disc
+        MyMusicEntry::PopularAlbums => ("\u{f490}", "Popular Albums", "most recently added albums"), // md-fire
+        MyMusicEntry::Tracks => ("\u{F025}", "Tracks", "all tracks"), // nf-fa-headphones
+        MyMusicEntry::Playlists => ("\u{F0C9}", "Playlists", "saved playlists"), // nf-fa-list
+        MyMusicEntry::Folders => ("\u{F07B}", "Folders", "browse by folder"), // nf-fa-folder
+    };
+    let icon = if nerd { nerd_icon } else { "▸" };
+    (icon, label, sub)
+}
+
 fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     let focused = !app.focus_sidebar;
     let mid = mid_accent_color(app.effective_accent());
@@ -786,36 +808,13 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
         .title_style(Style::default().fg(focus_border_color(app.effective_accent())))
         .title(" My Music ");
 
-    let entries: [(&str, &str, &str); 8] = if app.use_nerd_icons {
-        [
-            ("\u{F0C0}", "Artists", "your music library by artist"),        // nf-fa-users
-            ("\u{F2BD}", "Album Artists", "artists with full albums"),       // nf-fa-user_circle
-            ("\u{F017}", "Recently Played Artists", "artists you played lately"), // nf-fa-clock-o
-            ("\u{EDE9}", "Albums", "all albums"),                           // nf-cod-disc
-            ("\u{f490}", "Popular Albums", "most recently added albums"),    // md-fire
-            ("\u{F025}", "Tracks", "all tracks"),                           // nf-fa-headphones
-            ("\u{F0C9}", "Playlists", "saved playlists"),                   // nf-fa-list
-            ("\u{F07B}", "Folders", "browse by folder"),                    // nf-fa-folder
-        ]
-    } else {
-        [
-            ("▸", "Artists", "your music library by artist"),
-            ("▸", "Album Artists", "artists with full albums"),
-            ("▸", "Recently Played Artists", "artists you played lately"),
-            ("▸", "Albums", "all albums"),
-            ("▸", "Popular Albums", "most recently added albums"),
-            ("▸", "Tracks", "all tracks"),
-            ("▸", "Playlists", "saved playlists"),
-            ("▸", "Folders", "browse by folder"),
-        ]
-    };
-
     let (pill_bg, pill_fg) = pill_colors(focused);
 
-    let items: Vec<ListItem> = entries
+    let items: Vec<ListItem> = MyMusicEntry::ALL
         .iter()
         .enumerate()
-        .map(|(i, (icon, label, sub))| {
+        .map(|(i, &entry)| {
+            let (icon, label, sub) = my_music_entry_display(entry, app.use_nerd_icons);
             if i == app.main_selected {
                 ListItem::new(Line::from(vec![
                     pill_endcap_left(pill_bg, app.use_nerd_icons),
@@ -865,7 +864,7 @@ fn draw_my_music(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     // Vertical scrollbar when the entries don't fit (short terminals). The List widget
     // manages its own offset during render to keep the selection visible, so read it back
     // afterwards and draw the scrollbar on the right border column, matching the browse views.
-    let total = entries.len();
+    let total = MyMusicEntry::ALL.len();
     let visible = area.height.saturating_sub(2) as usize;
     if total > visible {
         let scroll_area = Rect::new(
@@ -1626,6 +1625,29 @@ fn render_search_input(
     }
 }
 
+/// Placeholder text shown when a search view has no results: a spinner-ish loading note, a
+/// prompt before the first query, or a no-matches note. Shared by both search views.
+fn search_empty_msg(loading: bool, query_empty: bool) -> &'static str {
+    if loading {
+        "Searching..."
+    } else if query_empty {
+        "Type a query above and press Enter to search"
+    } else {
+        "No results found"
+    }
+}
+
+/// Render a single-line placeholder message centered vertically in `area`. Used for the
+/// empty/loading states of the search views.
+fn draw_centered_msg(f: &mut Frame, area: Rect, msg: &str, color: Color) {
+    f.render_widget(
+        Paragraph::new(msg.to_string())
+            .style(Style::default().fg(color))
+            .alignment(Alignment::Center),
+        Rect::new(area.x, area.y + area.height / 2, area.width, 1),
+    );
+}
+
 fn draw_search(
     f: &mut Frame,
     app: &App,
@@ -1715,55 +1737,16 @@ fn draw_search(
     let results_area = chunks[2];
 
     if app.search_results.is_empty() {
-        let msg = if app.search_query.is_empty() {
-            "Type a query above and press Enter to search"
-        } else {
-            "No results found"
-        };
-        f.render_widget(
-            Paragraph::new(msg)
-                .style(Style::default().fg(mid))
-                .alignment(Alignment::Center),
-            Rect::new(
-                results_area.x,
-                results_area.y + results_area.height / 2,
-                results_area.width,
-                1,
-            ),
-        );
+        let msg = search_empty_msg(false, app.search_query.is_empty());
+        draw_centered_msg(f, results_area, msg, mid);
         return;
     }
 
     let results_focused = focused && !app.search_input_active;
-    let selected = app.main_selected;
-    let visible = ((results_area.height / 2) as usize).max(1);
     let total = app.search_results.len();
 
-    let offset = sync_scroll_offset(state, selected, visible, total);
-
-    let text_x = results_area.x + THUMB_W + THUMB_SEP;
-    let text_w = results_area
-        .width
-        .saturating_sub(THUMB_W + THUMB_SEP)
-        + u16::from(total > visible);
-
-    for (vis_i, item_i) in (offset..).zip(0usize..) {
-        if vis_i >= total {
-            break;
-        }
-        let y = results_area.y + (item_i as u16) * 2;
-        if y + 1 >= results_area.y + results_area.height {
-            break;
-        }
-
-        let is_sel = vis_i == selected;
-        let (s1, s2) = if is_sel {
-            cursor_styles(results_focused)
-        } else {
-            (Style::default(), Style::default())
-        };
-
-        let thumb_url = match &app.search_results[vis_i] {
+    let make_row = |i: usize| -> RowItem {
+        let thumb_url = match &app.search_results[i] {
             SearchResultItem::Artist(a) => crate::utils::artist_artwork_url(app, &a.id),
             SearchResultItem::Album(alb) => Some(alb.cover_url(base)),
             SearchResultItem::Track(t) => t.id.as_ref().map(|id| {
@@ -1778,11 +1761,8 @@ fn draw_search(
             }
             SearchResultItem::Playlist(_) => None,
         };
-        let thumb_rect = Rect::new(results_area.x, y, THUMB_W, 2);
-        let thumb_bg = thumbnail_bg_color(is_sel, results_focused);
-        render_thumbnail(f, thumbnails, thumb_url.as_deref(), thumb_rect, thumb_bg);
 
-        let (line1, line2, duration) = match &app.search_results[vis_i] {
+        let (line1, line2, duration) = match &app.search_results[i] {
             SearchResultItem::Artist(a) => search_row(
                 if app.use_nerd_icons { "\u{F007} " } else { "▸ " }, // nf-fa-user
                 focus_border_color(accent),
@@ -1833,53 +1813,25 @@ fn draw_search(
             ),
         };
 
-        if let Some(dur) = duration.as_deref().filter(|d| !d.is_empty()) {
-            let dur_w = dur.len() as u16;
-            if dur_w < text_w {
-                let title_w = text_w - dur_w;
-                f.render_widget(
-                    Paragraph::new(line1).style(s1),
-                    Rect::new(text_x, y, title_w, 1),
-                );
-                f.render_widget(
-                    Paragraph::new(dur).style(s2),
-                    Rect::new(text_x + title_w, y, dur_w, 1),
-                );
-            } else {
-                f.render_widget(
-                    Paragraph::new(line1).style(s1),
-                    Rect::new(text_x, y, text_w, 1),
-                );
-            }
-        } else {
-            f.render_widget(
-                Paragraph::new(line1).style(s1),
-                Rect::new(text_x, y, text_w, 1),
-            );
+        RowItem {
+            thumb_url,
+            line1,
+            line2,
+            duration,
         }
-        f.render_widget(
-            Paragraph::new(line2).style(s2),
-            Rect::new(text_x, y + 1, text_w, 1),
-        );
-    }
+    };
 
-    if total > visible {
-        let scroll_area = Rect::new(
-            area.x + area.width.saturating_sub(1),
-            results_area.y,
-            1,
-            results_area.height,
-        );
-        render_scrollbar(
-            f,
-            scroll_area,
-            total.saturating_sub(visible),
-            offset,
-            visible,
-            app.effective_accent(),
-            focused,
-        );
-    }
+    draw_windowed_rows(
+        f,
+        results_area,
+        total,
+        make_row,
+        app.main_selected,
+        results_focused,
+        state,
+        thumbnails,
+        accent,
+    );
 }
 
 fn draw_app_search(
@@ -1926,61 +1878,16 @@ fn draw_app_search(
     let results_area = chunks[1];
 
     if app.app_search_results.is_empty() {
-        let msg = if app.is_loading {
-            "Searching..."
-        } else if app.app_search_query.is_empty() {
-            "Type a query above and press Enter to search"
-        } else {
-            "No results found"
-        };
-        f.render_widget(
-            Paragraph::new(msg)
-                .style(Style::default().fg(mid))
-                .alignment(Alignment::Center),
-            Rect::new(
-                results_area.x,
-                results_area.y + results_area.height / 2,
-                results_area.width,
-                1,
-            ),
-        );
+        let msg = search_empty_msg(app.is_loading, app.app_search_query.is_empty());
+        draw_centered_msg(f, results_area, msg, mid);
         return;
     }
 
     let results_focused = focused && !app.app_search_input_active;
-    let selected = app.main_selected;
-    let visible = ((results_area.height / 2) as usize).max(1);
     let total = app.app_search_results.len();
 
-    let offset = sync_scroll_offset(state, selected, visible, total);
-
-    let text_x = results_area.x + THUMB_W + THUMB_SEP;
-    let text_w = results_area
-        .width
-        .saturating_sub(THUMB_W + THUMB_SEP)
-        + u16::from(total > visible);
-
-    for (vis_i, item_i) in (offset..).zip(0usize..) {
-        if vis_i >= total {
-            break;
-        }
-        let y = results_area.y + (item_i as u16) * 2;
-        if y + 1 >= results_area.y + results_area.height {
-            break;
-        }
-
-        let item = &app.app_search_results[vis_i];
-        let is_sel = vis_i == selected;
-        let (s1, s2) = if is_sel {
-            cursor_styles(results_focused)
-        } else {
-            (Style::default(), Style::default())
-        };
-
-        let thumb_url = item.artwork_url.clone();
-        let thumb_rect = Rect::new(results_area.x, y, THUMB_W, 2);
-        let thumb_bg = thumbnail_bg_color(is_sel, results_focused);
-        render_thumbnail(f, thumbnails, thumb_url.as_deref(), thumb_rect, thumb_bg);
+    let make_row = |i: usize| -> RowItem {
+        let item = &app.app_search_results[i];
 
         // Determine type label and icon from item metadata
         let (icon, type_label, icon_color) = if item.is_audio || item.item_type == "audio" {
@@ -1997,39 +1904,31 @@ fn draw_app_search(
             (icon, item.item_type.as_str(), mid)
         };
 
-        let line1 = Line::from(vec![
-            Span::styled(icon, Style::default().fg(icon_color)),
-            Span::styled(item.name.clone(), Style::default().fg(Color::White)),
-        ]);
-        let line2 = Line::from(Span::styled(type_label, Style::default().fg(mid)));
+        RowItem {
+            thumb_url: item.artwork_url.clone(),
+            line1: Line::from(vec![
+                Span::styled(icon, Style::default().fg(icon_color)),
+                Span::styled(item.name.clone(), Style::default().fg(Color::White)),
+            ]),
+            line2: Line::from(Span::styled(
+                type_label.to_string(),
+                Style::default().fg(mid),
+            )),
+            duration: None,
+        }
+    };
 
-        f.render_widget(
-            Paragraph::new(line1).style(s1),
-            Rect::new(text_x, y, text_w, 1),
-        );
-        f.render_widget(
-            Paragraph::new(line2).style(s2),
-            Rect::new(text_x, y + 1, text_w, 1),
-        );
-    }
-
-    if total > visible {
-        let scroll_area = Rect::new(
-            area.x + area.width.saturating_sub(1),
-            results_area.y,
-            1,
-            results_area.height,
-        );
-        render_scrollbar(
-            f,
-            scroll_area,
-            total.saturating_sub(visible),
-            offset,
-            visible,
-            raw_accent,
-            results_focused,
-        );
-    }
+    draw_windowed_rows(
+        f,
+        results_area,
+        total,
+        make_row,
+        app.main_selected,
+        results_focused,
+        state,
+        thumbnails,
+        raw_accent,
+    );
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
@@ -2784,62 +2683,36 @@ fn breadcrumb_str<'a>(stack: impl Iterator<Item = &'a str>, current: &'a str) ->
     parts.join(" › ")
 }
 
+/// Core windowed renderer for a two-row-per-item list with thumbnails: computes the visible
+/// window, draws each row (thumbnail + line1 with optional right-aligned duration + line2), and
+/// a right-edge scrollbar when the list overflows. Operates on `rows_area` — the already
+/// border-inset rectangle the rows occupy — so callers that own their own block/input chrome
+/// (search views) and the bordered-panel wrapper (`draw_two_row_list`) share one implementation.
+/// The scrollbar lands on the column just past `rows_area` (the panel's right border).
 #[allow(clippy::too_many_arguments)]
-/// Renders a two-row list, building only the rows in the visible window via `make_row`.
-/// `total` is the full item count (drives the title count, scrollbar and bounds); rows are
-/// constructed lazily so list length no longer affects per-frame cost (5k items == 20 items).
-fn draw_two_row_list(
+fn draw_windowed_rows(
     f: &mut Frame,
-    area: Rect,
-    title: &str,
+    rows_area: Rect,
     total: usize,
     make_row: impl Fn(usize) -> RowItem,
     selected: usize,
     focused: bool,
-    is_loading: bool,
     state: &mut ListState,
     thumbnails: &mut HashMap<String, StatefulProtocol>,
     accent: Option<[u8; 3]>,
 ) {
-    let border_style = if focused {
-        Style::default().fg(focus_border_color(accent))
-    } else {
-        Style::default().fg(unfocus_border_color(accent))
-    };
-    let block = styled_block(title, border_style, focus_border_color(accent));
-
-    if total == 0 {
-        state.select(None);
-        let msg = if is_loading {
-            "  Loading..."
-        } else {
-            "(empty)"
-        };
-        f.render_widget(
-            Paragraph::new(msg)
-                .block(block)
-                .style(Style::default().fg(Color::DarkGray)),
-            area,
-        );
-        return;
-    }
-
-    let inner = render_bordered_panel(f, block, area);
-
-    let visible = ((inner.height / 2) as usize).max(1);
-    let needs_scroll = total > visible;
-
+    let visible = ((rows_area.height / 2) as usize).max(1);
     let offset = sync_scroll_offset(state, selected, visible, total);
 
-    let text_x = inner.x + THUMB_W + THUMB_SEP;
-    let text_w = inner.width.saturating_sub(THUMB_W + THUMB_SEP);
+    let text_x = rows_area.x + THUMB_W + THUMB_SEP;
+    let text_w = rows_area.width.saturating_sub(THUMB_W + THUMB_SEP);
 
     for (vis_i, item_i) in (offset..).zip(0usize..) {
         if vis_i >= total {
             break;
         }
-        let y = inner.y + (item_i as u16) * 2;
-        if y + 1 >= inner.y + inner.height {
+        let y = rows_area.y + (item_i as u16) * 2;
+        if y + 1 >= rows_area.y + rows_area.height {
             break;
         }
 
@@ -2852,7 +2725,7 @@ fn draw_two_row_list(
             (Style::default(), Style::default())
         };
 
-        let thumb_rect = Rect::new(inner.x, y, THUMB_W, 2);
+        let thumb_rect = Rect::new(rows_area.x, y, THUMB_W, 2);
         let thumb_bg = thumbnail_bg_color(is_sel, focused);
         render_thumbnail(
             f,
@@ -2892,14 +2765,9 @@ fn draw_two_row_list(
         );
     }
 
-    if needs_scroll {
-        // Place on the right border column; skip the two corner cells
-        let scroll_area = Rect::new(
-            area.x + area.width.saturating_sub(1),
-            area.y + 1,
-            1,
-            area.height.saturating_sub(2),
-        );
+    if total > visible {
+        // Place on the right border column, just past the rows; skip the two corner cells.
+        let scroll_area = Rect::new(rows_area.x + rows_area.width, rows_area.y, 1, rows_area.height);
         render_scrollbar(
             f,
             scroll_area,
@@ -2910,6 +2778,52 @@ fn draw_two_row_list(
             focused,
         );
     }
+}
+
+/// Renders a two-row list, building only the rows in the visible window via `make_row`.
+/// `total` is the full item count (drives the title count, scrollbar and bounds); rows are
+/// constructed lazily so list length no longer affects per-frame cost (5k items == 20 items).
+#[allow(clippy::too_many_arguments)]
+fn draw_two_row_list(
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    total: usize,
+    make_row: impl Fn(usize) -> RowItem,
+    selected: usize,
+    focused: bool,
+    is_loading: bool,
+    state: &mut ListState,
+    thumbnails: &mut HashMap<String, StatefulProtocol>,
+    accent: Option<[u8; 3]>,
+) {
+    let border_style = if focused {
+        Style::default().fg(focus_border_color(accent))
+    } else {
+        Style::default().fg(unfocus_border_color(accent))
+    };
+    let block = styled_block(title, border_style, focus_border_color(accent));
+
+    if total == 0 {
+        state.select(None);
+        let msg = if is_loading {
+            "  Loading..."
+        } else {
+            "(empty)"
+        };
+        f.render_widget(
+            Paragraph::new(msg)
+                .block(block)
+                .style(Style::default().fg(Color::DarkGray)),
+            area,
+        );
+        return;
+    }
+
+    let inner = render_bordered_panel(f, block, area);
+    draw_windowed_rows(
+        f, inner, total, make_row, selected, focused, state, thumbnails, accent,
+    );
 }
 
 /// Render a left/right button pair into `row`, highlighting the one matching
