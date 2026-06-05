@@ -1,7 +1,7 @@
 /target
 
-# Claude Code local settings (machine-specific)
-.claude/settings.local.json
+.claude/
+CLAUDE.md
 
 # Rust backup files
 **/*.rs.bk
