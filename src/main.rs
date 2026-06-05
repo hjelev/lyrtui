@@ -118,6 +118,14 @@ Config file: ~/.config/lyrtui/config.toml
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     // Picker must be created after EnterAlternateScreen, before reading events.
     let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+    // Konsole supports kitty graphics but its DA responses don't trigger from_query_stdio's
+    // detection reliably — override halfblocks to kitty when running inside Konsole.
+    if picker.protocol_type() == ratatui_image::picker::ProtocolType::Halfblocks
+        && (std::env::var_os("KONSOLE_VERSION").is_some()
+            || std::env::var_os("KONSOLE_DBUS_SERVICE").is_some())
+    {
+        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Kitty);
+    }
     // Remember the auto-detected protocol so switching back to "auto" can restore it at runtime.
     let auto_protocol = picker.protocol_type();
     artwork::apply_image_protocol(&mut picker, &cfg.image_protocol, auto_protocol);
