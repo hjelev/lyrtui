@@ -2042,9 +2042,10 @@ fn activate_config_field(
         }
         FieldKind::DiscoveredServer(i) => {
             if let Some(modal) = app.config_modal.as_mut()
-                && let Some(ip) = modal.discovered_servers.get(i).cloned()
+                && let Some((ip, port)) = modal.discovered_servers.get(i).cloned()
             {
                 modal.host = ip;
+                modal.port = port.to_string();
                 modal.selected_field = 0;
             }
         }

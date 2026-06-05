@@ -3933,7 +3933,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     }
 
     // Discovered server entries (fields 7..6+N)
-    for (i, ip) in modal.discovered_servers.iter().enumerate() {
+    for (i, (ip, port)) in modal.discovered_servers.iter().enumerate() {
         let field_idx = 7 + i;
         let is_selected = modal.selected_field == field_idx;
         let (prefix, ip_style, hint) = if is_selected {
@@ -3954,7 +3954,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         };
         let line = Line::from(vec![
             Span::styled(prefix, lbl_style),
-            Span::styled(ip.clone(), ip_style),
+            Span::styled(format!("{}:{}", ip, port), ip_style),
             Span::styled(hint, Style::default().fg(accent_dim)),
         ]);
         f.render_widget(Paragraph::new(line), rows[8 + i]);

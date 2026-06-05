@@ -136,7 +136,7 @@ pub struct ConfigModal {
     pub disable_auto_colors: bool,
     pub accent_lightness: u8,
     pub image_protocol_idx: usize, // index into IMAGE_PROTOCOLS
-    pub discovered_servers: Vec<String>,
+    pub discovered_servers: Vec<(String, u16)>,
     pub is_scanning: bool,
     pub scan_attempted: bool,
     // Field layout: 0=host 1=port 2=username 3=password 4=auto_discover 5=broadcast_mask
@@ -599,5 +599,5 @@ pub enum AppMsg {
     AppSearchResultsLoaded(Vec<RadioItem>),
     #[allow(dead_code)]
     Error(String),
-    DiscoveredServers(Vec<String>),
+    DiscoveredServers(Vec<(String, u16)>),
 }

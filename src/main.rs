@@ -105,10 +105,11 @@ Config file: ~/.config/lyrtui/config.toml
     // Run discovery if this is a first run (no config file) or auto_discover is on.
     let config_file_exists = config::config_path().exists();
     if (!config_file_exists || cfg.auto_discover)
-        && let Some(discovered_ip) =
+        && let Some((discovered_ip, discovered_port)) =
             discovery::discover_lms(&cfg.broadcast_mask, Duration::from_secs(2))
     {
         cfg.host = discovered_ip;
+        cfg.port = discovered_port;
     }
 
     let client = Arc::new(LmsClient::new(cfg.base_url(), cfg.credentials()));
