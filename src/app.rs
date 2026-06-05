@@ -165,13 +165,16 @@ pub struct ConfigModal {
     pub disable_auto_colors: bool,
     pub accent_lightness: u8,
     pub image_protocol_idx: usize, // index into IMAGE_PROTOCOLS
-    pub discovered_servers: Vec<(String, u16)>,
+    pub discovered_servers: Vec<(String, u16, Option<String>)>,
     pub is_scanning: bool,
     pub scan_attempted: bool,
+    pub server_version: Option<String>,
+    pub version_loading: bool,
     // Field layout: 0=host 1=port 2=username 3=password 4=auto_discover 5=broadcast_mask
     //   6=scan_button 7..=6+N=discovered_servers
     //   7+N=nerd_icons 8+N=disable_auto_colors 9+N=accent_lightness 10+N=image_protocol
     //   11+N=OK 12+N=Cancel
+    // (server_version is display-only; not counted in field indices)
     pub selected_field: usize,
     pub editing: bool,
     pub cursor_pos: usize,
@@ -210,6 +213,8 @@ impl ConfigModal {
             discovered_servers: Vec::new(),
             is_scanning: false,
             scan_attempted: false,
+            server_version: None,
+            version_loading: true,
             selected_field: 0,
             editing: false,
             cursor_pos: 0,
@@ -642,5 +647,6 @@ pub enum AppMsg {
     AppSearchResultsLoaded(Vec<RadioItem>),
     #[allow(dead_code)]
     Error(String),
-    DiscoveredServers(Vec<(String, u16)>),
+    DiscoveredServers(Vec<(String, u16, Option<String>)>),
+    CurrentServerVersionLoaded(Option<String>),
 }

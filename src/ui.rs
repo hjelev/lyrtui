@@ -3361,34 +3361,34 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
 /// Must mirror `draw_config_modal`'s dynamic layout exactly so click hit-testing lands on the
 /// same rows that are rendered. OK/Cancel are returned by `compute_config_modal_button_rects`.
 pub fn compute_config_modal_rects(area: Rect, n_servers: usize) -> (Rect, Vec<Rect>) {
-    let popup = centered_rect_abs(54, 21 + n_servers as u16, area);
+    let popup = centered_rect_abs(54, 22 + n_servers as u16, area);
     let inner_x = popup.x + 1;
     let inner_y = popup.y + 1;
     let inner_w = popup.width.saturating_sub(2);
     // Offsets mirror the renderer's constraint rows:
     //   [0] pad, [1] host, [2] port, [3] username, [4] password,
-    //   [5] auto-discover, [6] broadcast-mask, [7] scan-button,
-    //   [8..7+N] discovered servers, [8+N] divider (not clickable),
-    //   [9+N] nerd-icons, [10+N] disable-auto-colors, [11+N] accent-lightness,
-    //   [12+N] image-protocol.
+    //   [5] server-version (display-only), [6] auto-discover, [7] broadcast-mask,
+    //   [8] scan-button, [9..8+N] discovered servers, [9+N] divider (not clickable),
+    //   [10+N] nerd-icons, [11+N] disable-auto-colors, [12+N] accent-lightness,
+    //   [13+N] image-protocol.
     let row = |off: u16| Rect::new(inner_x, inner_y + off, inner_w, 1);
     let mut rects = vec![
         row(1), // 0 host
         row(2), // 1 port
         row(3), // 2 username
         row(4), // 3 password
-        row(5), // 4 auto-discover
-        row(6), // 5 broadcast-mask
-        row(7), // 6 scan-button
+        row(6), // 4 auto-discover (row 5 is the version display, not clickable)
+        row(7), // 5 broadcast-mask
+        row(8), // 6 scan-button
     ];
     for j in 0..n_servers as u16 {
-        rects.push(row(8 + j)); // 7+j discovered server
+        rects.push(row(9 + j)); // 7+j discovered server
     }
-    // [8+N] divider sits here (not clickable)
-    rects.push(row(9 + n_servers as u16));  // 7+N nerd-icons
-    rects.push(row(10 + n_servers as u16)); // 8+N disable-auto-colors
-    rects.push(row(11 + n_servers as u16)); // 9+N accent-lightness
-    rects.push(row(12 + n_servers as u16)); // 10+N image-protocol
+    // [9+N] divider sits here (not clickable)
+    rects.push(row(10 + n_servers as u16)); // 7+N nerd-icons
+    rects.push(row(11 + n_servers as u16)); // 8+N disable-auto-colors
+    rects.push(row(12 + n_servers as u16)); // 9+N accent-lightness
+    rects.push(row(13 + n_servers as u16)); // 10+N image-protocol
     (popup, rects)
 }
 
@@ -3775,7 +3775,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     let area = f.area();
     let n_servers = modal.discovered_servers.len();
     // +1 for scan button row, +n_servers for server entries, +1 base for header growth
-    let popup_height = 21u16 + n_servers as u16;
+    let popup_height = 22u16 + n_servers as u16;
     let popup = centered_rect_abs(54, popup_height, area);
 
     f.render_widget(Clear, popup);
@@ -3795,24 +3795,26 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
 
     // Build constraints dynamically:
     // [0] pad | [1] host | [2] port | [3] username | [4] password
-    // [5] auto-discover | [6] broadcast-mask | [7] scan-button | [8..7+N] discovered servers
-    // [8+N] divider | [9+N] nerd-icons | [10+N] disable-auto-colors | [11+N] accent-lightness
-    // [12+N] image-protocol | [13+N] error | [14+N] spacer | [15+N] help/buttons
+    // [5] server-version (display-only) | [6] auto-discover | [7] broadcast-mask
+    // [8] scan-button | [9..8+N] discovered servers
+    // [9+N] divider | [10+N] nerd-icons | [11+N] disable-auto-colors | [12+N] accent-lightness
+    // [13+N] image-protocol | [14+N] error | [15+N] spacer | [16+N] help/buttons
     let mut constraints = vec![
         Constraint::Length(1), // [0] top pad
         Constraint::Length(1), // [1] host
         Constraint::Length(1), // [2] port
         Constraint::Length(1), // [3] username
         Constraint::Length(1), // [4] password
-        Constraint::Length(1), // [5] divider
-        Constraint::Length(1), // [6] nerd-icons
-        Constraint::Length(1), // [7] auto-discover
-        Constraint::Length(1), // [8] broadcast-mask
-        Constraint::Length(1), // [9] scan-button
+        Constraint::Length(1), // [5] server version (read-only)
+        Constraint::Length(1), // [6] auto-discover
+        Constraint::Length(1), // [7] broadcast-mask
+        Constraint::Length(1), // [8] scan-button
     ];
     for _ in 0..n_servers {
         constraints.push(Constraint::Length(1)); // discovered server entry
     }
+    constraints.push(Constraint::Length(1)); // divider
+    constraints.push(Constraint::Length(1)); // nerd-icons
     constraints.push(Constraint::Length(1)); // disable-auto-colors
     constraints.push(Constraint::Length(1)); // accent-lightness
     constraints.push(Constraint::Length(1)); // image-protocol
@@ -3825,20 +3827,20 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         .constraints(constraints)
         .split(inner);
 
-    // Row indices. Group 1 (above divider): host..password, auto-discover, broadcast-mask,
+    // Row indices. Group 1: host..password, server-version, auto-discover, broadcast-mask,
     // scan-button, then the N discovered-server rows. Divider. Group 2: nerd-icons,
     // disable-auto-colors, accent-lightness, image-protocol. Then error, flexible spacer, buttons.
-    let row_auto = 5usize;
-    let row_mask = 6usize;
-    let row_scan = 7usize;
-    // discovered servers render at rows[8 + i]
-    let row_divider = 8 + n_servers;
-    let row_nerd = 9 + n_servers;
-    let row_colors = 10 + n_servers;
-    let row_lightness = 11 + n_servers;
-    let row_proto = 12 + n_servers;
-    let row_error = 13 + n_servers;
-    let row_buttons = 15 + n_servers;
+    let row_auto = 6usize;
+    let row_mask = 7usize;
+    let row_scan = 8usize;
+    // discovered servers render at rows[9 + i]
+    let row_divider = 9 + n_servers;
+    let row_nerd = 10 + n_servers;
+    let row_colors = 11 + n_servers;
+    let row_lightness = 12 + n_servers;
+    let row_proto = 13 + n_servers;
+    let row_error = 14 + n_servers;
+    let row_buttons = 16 + n_servers;
 
     // Text input fields: (label, value, field_index)
     let pass_masked = "*".repeat(modal.password.len());
@@ -3873,6 +3875,23 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
             Span::styled(value.to_string(), val_style),
         ]);
         f.render_widget(Paragraph::new(line), rows[i + 1]);
+    }
+
+    // Server version row (display-only, rows[5])
+    {
+        let ver_text = if modal.version_loading {
+            "Loading...".to_string()
+        } else {
+            modal.server_version.as_deref().unwrap_or("Unknown").to_string()
+        };
+        let ver_line = Line::from(vec![
+            Span::styled(
+                format!("  {:>w$}: ", "Server version", w = CONFIG_LABEL_W),
+                Style::default().fg(accent_mid),
+            ),
+            Span::styled(ver_text, Style::default().fg(Color::White)),
+        ]);
+        f.render_widget(Paragraph::new(ver_line), rows[5]);
     }
 
     // Divider (separates connection/discovery settings from display settings)
@@ -3987,7 +4006,7 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     }
 
     // Discovered server entries (fields 7..6+N)
-    for (i, (ip, port)) in modal.discovered_servers.iter().enumerate() {
+    for (i, (ip, port, version)) in modal.discovered_servers.iter().enumerate() {
         let field_idx = 7 + i;
         let is_selected = modal.selected_field == field_idx;
         let (prefix, ip_style, hint) = if is_selected {
@@ -4006,12 +4025,13 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
         } else {
             Style::default().fg(accent_mid)
         };
+        let ver_str = version.as_deref().map(|v| format!("  v{}", v)).unwrap_or_default();
         let line = Line::from(vec![
             Span::styled(prefix, lbl_style),
-            Span::styled(format!("{}:{}", ip, port), ip_style),
+            Span::styled(format!("{}:{}{}", ip, port, ver_str), ip_style),
             Span::styled(hint, Style::default().fg(accent_dim)),
         ]);
-        f.render_widget(Paragraph::new(line), rows[8 + i]);
+        f.render_widget(Paragraph::new(line), rows[9 + i]);
     }
 
     render_toggle(

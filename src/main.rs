@@ -498,6 +498,12 @@ async fn run(
                             cfg.accent_lightness,
                             &cfg.image_protocol,
                         ));
+                        let c = client.clone();
+                        let tx2 = tx.clone();
+                        tokio::spawn(async move {
+                            let v = c.get_server_info().await.ok().and_then(|i| i.version);
+                            let _ = tx2.send(AppMsg::CurrentServerVersionLoaded(v)).await;
+                        });
                     } else {
                         let prev_gvc = app.global_volume_control;
                         let prev_art = app.full_art_mode;
@@ -719,6 +725,12 @@ async fn handle_msg(
                 modal.discovered_servers = servers;
                 // Move focus to first discovered server (or back to scan button if none found).
                 modal.selected_field = 7;
+            }
+        }
+        AppMsg::CurrentServerVersionLoaded(v) => {
+            if let Some(modal) = app.config_modal.as_mut() {
+                modal.server_version = v;
+                modal.version_loading = false;
             }
         }
         AppMsg::ArtworkDecoded { .. }

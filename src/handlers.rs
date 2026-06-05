@@ -2097,6 +2097,8 @@ fn activate_config_field(
                 modal.scan_attempted = true;
                 modal.discovered_servers.clear();
                 let mask = modal.broadcast_mask.clone();
+                let username = modal.username.clone();
+                let password = modal.password.clone();
                 let tx2 = tx.clone();
                 tokio::spawn(async move {
                     let servers = tokio::task::spawn_blocking(move || {
@@ -2104,13 +2106,36 @@ fn activate_config_field(
                     })
                     .await
                     .unwrap_or_default();
-                    let _ = tx2.send(AppMsg::DiscoveredServers(servers)).await;
+                    let handles: Vec<_> = servers
+                        .iter()
+                        .map(|(ip, port)| {
+                            let url = format!("http://{}:{}/jsonrpc.js", ip, port);
+                            let creds = if username.is_empty() {
+                                None
+                            } else {
+                                Some((username.clone(), password.clone()))
+                            };
+                            tokio::spawn(async move {
+                                LmsClient::new(url, creds)
+                                    .get_server_info()
+                                    .await
+                                    .ok()
+                                    .and_then(|i| i.version)
+                            })
+                        })
+                        .collect();
+                    let mut with_versions = Vec::with_capacity(servers.len());
+                    for ((ip, port), handle) in servers.into_iter().zip(handles) {
+                        let version = handle.await.unwrap_or(None);
+                        with_versions.push((ip, port, version));
+                    }
+                    let _ = tx2.send(AppMsg::DiscoveredServers(with_versions)).await;
                 });
             }
         }
         FieldKind::DiscoveredServer(i) => {
             if let Some(modal) = app.config_modal.as_mut()
-                && let Some((ip, port)) = modal.discovered_servers.get(i).cloned()
+                && let Some((ip, port, _)) = modal.discovered_servers.get(i).cloned()
             {
                 modal.host = ip;
                 modal.port = port.to_string();
