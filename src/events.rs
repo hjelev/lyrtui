@@ -125,6 +125,7 @@ pub enum Action {
     ScopePrev,
     ScopeNext,
     NavToSidebar(usize),
+    OpenLocalFilter,
     None,
 }
 
@@ -162,6 +163,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         (KeyCode::Tab, _) | (KeyCode::BackTab, _) => Action::ToggleFocus,
         (KeyCode::Char('['), _) => Action::ScopePrev,
         (KeyCode::Char(']'), _) => Action::ScopeNext,
+        (KeyCode::Char('/'), _) => Action::OpenLocalFilter,
         (KeyCode::Char(c @ '1'..='8'), _) => Action::NavToSidebar(c as usize - '1' as usize),
         _ => Action::None,
     }

@@ -6,6 +6,7 @@ mod cli;
 mod config;
 mod discovery;
 mod events;
+mod filter;
 mod handlers;
 mod ui;
 mod utils;
@@ -467,6 +468,8 @@ async fn run(
                     && app.app_search_input_active
                 {
                     handlers::handle_app_search_input_key(&mut app, key, &client, &tx).await;
+                } else if app.local_filter.as_ref().is_some_and(|f| f.editing) {
+                    handlers::handle_local_filter_key(&mut app, key);
                 } else if matches!(app.main_view, MainView::Players)
                     && !app.focus_sidebar
                     && matches!(key.code, crossterm::event::KeyCode::Char('s'))
@@ -587,6 +590,10 @@ async fn run(
             );
             needs_redraw = true;
         }
+
+        // Navigating to a different view drops any active local filter (restores the full list
+        // of the view it was opened on). One check here covers every navigation path.
+        filter::clear_if_view_changed(&mut app);
     }
 
     if app.active_player != cfg.default_player {
@@ -658,6 +665,9 @@ async fn handle_msg(
         AppMsg::QueueLoaded(pid, q) => {
             if app.active_player.as_deref() == Some(pid.as_str()) {
                 app.queue = q;
+                // The now-playing loop reloads the queue periodically; re-apply an active
+                // queue filter so the refresh doesn't discard it.
+                filter::reapply_if_active(app, &MainView::Queue);
             }
         }
         AppMsg::ArtistsLoaded(a) => app.artists = a,

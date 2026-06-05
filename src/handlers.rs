@@ -13,7 +13,7 @@ use crate::app::{
 };
 use crate::discovery;
 use crate::events::Action;
-use crate::{background, config, ui, utils};
+use crate::{background, config, filter, ui, utils};
 
 fn point_in(col: u16, row: u16, area: Rect) -> bool {
     col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height
@@ -646,7 +646,11 @@ pub async fn handle_mouse_event(
                 }
             } else if point_in(col, row, main_area) {
                 app.focus_sidebar = false;
-                let inner_top = main_area.y + 1;
+                // The local-filter box (when active) steals 3 rows off the top of the panel,
+                // pushing the list down. Only filterable views can have it active, so this
+                // offset is always 0 for Players/Search.
+                let filter_off = if app.local_filter.is_some() { 3 } else { 0 };
+                let inner_top = main_area.y + 1 + filter_off;
                 let inner_bot = main_area.y + main_area.height.saturating_sub(1);
 
                 // Players view has a special layout: power buttons + global row on top,
@@ -1476,6 +1480,13 @@ pub async fn handle_action(
                 && app.main_selected == 0
             {
                 app.app_search_input_active = true;
+            } else if app.local_filter.as_ref().is_some_and(|f| !f.editing)
+                && app.main_selected == 0
+            {
+                // At the top of a filtered list, ↑/k re-enters the filter input box.
+                if let Some(f) = &mut app.local_filter {
+                    f.editing = true;
+                }
             } else {
                 app.main_selected = app.main_selected.saturating_sub(1);
             }
@@ -1572,7 +1583,12 @@ pub async fn handle_action(
         }
 
         Action::Back => {
-            if !app.focus_sidebar {
+            if app.local_filter.is_some() {
+                // While a local filter is applied (and not editing — those keys are routed to
+                // handle_local_filter_key upstream), Back/Esc/Backspace clears the filter and
+                // stays on the same view rather than navigating away.
+                filter::clear(app);
+            } else if !app.focus_sidebar {
                 match &app.main_view.clone() {
                     MainView::Library(LibraryView::Tracks { album_id: Some(_) }) => {
                         if let Some(prev) = app.previous_view.take() {
@@ -1816,6 +1832,19 @@ pub async fn handle_action(
             if idx < app.sidebar_items.len() {
                 app.sidebar_selected = idx;
                 activate_sidebar_item(app, client, tx).await;
+            }
+        }
+
+        Action::OpenLocalFilter => {
+            if !utils::has_overlay(app) {
+                if let Some(f) = &mut app.local_filter {
+                    // Re-open editing on the existing query.
+                    f.editing = true;
+                    app.focus_sidebar = false;
+                } else if filter::is_filterable(&app.main_view) {
+                    filter::open(app);
+                    app.focus_sidebar = false;
+                }
             }
         }
 
@@ -3153,6 +3182,36 @@ fn handle_text_edit_key(key: KeyCode, query: &mut String, cursor: &mut usize) ->
         _ => return false,
     }
     true
+}
+
+/// Handle a key while the local panel filter (`/`) box is being edited. Filters live: any text
+/// edit re-derives the filtered list immediately. Routed here from the event loop only when
+/// `app.local_filter` is `Some` and `editing` is true.
+pub fn handle_local_filter_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Enter or ↓ commits: keep the filter applied, move focus down to the (filtered) list.
+        KeyCode::Enter | KeyCode::Down => {
+            if let Some(f) = &mut app.local_filter {
+                f.editing = false;
+            }
+            app.main_selected = 0;
+        }
+        KeyCode::Esc => filter::clear(app),
+        // Backspace on an empty query closes the filter (mirrors typical TUI behavior).
+        KeyCode::Backspace if app.local_filter.as_ref().is_some_and(|f| f.query.is_empty()) => {
+            filter::clear(app);
+        }
+        _ => {
+            let edited = if let Some(f) = &mut app.local_filter {
+                handle_text_edit_key(key.code, &mut f.query, &mut f.cursor)
+            } else {
+                false
+            };
+            if edited {
+                filter::recompute(app);
+            }
+        }
+    }
 }
 
 pub async fn handle_search_input_key(

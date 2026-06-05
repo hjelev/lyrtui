@@ -33,6 +33,7 @@ Browse and search your music library, internet radio, and installed streaming ap
 - **Recently Played Artists** — quickly jump back to artists you've been listening to, sorted by last played
 - **Popular Albums** — browse recently added albums at a glance
 - **Search** your music library (artists, albums, tracks, playlists) — type a query, press Enter, then drill in or play results directly
+- **Local filter** (`/`) — instantly narrow the list you're already viewing (any library list, the queue, radio, apps, favourites). Type to filter live by title and artist; `Esc` or `Backspace` restores the full list, and changing views clears it automatically
 - Browse and play internet radio via Lyrion's radio services (TuneIn, etc.) with full hierarchical navigation
 - Browse and play installed Lyrion apps (Spotify, Deezer, Bandcamp, etc.) with the same hierarchical navigation — shows a **Loading...** indicator while fetching remote content so navigation never blocks
 - View and jump to items in the playback queue
@@ -148,6 +149,7 @@ The action menu can be navigated with `↑`/`↓` (or `j`/`k`), confirmed with `
 | `d` / `Del` | Remove selected item from queue |
 | `x` | Clear queue |
 | `[` / `]` | Cycle search scope prev / next (in Search view) |
+| `/` | Filter the current list — type to narrow live, `Esc` / `Backspace` to clear |
 | `t` | Toggle player power (in Players view) |
 | `Space` | Toggle sync checkbox (in sync modal) |
 | `Tab` | Switch focus between player list and buttons (in sync modal) |

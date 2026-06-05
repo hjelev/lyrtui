@@ -753,6 +753,30 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     }
 }
 
+/// Render the local-filter (`/`) input box. Mirrors the search-view input styling: bright
+/// border while editing, dim once committed. Reuses [`render_search_input`].
+fn render_local_filter_box(f: &mut Frame, app: &App, area: Rect) {
+    let Some(filter) = &app.local_filter else {
+        return;
+    };
+    let accent = app.effective_accent();
+    let border_style = if filter.editing {
+        Style::default().fg(focus_border_color(accent))
+    } else {
+        Style::default().fg(unfocus_border_color(accent))
+    };
+    render_search_input(
+        f,
+        area,
+        " Filter ",
+        &filter.query,
+        filter.editing,
+        filter.cursor,
+        app.use_nerd_icons,
+        border_style,
+    );
+}
+
 fn draw_main(
     f: &mut Frame,
     app: &App,
@@ -761,6 +785,18 @@ fn draw_main(
     thumbnails: &mut HashMap<String, StatefulProtocol>,
     base: &str,
 ) {
+    // When a local filter is active, carve a 3-row input box off the top of the panel; the
+    // per-view list draws (unchanged) into the remaining rect below it.
+    let area = if app.local_filter.is_some() {
+        let parts = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)])
+            .split(area);
+        render_local_filter_box(f, app, parts[0]);
+        parts[1]
+    } else {
+        area
+    };
     match &app.main_view {
         MainView::MyMusic => draw_my_music(f, app, area, state),
         MainView::Library(lib) => draw_library(f, app, area, lib, state, thumbnails, base),
@@ -1601,9 +1637,12 @@ fn search_row(
 
 /// Render the rounded search input box (icon + query) into `area` and place the caret when
 /// `active`. `border_style` is computed by the caller (the two search views differ there).
+/// `title` is drawn on the top border (empty string for no title).
+#[allow(clippy::too_many_arguments)]
 fn render_search_input(
     f: &mut Frame,
     area: Rect,
+    title: &str,
     query: &str,
     active: bool,
     cursor_pos: usize,
@@ -1611,14 +1650,16 @@ fn render_search_input(
     border_style: Style,
 ) {
     let search_icon = if nerd_icons { "\u{F002}" } else { "/" }; // nf-fa-search
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style);
+    if !title.is_empty() {
+        block = block.title(Span::styled(title, border_style));
+    }
     let input = Paragraph::new(format!(" {} {}", search_icon, query))
         .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(border_style),
-        );
+        .block(block);
     f.render_widget(input, area);
     if active {
         // prefix inside block: left border(1) + " icon "(3) + cursor_pos
@@ -1688,6 +1729,7 @@ fn draw_search(
     render_search_input(
         f,
         chunks[0],
+        "",
         &app.search_query,
         app.search_input_active,
         app.search_cursor_pos,
@@ -1869,6 +1911,7 @@ fn draw_app_search(
     render_search_input(
         f,
         chunks[0],
+        "",
         &app.app_search_query,
         app.app_search_input_active,
         app.app_search_cursor_pos,
@@ -1985,6 +2028,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         shortcut("a", "Add selected item to queue", mid),
         shortcut("d / Del", "Remove selected item from queue", mid),
         shortcut("x", "Clear queue", mid),
+        shortcut("/", "Filter current list (Esc / Bksp clears)", mid),
         Line::from(""),
         header("Search"),
         shortcut("[ / ]", "Cycle search scope (prev / next)", mid),

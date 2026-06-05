@@ -31,6 +31,7 @@ The Lyrion Music Server must be running locally on `localhost:9000` for the app 
 | `config.rs` | TOML config load/save (`~/.config/lyrtui/config.toml`) | ~3 KB |
 | `discovery.rs` | UDP broadcast LMS server auto-discovery | ~2 KB |
 | `events.rs` | `crossterm` event polling and translation | ~4 KB |
+| `filter.rs` | Local panel filter (`/`): in-place list filtering with backup/restore | ~6 KB |
 
 ## Architecture
 
@@ -45,6 +46,7 @@ The app is structured around a strict separation between UI and network layers, 
 - **`config.rs`** — `Config` struct (serde/toml). Fields: `host`, `port`, `default_player`, `use_nerd_icons`, `username`, `password`, `auto_discover`, `broadcast_mask`, `global_volume_control`, `full_art_mode`, `disable_auto_colors`, `image_protocol`.
 - **`discovery.rs`** — UDP broadcast scan to find LMS servers on the local network.
 - **`utils.rs`** — `cover_url()`, `artist_artwork_url()`, `folder_id_at()`, `main_list_len()`, `is_track_view()`, and other shared helpers.
+- **`filter.rs`** — the local panel filter (`/`). Filters the current view's list **in place**: the backing Vec is replaced with the matching subset while the full list is stashed in `App::local_filter` (`LocalFilter` + `FilterBackup`) for instant restore. Because the Vec *is* the filtered list, every existing selection/index read stays untouched. `open`/`recompute`/`clear`/`reapply_if_active`/`clear_if_view_changed` centralize all the per-view `match`ing. Keyboard: `/` → `Action::OpenLocalFilter`, live editing routed to `handlers::handle_local_filter_key`; the event loop calls `clear_if_view_changed` each iteration and `reapply_if_active` after `QueueLoaded`.
 
 ## Key Enums
 

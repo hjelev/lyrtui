@@ -22,7 +22,7 @@ pub enum SidebarItem {
     Help,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LibraryView {
     Artists,
     AlbumArtists,
@@ -64,7 +64,7 @@ impl MyMusicEntry {
     ];
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MainView {
     Library(LibraryView),
     MyMusic,
@@ -82,6 +82,35 @@ pub enum MainView {
         cmd: String,
         item_id: Option<String>,
     },
+}
+
+/// State for the local panel filter (`/`). Filters the current right-side list in memory:
+/// the view's backing Vec is replaced with the matching subset while the full list lives in
+/// `backup` for instant restore. See `crate::filter`.
+#[derive(Debug, Clone)]
+pub struct LocalFilter {
+    pub query: String,
+    pub cursor: usize,
+    /// True while the input box is focused and keystrokes edit `query`. After Enter, the
+    /// filter stays applied but focus moves to the (filtered) list.
+    pub editing: bool,
+    /// The view that owns this filter. Used to restore the right Vec and to clear the filter
+    /// when the user navigates to a different view.
+    pub owner: MainView,
+    /// The unfiltered list, kept so `clear` can restore the panel instantly.
+    pub backup: FilterBackup,
+}
+
+/// The full, unfiltered list backing whichever view the local filter is applied to. Grouped
+/// by element type since several views share one (e.g. Artists/AlbumArtists/RecentlyPlayed).
+#[derive(Debug, Clone)]
+pub enum FilterBackup {
+    Artists(Vec<Artist>),
+    Albums(Vec<Album>),
+    Tracks(Vec<Track>),
+    Playlists(Vec<Playlist>),
+    Folder(Vec<FolderItem>),
+    Items(Vec<RadioItem>),
 }
 
 #[derive(Debug, Clone)]
@@ -405,6 +434,9 @@ pub struct App {
     pub app_search_results: Vec<RadioItem>,
     pub app_search_input_active: bool,
 
+    /// Local panel filter (`/`); `None` when inactive. See `crate::filter`.
+    pub local_filter: Option<LocalFilter>,
+
     pub use_nerd_icons: bool,
     pub full_art_mode: bool,
     pub accent_color: Option<[u8; 3]>,
@@ -506,6 +538,7 @@ impl App {
             app_search_cursor_pos: 0,
             app_search_results: vec![],
             app_search_input_active: false,
+            local_filter: None,
             is_loading: false,
             use_nerd_icons: false,
             full_art_mode: false,
