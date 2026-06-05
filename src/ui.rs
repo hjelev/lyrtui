@@ -61,6 +61,13 @@ const BAR_FOCUSED: Color = Color::Rgb(100, 180, 255);
 const BAR_UNFOCUSED: Color = Color::Rgb(60, 80, 110);
 const VOL_BAR_TRACK: Color = Color::Rgb(30, 35, 50);
 
+// Per-type accent colors for search / browse result rows.
+const PLAYLIST_ACCENT: Color = Color::Rgb(220, 180, 80);
+const APP_ITEM_ACCENT: Color = Color::Rgb(180, 120, 220);
+const RADIO_ITEM_ACCENT: Color = Color::Rgb(100, 180, 220);
+// Foreground for the time text painted over the unfilled part of the progress bar.
+const PROGRESS_TEXT_OVERLAY: Color = Color::Rgb(210, 215, 225);
+
 fn accent_to_color(accent: Option<[u8; 3]>) -> Color {
     accent.map(|c| Color::Rgb(c[0], c[1], c[2])).unwrap_or(Color::Yellow)
 }
@@ -275,6 +282,28 @@ fn pill_button(icon: &str, fg: Color, bg: Color, nerd: bool) -> Paragraph<'stati
     }
 }
 
+/// Wrap a row's content spans in the pill cursor: when `selected`, a rounded left endcap before
+/// and a rounded right endcap after; otherwise a single leading space and no trailing cap. This
+/// is the only thing that differs between the focused/unfocused variants of the Players rows.
+fn pill_row_line(
+    selected: bool,
+    pill_bg: Color,
+    nerd: bool,
+    content: Vec<Span<'static>>,
+) -> Line<'static> {
+    let mut spans = Vec::with_capacity(content.len() + 2);
+    if selected {
+        spans.push(pill_endcap_left(pill_bg, nerd));
+    } else {
+        spans.push(Span::raw(" "));
+    }
+    spans.extend(content);
+    if selected {
+        spans.push(pill_endcap_right(pill_bg, nerd));
+    }
+    Line::from(spans)
+}
+
 fn icon_vol(nerd: bool) -> &'static str {
     if nerd { "\u{F028}" } else { "♪" }
 }
@@ -301,6 +330,14 @@ fn icon_player_dot(nerd: bool) -> &'static str {
 
 fn icon_globe(nerd: bool) -> &'static str {
     if nerd { " \u{F0AC}" } else { " ◎" }
+}
+
+fn icon_artist(nerd: bool) -> &'static str {
+    if nerd { "\u{F007} " } else { "▸ " } // nf-fa-user
+}
+
+fn icon_album(nerd: bool) -> &'static str {
+    if nerd { "\u{EDE9} " } else { "▸ " } // nf-fa-compact_disc
 }
 
 /// Returns (pill_bg, pill_fg) for the yazi-style pill selector.
@@ -1311,30 +1348,17 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
     } else {
         mid
     };
-    let global_line = if glob_focused {
-        let mut spans = vec![
-            pill_endcap_left(pill_bg, app.use_nerd_icons),
-            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
-            Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
-            Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
-        ];
-        spans.extend(vol_bar_spans(global_avg, player_bar_w, BAR_FOCUSED, glob_bg, app.use_nerd_icons));
-        spans.push(Span::styled(vol_str.clone(), Style::default().fg(Color::White).bg(glob_bg)));
-        spans.push(pill_endcap_right(pill_bg, app.use_nerd_icons));
-        Line::from(spans)
-    } else {
-        let mut spans = vec![
-            Span::raw(" "),
-            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
-            Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
-            Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
-            Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
-        ];
-        spans.extend(vol_bar_spans(global_avg, player_bar_w, BAR_UNFOCUSED, glob_bg, app.use_nerd_icons));
-        spans.push(Span::styled(vol_str.clone(), Style::default().fg(mid).bg(glob_bg)));
-        Line::from(spans)
-    };
+    let glob_bar_color = if glob_focused { BAR_FOCUSED } else { BAR_UNFOCUSED };
+    let glob_vol_fg = if glob_focused { Color::White } else { mid };
+    let mut glob_content = vec![
+        Span::styled(format!(" {} ", pwr_icon), Style::default().fg(glob_pwr_fg).bg(glob_bg)),
+        Span::styled(" ", Style::default().fg(glob_fg).bg(glob_bg)),
+        Span::styled(checkbox, Style::default().fg(checkbox_color).bg(glob_bg).add_modifier(Modifier::BOLD)),
+        Span::styled(glob_suffix, Style::default().fg(glob_fg).bg(glob_bg)),
+    ];
+    glob_content.extend(vol_bar_spans(global_avg, player_bar_w, glob_bar_color, glob_bg, app.use_nerd_icons));
+    glob_content.push(Span::styled(vol_str, Style::default().fg(glob_vol_fg).bg(glob_bg)));
+    let global_line = pill_row_line(glob_focused, pill_bg, app.use_nerd_icons, glob_content);
     f.render_widget(Paragraph::new(global_line), chunks[0]);
 
     // --- Player list ---
@@ -1431,28 +1455,14 @@ fn draw_players(f: &mut Frame, app: &App, area: Rect, state: &mut ListState) {
             btn_dim_color(accent)
         };
 
-        let line = if is_sel {
-            let mut spans = vec![
-                pill_endcap_left(pill_bg, app.use_nerd_icons),
-                Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
-                Span::styled(label, Style::default().fg(name_fg).bg(row_bg)),
-                Span::styled(" ⇄ ", Style::default().fg(sync_fg).bg(row_bg)),
-            ];
-            spans.extend(vol_bar_spans(vol, bar_w, bar_color, row_bg, app.use_nerd_icons));
-            spans.push(Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)));
-            spans.push(pill_endcap_right(pill_bg, app.use_nerd_icons));
-            Line::from(spans)
-        } else {
-            let mut spans = vec![
-                Span::raw(" "),
-                Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
-                Span::styled(label, Style::default().fg(name_fg).bg(row_bg)),
-                Span::styled(" ⇄ ", Style::default().fg(sync_fg).bg(row_bg)),
-            ];
-            spans.extend(vol_bar_spans(vol, bar_w, bar_color, row_bg, app.use_nerd_icons));
-            spans.push(Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)));
-            Line::from(spans)
-        };
+        let mut content = vec![
+            Span::styled(format!(" {} ", pwr_icon), Style::default().fg(player_pwr_fg).bg(row_bg)),
+            Span::styled(label, Style::default().fg(name_fg).bg(row_bg)),
+            Span::styled(" ⇄ ", Style::default().fg(sync_fg).bg(row_bg)),
+        ];
+        content.extend(vol_bar_spans(vol, bar_w, bar_color, row_bg, app.use_nerd_icons));
+        content.push(Span::styled(vol_str, Style::default().fg(vol_fg).bg(row_bg)));
+        let line = pill_row_line(is_sel, pill_bg, app.use_nerd_icons, content);
         f.render_widget(
             Paragraph::new(line),
             Rect::new(list_area.x, y, list_area.width, 1),
@@ -1807,7 +1817,7 @@ fn draw_search(
 
         let (line1, line2, duration) = match &app.search_results[i] {
             SearchResultItem::Artist(a) => search_row(
-                if app.use_nerd_icons { "\u{F007} " } else { "▸ " }, // nf-fa-user
+                icon_artist(app.use_nerd_icons),
                 focus_border_color(accent),
                 a.artist.clone(),
                 "artist".to_string(),
@@ -1815,7 +1825,7 @@ fn draw_search(
                 mid,
             ),
             SearchResultItem::Album(alb) => search_row(
-                if app.use_nerd_icons { "\u{EDE9} " } else { "▸ " }, // nf-fa-compact_disc
+                icon_album(app.use_nerd_icons),
                 focus_border_color(accent),
                 alb.album.clone(),
                 format!("album  {}", alb.artist.as_deref().unwrap_or("")),
@@ -1832,7 +1842,7 @@ fn draw_search(
             ),
             SearchResultItem::Playlist(pl) => search_row(
                 "▸ ",
-                Color::Rgb(220, 180, 80),
+                PLAYLIST_ACCENT,
                 pl.name.clone(),
                 "playlist".to_string(),
                 None,
@@ -1840,7 +1850,7 @@ fn draw_search(
             ),
             SearchResultItem::AppItem(item) => search_row(
                 "▸ ",
-                Color::Rgb(180, 120, 220),
+                APP_ITEM_ACCENT,
                 item.name.clone(),
                 "app".to_string(),
                 None,
@@ -1848,7 +1858,7 @@ fn draw_search(
             ),
             SearchResultItem::RadioItem(item) => search_row(
                 "▸ ",
-                Color::Rgb(100, 180, 220),
+                RADIO_ITEM_ACCENT,
                 item.name.clone(),
                 "radio".to_string(),
                 None,
@@ -1939,7 +1949,7 @@ fn draw_app_search(
             (icon, "song", accent)
         } else if item.item_type == "playlist" {
             let icon = if app.use_nerd_icons { "  " } else { "▸ " };
-            (icon, "playlist", Color::Rgb(220, 180, 80))
+            (icon, "playlist", PLAYLIST_ACCENT)
         } else if item.has_items {
             let icon = if app.use_nerd_icons { "  " } else { "▸ " };
             (icon, "folder", Color::Rgb(100, 200, 180))
@@ -2531,7 +2541,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 Span::styled(" ".repeat(filled.saturating_sub(1)), Style::default().bg(accent)),
                 inner_cap,
                 Span::styled(" ".repeat(pure_unfilled), Style::default().bg(track_color)),
-                Span::styled(over_unfilled_text, Style::default().bg(track_color).fg(Color::Rgb(210, 215, 225))),
+                Span::styled(over_unfilled_text, Style::default().bg(track_color).fg(PROGRESS_TEXT_OVERLAY)),
                 pill_endcap_right(right_cap_color, true),
             ])
         } else {
@@ -2542,7 +2552,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 Span::styled(" ".repeat(pure_filled), Style::default().bg(accent)),
                 Span::styled(pre_cap, Style::default().bg(accent).fg(Color::Black).add_modifier(Modifier::BOLD)),
                 inner_cap,
-                Span::styled(over_unfilled_text, Style::default().bg(track_color).fg(Color::Rgb(210, 215, 225))),
+                Span::styled(over_unfilled_text, Style::default().bg(track_color).fg(PROGRESS_TEXT_OVERLAY)),
                 pill_endcap_right(right_cap_color, true),
             ])
         }
@@ -2562,7 +2572,7 @@ fn draw_now_playing_info(f: &mut Frame, app: &App, np: &NowPlaying, area: Rect, 
                 over_unfilled_text,
                 Style::default()
                     .bg(track_color)
-                    .fg(Color::Rgb(210, 215, 225)),
+                    .fg(PROGRESS_TEXT_OVERLAY),
             ),
             pill_endcap_right(right_cap_color, app.use_nerd_icons),
         ])

@@ -1362,16 +1362,34 @@ fn toggle_all_players_power(app: &App, client: &Arc<LmsClient>) {
     });
 }
 
+/// Current volume for `pid`, defaulting to 50 when the player hasn't reported one yet.
+fn player_volume_or_default(app: &App, pid: &str) -> u8 {
+    app.player_volumes.get(pid).copied().unwrap_or(50)
+}
+
+/// Record a new local volume for `pid` and queue it for debounced sync to the server:
+/// update the cached volume, mark it locally-pending so polls don't clobber it, and send it
+/// down the volume-sync channel.
+fn bump_player_volume(
+    app: &mut App,
+    pid: &str,
+    nv: u8,
+    now: std::time::Instant,
+    vol_sync_tx: &mpsc::Sender<(String, u8)>,
+) {
+    app.player_volumes.insert(pid.to_string(), nv);
+    app.volume_pending.insert(pid.to_string(), now);
+    let _ = vol_sync_tx.try_send((pid.to_string(), nv));
+}
+
 fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta: i16) {
     let new_vol = |v: u8| -> u8 { ((v as i16) + delta).clamp(0, 100) as u8 };
 
     let now = std::time::Instant::now();
     if app.global_volume_control {
-        for pid in &app.player_ids() {
-            let nv = new_vol(app.player_volumes.get(pid).copied().unwrap_or(50));
-            app.player_volumes.insert(pid.clone(), nv);
-            app.volume_pending.insert(pid.clone(), now);
-            let _ = vol_sync_tx.try_send((pid.clone(), nv));
+        for pid in app.player_ids() {
+            let nv = new_vol(player_volume_or_default(app, &pid));
+            bump_player_volume(app, &pid, nv, now, vol_sync_tx);
         }
         if let Some(active_pid) = app.active_pid()
             && let Some(nv) = app.player_volumes.get(&active_pid).copied()
@@ -1382,31 +1400,25 @@ fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta:
     } else if let MainView::Players = &app.main_view {
         if app.players_focus_global {
             for pid in app.player_ids() {
-                let nv = new_vol(app.player_volumes.get(&pid).copied().unwrap_or(50));
-                app.player_volumes.insert(pid.clone(), nv);
-                app.volume_pending.insert(pid.clone(), now);
-                let _ = vol_sync_tx.try_send((pid, nv));
+                let nv = new_vol(player_volume_or_default(app, &pid));
+                bump_player_volume(app, &pid, nv, now, vol_sync_tx);
             }
         } else if let Some(player) = app.players.get(app.main_selected) {
             let pid = player.playerid.clone();
-            let nv = new_vol(app.player_volumes.get(&pid).copied().unwrap_or(50));
-            app.player_volumes.insert(pid.clone(), nv);
-            app.volume_pending.insert(pid.clone(), now);
+            let nv = new_vol(player_volume_or_default(app, &pid));
+            bump_player_volume(app, &pid, nv, now, vol_sync_tx);
             if app.active_player.as_deref() == Some(&pid)
                 && let Some(np) = app.now_playing.as_mut()
             {
                 np.volume = nv;
             }
-            let _ = vol_sync_tx.try_send((pid, nv));
         }
     } else if let Some(pid) = app.active_pid() {
         let nv = new_vol(app.now_playing.as_ref().map(|n| n.volume).unwrap_or(50));
         if let Some(np) = app.now_playing.as_mut() {
             np.volume = nv;
         }
-        app.player_volumes.insert(pid.clone(), nv);
-        app.volume_pending.insert(pid.clone(), now);
-        let _ = vol_sync_tx.try_send((pid, nv));
+        bump_player_volume(app, &pid, nv, now, vol_sync_tx);
     }
 }
 
@@ -1853,6 +1865,48 @@ pub async fn handle_action(
     false
 }
 
+/// Reset and focus a top-level browse view (Radio/Apps/Favourites) before kicking off its
+/// background load: clear the view's item list, nav stack and title, then set the shared
+/// focus/loading flags. The caller still spawns the appropriate `background::load_*` task.
+fn enter_browse_view(app: &mut App, view: MainView) {
+    match view {
+        MainView::Radio => {
+            app.radio_items.clear();
+            app.radio_nav_stack.clear();
+            app.radio_title = "Radio".to_string();
+        }
+        MainView::Apps => {
+            app.app_items.clear();
+            app.app_nav_stack.clear();
+            app.app_title = "Apps".to_string();
+        }
+        MainView::Favourites => {
+            app.fav_items.clear();
+            app.fav_nav_stack.clear();
+            app.fav_title = "Favourites".to_string();
+        }
+        _ => {}
+    }
+    app.main_view = view;
+    app.focus_sidebar = false;
+    app.is_loading = true;
+}
+
+/// Push the current browse view onto a nav stack so we can return to it after descending into
+/// a child item.
+fn push_nav(
+    stack: &mut Vec<RadioNav>,
+    title: String,
+    items: Vec<crate::api::RadioItem>,
+    selected: usize,
+) {
+    stack.push(RadioNav {
+        title,
+        items,
+        selected,
+    });
+}
+
 async fn activate_sidebar_item(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
     app.main_selected = 0;
     app.players_focus_global = false;
@@ -1863,30 +1917,15 @@ async fn activate_sidebar_item(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc
             app.focus_sidebar = false;
         }
         Some(SidebarItem::Radio) => {
-            app.radio_items = vec![];
-            app.radio_nav_stack = vec![];
-            app.radio_title = "Radio".to_string();
-            app.main_view = MainView::Radio;
-            app.focus_sidebar = false;
-            app.is_loading = true;
+            enter_browse_view(app, MainView::Radio);
             background::load_radio_services(client.clone(), tx.clone());
         }
         Some(SidebarItem::Apps) => {
-            app.app_items = vec![];
-            app.app_nav_stack = vec![];
-            app.app_title = "Apps".to_string();
-            app.main_view = MainView::Apps;
-            app.focus_sidebar = false;
-            app.is_loading = true;
+            enter_browse_view(app, MainView::Apps);
             background::load_app_services(client.clone(), tx.clone());
         }
         Some(SidebarItem::Favourites) => {
-            app.fav_items = vec![];
-            app.fav_nav_stack = vec![];
-            app.fav_title = "Favourites".to_string();
-            app.main_view = MainView::Favourites;
-            app.focus_sidebar = false;
-            app.is_loading = true;
+            enter_browse_view(app, MainView::Favourites);
             background::load_fav_items(
                 app.active_pid().unwrap_or_default(),
                 None,
@@ -2487,12 +2526,12 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                 {
                     let item_id = item.item_id;
                     let pid = app.active_pid().unwrap_or_default();
-                    let nav = RadioNav {
-                        title: app.radio_title.clone(),
-                        items: std::mem::take(&mut app.radio_items),
-                        selected: app.main_selected,
-                    };
-                    app.radio_nav_stack.push(nav);
+                    push_nav(
+                        &mut app.radio_nav_stack,
+                        app.radio_title.clone(),
+                        std::mem::take(&mut app.radio_items),
+                        app.main_selected,
+                    );
                     app.radio_title = item.name;
                     app.main_selected = 0;
                     app.is_loading = true;
@@ -2525,12 +2564,12 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                 {
                     let item_id = item.item_id;
                     let pid = app.active_pid().unwrap_or_default();
-                    let nav = RadioNav {
-                        title: app.app_title.clone(),
-                        items: std::mem::take(&mut app.app_items),
-                        selected: app.main_selected,
-                    };
-                    app.app_nav_stack.push(nav);
+                    push_nav(
+                        &mut app.app_nav_stack,
+                        app.app_title.clone(),
+                        std::mem::take(&mut app.app_items),
+                        app.main_selected,
+                    );
                     app.app_title = item.name;
                     app.main_selected = 0;
                     app.is_loading = true;
@@ -2552,12 +2591,12 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     && item.item_id.is_some()
                 {
                     let pid = app.active_pid().unwrap_or_default();
-                    let nav = RadioNav {
-                        title: app.app_title.clone(),
-                        items: std::mem::take(&mut app.app_items),
-                        selected: 0,
-                    };
-                    app.app_nav_stack.push(nav);
+                    push_nav(
+                        &mut app.app_nav_stack,
+                        app.app_title.clone(),
+                        std::mem::take(&mut app.app_items),
+                        0,
+                    );
                     app.app_title = item.name.clone();
                     app.main_selected = 0;
                     app.is_loading = true;
@@ -2588,12 +2627,12 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     && let Some(item_id) = item.item_id.clone()
                 {
                     let pid = app.active_pid().unwrap_or_default();
-                    let nav = RadioNav {
-                        title: app.fav_title.clone(),
-                        items: std::mem::take(&mut app.fav_items),
-                        selected: app.main_selected,
-                    };
-                    app.fav_nav_stack.push(nav);
+                    push_nav(
+                        &mut app.fav_nav_stack,
+                        app.fav_title.clone(),
+                        std::mem::take(&mut app.fav_items),
+                        app.main_selected,
+                    );
                     app.fav_title = item.name;
                     app.main_selected = 0;
                     app.is_loading = true;

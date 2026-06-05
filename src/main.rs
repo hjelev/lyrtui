@@ -158,14 +158,10 @@ async fn run(
     let (tx, mut rx) = mpsc::channel::<AppMsg>(64);
     let (vol_sync_tx, mut vol_sync_rx) = mpsc::channel::<(String, u8)>(32);
     let mut app = App::new(cfg.default_player.clone());
-    app.use_nerd_icons = cfg.use_nerd_icons;
-    app.global_volume_control = cfg.global_volume_control;
-    app.full_art_mode = cfg.full_art_mode;
+    app.apply_config(&cfg);
     if app.full_art_mode {
         app.focus_sidebar = false;
     }
-    app.disable_auto_colors = cfg.disable_auto_colors;
-    app.accent_lightness = cfg.accent_lightness;
     // Compute Now Playing panel height: art column is 18 cols; height = ceil(18 * fw / fh) + 2 borders.
     // art_col_w is the actual cell width the square image fills (inner_h * fh / fw).
     let base_status_height;
@@ -405,24 +401,19 @@ async fn run(
                     let target_w = (crate::ui::THUMB_W as u32 * fw as u32).max(1);
                     let target_h = (2u32 * fh as u32).max(1);
                     tokio::spawn(async move {
-                        match c.fetch_image_bytes(&u).await {
-                            Ok(bytes) => match image::load_from_memory(&bytes) {
-                                Ok(img) => {
-                                    let small = img.resize(
-                                        target_w,
-                                        target_h,
-                                        image::imageops::FilterType::Triangle,
-                                    );
-                                    // Fully resize+encode the protocol off the UI thread so the
-                                    // draw call never blocks: at render time needs_resize is None.
-                                    let proto = artwork::encode_thumb_protocol(&pk, small.clone());
-                                    let _ = t.send(AppMsg::ThumbnailLoaded(u, small, proto)).await;
-                                }
-                                Err(_) => {
-                                    let _ = t.send(AppMsg::ThumbnailFailed(u)).await;
-                                }
-                            },
-                            Err(_) => {
+                        match background::fetch_and_decode(&c, &u).await {
+                            Some(img) => {
+                                let small = img.resize(
+                                    target_w,
+                                    target_h,
+                                    image::imageops::FilterType::Triangle,
+                                );
+                                // Fully resize+encode the protocol off the UI thread so the
+                                // draw call never blocks: at render time needs_resize is None.
+                                let proto = artwork::encode_thumb_protocol(&pk, small.clone());
+                                let _ = t.send(AppMsg::ThumbnailLoaded(u, small, proto)).await;
+                            }
+                            None => {
                                 let _ = t.send(AppMsg::ThumbnailFailed(u)).await;
                             }
                         }

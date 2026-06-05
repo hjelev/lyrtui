@@ -9,6 +9,12 @@ const LIMIT_FULL: u64 = 10_000;
 const LIMIT_BROWSE: u64 = 200;
 const LIMIT_QUEUE: u64 = 500;
 
+// LMS `tags:` strings selecting which fields the server returns for each query.
+const TAG_NOW_PLAYING: &str = "tags:adltuKy";
+const TAG_QUEUE: &str = "tags:adltK";
+const TAG_ALBUMS: &str = "tags:alj";
+const TAG_TRACKS: &str = "tags:adlt";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Player {
     pub playerid: String,
@@ -233,7 +239,7 @@ impl LmsClient {
         let result = self
             .rpc(
                 player_id,
-                &[json!("status"), json!("-"), json!(1), json!("tags:adltuKy")],
+                &[json!("status"), json!("-"), json!(1), json!(TAG_NOW_PLAYING)],
             )
             .await?;
 
@@ -270,7 +276,7 @@ impl LmsClient {
         let mut result = self
             .rpc(
                 player_id,
-                &[json!("status"), json!(0), json!(LIMIT_QUEUE), json!("tags:adltK")],
+                &[json!("status"), json!(0), json!(LIMIT_QUEUE), json!(TAG_QUEUE)],
             )
             .await?;
         let tracks = take_array(&mut result, "playlist_loop");
@@ -330,7 +336,7 @@ impl LmsClient {
     }
 
     pub async fn get_albums(&self, artist_id: Option<&str>) -> Result<Vec<Album>> {
-        let mut params = vec![json!("albums"), json!(0), json!(LIMIT_FULL), json!("tags:alj")];
+        let mut params = vec![json!("albums"), json!(0), json!(LIMIT_FULL), json!(TAG_ALBUMS)];
         if let Some(id) = artist_id {
             params.push(json!(format!("artist_id:{}", id)));
         }
@@ -339,7 +345,7 @@ impl LmsClient {
 
     pub async fn get_all_tracks(&self) -> Result<Vec<Track>> {
         self.fetch_list(
-            &[json!("tracks"), json!(0), json!(LIMIT_FULL), json!("tags:adlt")],
+            &[json!("tracks"), json!(0), json!(LIMIT_FULL), json!(TAG_TRACKS)],
             "titles_loop",
         )
         .await
@@ -620,16 +626,7 @@ impl LmsClient {
         cmd: &str,
         item_id: Option<&str>,
     ) -> Result<Vec<RadioItem>> {
-        let mut params = vec![
-            json!(cmd),
-            json!("items"),
-            json!(0),
-            json!(LIMIT_BROWSE),
-            json!("want_url:1"),
-        ];
-        if let Some(id) = item_id {
-            params.push(json!(format!("item_id:{}", id)));
-        }
+        let params = xmlbrowse_params(cmd, item_id, None);
         let result = self.rpc(player_id, &params).await?;
         let items = browse_loop(&result);
         let base = self.server_base_url();
@@ -848,17 +845,7 @@ impl LmsClient {
         item_id: Option<&str>,
         query: &str,
     ) -> Result<Vec<RadioItem>> {
-        let mut params = vec![
-            json!(cmd),
-            json!("items"),
-            json!(0),
-            json!(LIMIT_BROWSE),
-            json!(format!("search:{}", query)),
-            json!("want_url:1"),
-        ];
-        if let Some(id) = item_id {
-            params.push(json!(format!("item_id:{}", id)));
-        }
+        let params = xmlbrowse_params(cmd, item_id, Some(query));
         let result = self.rpc(player_id, &params).await?;
         let base = self.server_base_url();
         Ok(browse_loop(&result)
@@ -886,81 +873,53 @@ impl LmsClient {
             .await
             && !result.is_null()
         {
-            let raw_artists = result["contributors_loop"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            let artists: Vec<Artist> = raw_artists
-                .into_iter()
-                .filter_map(|v| {
-                    let name = v["contributor"].as_str()?.to_string();
-                    let id = v["contributor_id"].clone();
-                    if id.is_null() {
-                        return None;
-                    }
-                    Some(Artist { id, artist: name })
-                })
-                .collect();
+            let artists = map_loop(&result, "contributors_loop", |v| {
+                let name = v["contributor"].as_str()?.to_string();
+                let id = v["contributor_id"].clone();
+                if id.is_null() {
+                    return None;
+                }
+                Some(Artist { id, artist: name })
+            });
 
-            let raw_albums = result["albums_loop"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            let albums: Vec<Album> = raw_albums
-                .into_iter()
-                .filter_map(|v| {
-                    let name = v["album"].as_str()?.to_string();
-                    let id = v["album_id"].clone();
-                    if id.is_null() {
-                        return None;
-                    }
-                    Some(Album {
-                        id,
-                        album: name,
-                        artist: v["artist"].as_str().map(String::from),
-                        artwork_track_id: v["artwork_track_id"].as_str().map(String::from),
-                    })
+            let albums = map_loop(&result, "albums_loop", |v| {
+                let name = v["album"].as_str()?.to_string();
+                let id = v["album_id"].clone();
+                if id.is_null() {
+                    return None;
+                }
+                Some(Album {
+                    id,
+                    album: name,
+                    artist: v["artist"].as_str().map(String::from),
+                    artwork_track_id: v["artwork_track_id"].as_str().map(String::from),
                 })
-                .collect();
+            });
 
-            let raw_tracks = result["tracks_loop"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            let tracks: Vec<Track> = raw_tracks
-                .into_iter()
-                .filter_map(|v| {
-                    let title = v["track"].as_str()?.to_string();
-                    let id = v["track_id"].clone();
-                    if id.is_null() {
-                        return None;
-                    }
-                    Some(Track {
-                        id: Some(id),
-                        title,
-                        artist: v["artist"].as_str().map(String::from),
-                        album: v["album"].as_str().map(String::from),
-                        duration: v["duration"].as_f64(),
-                        artwork_url: None,
-                    })
+            let tracks = map_loop(&result, "tracks_loop", |v| {
+                let title = v["track"].as_str()?.to_string();
+                let id = v["track_id"].clone();
+                if id.is_null() {
+                    return None;
+                }
+                Some(Track {
+                    id: Some(id),
+                    title,
+                    artist: v["artist"].as_str().map(String::from),
+                    album: v["album"].as_str().map(String::from),
+                    duration: v["duration"].as_f64(),
+                    artwork_url: None,
                 })
-                .collect();
+            });
 
-            let raw_playlists = result["playlists_loop"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            let playlists: Vec<Playlist> = raw_playlists
-                .into_iter()
-                .filter_map(|v| {
-                    let name = v["playlist"].as_str()?.to_string();
-                    let id = v["playlist_id"].clone();
-                    if id.is_null() {
-                        return None;
-                    }
-                    Some(Playlist { id, name })
-                })
-                .collect();
+            let playlists = map_loop(&result, "playlists_loop", |v| {
+                let name = v["playlist"].as_str()?.to_string();
+                let id = v["playlist_id"].clone();
+                if id.is_null() {
+                    return None;
+                }
+                Some(Playlist { id, name })
+            });
 
             return Ok((artists, albums, tracks, playlists));
         }
@@ -1110,6 +1069,35 @@ fn parse_browse_item(v: &Value, base: &str, default_cmd: &str) -> RadioItem {
         has_items: v["hasitems"].as_u64().unwrap_or(0) > 0,
         is_audio: v["isaudio"].as_u64().unwrap_or(0) > 0,
     }
+}
+
+/// Build the common XMLBrowser parameter list: `<cmd> items 0 LIMIT_BROWSE want_url:1`,
+/// optionally appending `search:<query>` and `item_id:<id>` tags. The trailing `key:value`
+/// tokens are order-independent named args as far as LMS is concerned.
+fn xmlbrowse_params(cmd: &str, item_id: Option<&str>, search: Option<&str>) -> Vec<Value> {
+    let mut params = vec![
+        json!(cmd),
+        json!("items"),
+        json!(0),
+        json!(LIMIT_BROWSE),
+        json!("want_url:1"),
+    ];
+    if let Some(q) = search {
+        params.push(json!(format!("search:{}", q)));
+    }
+    if let Some(id) = item_id {
+        params.push(json!(format!("item_id:{}", id)));
+    }
+    params
+}
+
+/// Map the JSON array stored under `key` through `f`, dropping `None` results; empty `Vec`
+/// if the key is absent or not an array.
+fn map_loop<T>(result: &Value, key: &str, f: impl Fn(&Value) -> Option<T>) -> Vec<T> {
+    result[key]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(&f).collect())
+        .unwrap_or_default()
 }
 
 /// Consume the array stored under `key`, leaving `Null` behind; empty `Vec` if absent.

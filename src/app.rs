@@ -462,6 +462,16 @@ pub struct App {
 }
 
 impl App {
+    /// Copy the user-configurable settings from `cfg` onto the running app state. Called at
+    /// startup so there is a single place to keep in sync when a new setting is added.
+    pub fn apply_config(&mut self, cfg: &crate::config::Config) {
+        self.use_nerd_icons = cfg.use_nerd_icons;
+        self.global_volume_control = cfg.global_volume_control;
+        self.full_art_mode = cfg.full_art_mode;
+        self.disable_auto_colors = cfg.disable_auto_colors;
+        self.accent_lightness = cfg.accent_lightness;
+    }
+
     pub fn new(default_player: Option<String>) -> Self {
         Self {
             connection: ConnectionState::Reconnecting,

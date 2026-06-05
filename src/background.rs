@@ -8,17 +8,32 @@ use crate::api::{Album, Artist, LmsClient, RadioItem};
 use crate::app::{App, AppMsg, SearchResultItem, SearchScope};
 use crate::utils;
 
+/// Now-playing poll cadence: fast while playing (smooth progress bar), backed off otherwise.
+const POLL_PLAYING_MS: u64 = 500;
+const POLL_IDLE_MS: u64 = 2000;
+/// `color_thief` palette extraction tuning (quality, max colors) for accent detection.
+const PALETTE_QUALITY: u8 = 10;
+const PALETTE_MAX_COLORS: u8 = 5;
+/// Luma window for picking an accent that is neither too dark nor too bright.
+const ACCENT_LUMA_MIN: u32 = 70;
+const ACCENT_LUMA_MAX: u32 = 210;
+
+/// Fetch image bytes for `url` and decode them; `None` on any network or decode error.
+pub async fn fetch_and_decode(client: &LmsClient, url: &str) -> Option<image::DynamicImage> {
+    let bytes = client.fetch_image_bytes(url).await.ok()?;
+    image::load_from_memory(&bytes).ok()
+}
+
 pub fn spawn_artwork_fetch(url: String, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
     tokio::spawn(async move {
         let ok = async {
-            let bytes = client.fetch_image_bytes(&url).await.ok()?;
-            let img = image::load_from_memory(&bytes).ok()?;
+            let img = fetch_and_decode(&client, &url).await?;
             let rgb = img.to_rgb8();
             let accent = color_thief::get_palette(
                 rgb.as_raw(),
                 color_thief::ColorFormat::Rgb,
-                10,
-                5,
+                PALETTE_QUALITY,
+                PALETTE_MAX_COLORS,
             )
             .ok()
             .and_then(|colors| {
@@ -27,7 +42,7 @@ pub fn spawn_artwork_fetch(url: String, client: Arc<LmsClient>, tx: mpsc::Sender
                     .find(|c| {
                         let luma = (c.r as u32 * 299 + c.g as u32 * 587 + c.b as u32 * 114)
                             / 1000;
-                        (70..=210).contains(&luma)
+                        (ACCENT_LUMA_MIN..=ACCENT_LUMA_MAX).contains(&luma)
                     })
                     .or_else(|| colors.first())
                     .map(|c| [c.r, c.g, c.b])
@@ -93,7 +108,7 @@ pub fn start_now_playing_loop(
             }
             // Poll fast while playing (keeps the progress bar smooth); back off when paused,
             // stopped, or unreachable to cut idle network/CPU.
-            let delay = if playing { 500 } else { 2000 };
+            let delay = if playing { POLL_PLAYING_MS } else { POLL_IDLE_MS };
             tokio::time::sleep(Duration::from_millis(delay)).await;
         }
     })
