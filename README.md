@@ -33,7 +33,7 @@ Browse and search your music library, internet radio, and installed streaming ap
 - **Recently Played Artists** — quickly jump back to artists you've been listening to, sorted by last played
 - **Popular Albums** — browse recently added albums at a glance
 - **Search** your music library (artists, albums, tracks, playlists) — type a query, press Enter, then drill in or play results directly
-- **Local filter** (`/`) — instantly narrow the list you're already viewing (any library list, the queue, radio, apps, favourites). Type to filter live by title and artist; `Esc` or `Backspace` restores the full list, and changing views clears it automatically
+- **Local filter** (`/`) — instantly narrow the list you're already viewing (any library list, the queue, radio, apps, favourites). Type to filter live by title and artist; `Esc` or `Backspace` restores the full list, and changing views clears it automatically. Press `↓` to move from the filter box into the results; press `↑` at the top result to jump back into the filter box
 - Browse and play internet radio via Lyrion's radio services (TuneIn, etc.) with full hierarchical navigation
 - Browse and play installed Lyrion apps (Spotify, Deezer, Bandcamp, etc.) with the same hierarchical navigation — shows a **Loading...** indicator while fetching remote content so navigation never blocks
 - View and jump to items in the playback queue
@@ -53,13 +53,17 @@ Browse and search your music library, internet radio, and installed streaming ap
 - In-app help screen listing all keyboard shortcuts
 - Graceful reconnection when the server is unreachable
 
-## Requirements
+<details>
+<summary><strong>Requirements</strong></summary>
 
 - A running [Lyrion Music Server](https://lyrion.org/) instance (default: `localhost:9000`)
 - (Optional) A terminal that supports one of: Kitty graphics protocol, Sixel, iTerm2 inline images, or Unicode halfblocks (fallback — works everywhere)
 - (Optional) A [Nerd Font](https://www.nerdfonts.com/) for icon support
 
-## Installation
+</details>
+
+<details>
+<summary><strong>Installation</strong></summary>
 
 ### Install via cargo
 
@@ -80,11 +84,15 @@ cd lyrtui
 cargo build --release
 # binary at: target/release/lyrtui
 ```
+
 ### Use the installer from the releases page
 
-[releases page](https://github.com/hjelev/lyrtui/releases) and run it. This will place the `lyrtui` binary in your system's PATH.
+Download from the [releases page](https://github.com/hjelev/lyrtui/releases) and run it. This will place the `lyrtui` binary in your system's PATH.
 
-## Usage
+</details>
+
+<details>
+<summary><strong>Usage</strong></summary>
 
 ```sh
 lyrtui
@@ -118,6 +126,7 @@ The playback flags (`-p`, `--next`, `--prev`) target the `default_player` from c
 - **Double-click** on a playable item — play immediately (skips the menu)
 - **Left click** on a navigable item (artist, album, radio folder) — navigate into it (unchanged)
 - **Left click** on the volume `−` / `+` buttons in the now-playing bar — adjust volume
+- **Left click** on a player's volume bar (Players view) — mute / unmute that player
 - **Left click** on the shuffle or repeat buttons — toggle/cycle playback mode
 - **Left click** on the progress bar (now-playing bar or full-art view) — seek the current track to that position
 - **Left click** on the `Navigation` title (sidebar header) — opens a "Close lyrtui?" confirmation dialog (mouse-only; pressing `q` still quits directly)
@@ -150,11 +159,14 @@ The action menu can be navigated with `↑`/`↓` (or `j`/`k`), confirmed with `
 | `x` | Clear queue |
 | `[` / `]` | Cycle search scope prev / next (in Search view) |
 | `/` | Filter the current list — type to narrow live, `Esc` / `Backspace` to clear |
+| `m` | Mute / unmute the active player |
 | `t` | Toggle player power (in Players view) |
+| `1`–`9` | Jump directly to sidebar section by number |
 | `Space` | Toggle sync checkbox (in sync modal) |
 | `Tab` | Switch focus between player list and buttons (in sync modal) |
 | `c` | Open server configuration |
 | `` ` `` | Toggle Big Art Mode |
+| `Esc` `Esc` | Double-press from any sub-section to jump back to the root navigation |
 | `q` / `Ctrl-c` | Quit |
 
 ### Configuration
@@ -173,6 +185,7 @@ full_art_mode = false        # start in big art mode
 disable_auto_colors = false  # disable adaptive theme colors extracted from album art
 username = ""                # optional: LMS HTTP basic auth username
 password = ""                # optional: LMS HTTP basic auth password
+image_protocol = ""          # override image protocol: "kitty", "sixel", "iterm2", "halfblocks", or "" (auto-detect)
 ```
 
 You can edit this file directly or use the in-app config menu (`c`). Inside the menu, move between fields with the arrow keys (`↑`/`↓` or `←`/`→`) or `Tab`, press `Enter` to edit a field or toggle a setting, and click any field with the mouse. On the image-protocol selector, `←`/`→` cycle the value.
@@ -196,7 +209,10 @@ session or garbled escape sequences), the app exits cleanly rather than spinning
 Set `LYRTUI_DEBUG_EVENTS=1` to log dropped-event diagnostics to `<tmpdir>/lyrtui-events.log`
 (e.g. `/tmp/lyrtui-events.log`) for inspection.
 
-## Architecture
+</details>
+
+<details>
+<summary><strong>Architecture</strong></summary>
 
 ```
 main.rs       — terminal init, event loop, action dispatch
@@ -215,11 +231,15 @@ Network I/O runs in background `tokio` tasks and communicates with the UI via `m
 
 Large lists (e.g. *All Tracks* with thousands of entries) stay fluid because navigation cost is independent of both list length and image-load state: each frame builds only the rows in the visible window (not the whole list), and cover-art thumbnails are fully resized **and** encoded for the terminal in the background task before being handed to the UI — so the draw call never blocks waiting for an image to encode.
 
-## Development
+</details>
+
+<details>
+<summary><strong>Development</strong></summary>
 
 ```sh
 cargo run           # run with debug build
 cargo test          # run tests
-cargo clippy -- -D warnings   # lint
-cargo fmt           # format
+cargo clippy -- -D warnings   # lint (warnings are errors)
 ```
+
+</details>
