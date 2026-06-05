@@ -388,7 +388,7 @@ impl LmsClient {
         Ok(artists)
     }
 
-    pub async fn get_popular_albums(&self, limit: usize) -> Result<Vec<Album>> {
+    pub async fn get_new_music(&self, limit: usize) -> Result<Vec<Album>> {
         self.fetch_list(
             &[
                 json!("albums"),

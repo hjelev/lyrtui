@@ -32,7 +32,7 @@ Browse and search your music library, internet radio, and installed streaming ap
 - Browse your music library: Artists → Albums → Tracks, or jump straight to All Tracks
 - **Cover-art thumbnails** in every library list — albums use their real cover art (via the LMS coverid, not the placeholder), artists/album-artists show a representative cover resolved from one of their albums, and folders show the cover of their first track (descending through subfolders for multi-disc/discography layouts)
 - **Recently Played Artists** — quickly jump back to artists you've been listening to, sorted by last played
-- **Popular Albums** — browse recently added albums at a glance
+- **New Music** — browse recently added albums at a glance
 - **Search** your music library (artists, albums, tracks, playlists) — type a query, press Enter, then drill in or play results directly
 - **Local filter** (`/`) — instantly narrow the list you're already viewing (any library list, the queue, radio, apps, favourites). Type to filter live by title and artist; `Esc` or `Backspace` restores the full list, and changing views clears it automatically. Press `↓` to move from the filter box into the results; press `↑` at the top result to jump back into the filter box
 - Browse and play internet radio via Lyrion's radio services (TuneIn, etc.) with full hierarchical navigation

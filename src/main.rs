@@ -673,7 +673,7 @@ async fn handle_msg(
         AppMsg::AlbumsLoaded(a) => { app.albums = a; app.is_loading = false; }
         AppMsg::TracksLoaded(t) => { app.tracks = t; app.is_loading = false; }
         AppMsg::RecentArtistsLoaded(a) => { app.recent_artists = a; app.is_loading = false; }
-        AppMsg::PopularAlbumsLoaded(a) => { app.popular_albums = a; app.is_loading = false; }
+        AppMsg::NewMusicLoaded(a) => { app.new_music = a; app.is_loading = false; }
         AppMsg::RadioItemsLoaded(items) => {
             if app.radio_nav_stack.is_empty() {
                 app.radio_services = items.clone();

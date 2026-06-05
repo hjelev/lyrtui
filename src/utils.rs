@@ -57,8 +57,8 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
         MainView::Library(LibraryView::Albums { .. }) => {
             app.albums.get(idx).map(|a| a.cover_url(base))
         }
-        MainView::Library(LibraryView::PopularAlbums) => {
-            app.popular_albums.get(idx).map(|a| a.cover_url(base))
+        MainView::Library(LibraryView::NewMusic) => {
+            app.new_music.get(idx).map(|a| a.cover_url(base))
         }
         MainView::Library(LibraryView::RecentlyPlayedArtists) => app
             .recent_artists
@@ -320,7 +320,7 @@ pub fn main_list_len(app: &App) -> usize {
         MainView::Library(LibraryView::Folder { .. }) => app.folder_items.len(),
         MainView::Library(LibraryView::Playlists) => app.playlists.len(),
         MainView::Library(LibraryView::RecentlyPlayedArtists) => app.recent_artists.len(),
-        MainView::Library(LibraryView::PopularAlbums) => app.popular_albums.len(),
+        MainView::Library(LibraryView::NewMusic) => app.new_music.len(),
         MainView::Queue => app.queue.len(),
         MainView::Players => app.players.len(),
         MainView::Radio => app.radio_items.len(),

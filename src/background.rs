@@ -392,12 +392,12 @@ pub fn load_recent_artists(limit: usize, client: Arc<LmsClient>, tx: mpsc::Sende
     );
 }
 
-pub fn load_popular_albums(limit: usize, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
+pub fn load_new_music(limit: usize, client: Arc<LmsClient>, tx: mpsc::Sender<AppMsg>) {
     spawn_if_ok(
         client,
         tx,
-        move |c| async move { c.get_popular_albums(limit).await },
-        |v: Vec<Album>| AppMsg::PopularAlbumsLoaded(v),
+        move |c| async move { c.get_new_music(limit).await },
+        |v: Vec<Album>| AppMsg::NewMusicLoaded(v),
     );
 }
 

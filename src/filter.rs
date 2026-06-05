@@ -33,7 +33,7 @@ pub fn is_filterable(view: &MainView) -> bool {
                 | LibraryView::AlbumArtists
                 | LibraryView::RecentlyPlayedArtists
                 | LibraryView::Albums { .. }
-                | LibraryView::PopularAlbums
+                | LibraryView::NewMusic
                 | LibraryView::Tracks { .. }
                 | LibraryView::Folder { .. }
                 | LibraryView::Playlists
@@ -55,8 +55,8 @@ fn snapshot_view(app: &App, view: &MainView) -> Option<FilterBackup> {
             FilterBackup::Artists(app.recent_artists.clone())
         }
         MainView::Library(LibraryView::Albums { .. }) => FilterBackup::Albums(app.albums.clone()),
-        MainView::Library(LibraryView::PopularAlbums) => {
-            FilterBackup::Albums(app.popular_albums.clone())
+        MainView::Library(LibraryView::NewMusic) => {
+            FilterBackup::Albums(app.new_music.clone())
         }
         MainView::Library(LibraryView::Tracks { .. }) => FilterBackup::Tracks(app.tracks.clone()),
         MainView::Queue => FilterBackup::Tracks(app.queue.clone()),
@@ -150,8 +150,8 @@ pub fn recompute(app: &mut App) {
         (MainView::Library(LibraryView::Albums { .. }), FilterBackup::Albums(full)) => {
             app.albums = retain_albums(full, &q);
         }
-        (MainView::Library(LibraryView::PopularAlbums), FilterBackup::Albums(full)) => {
-            app.popular_albums = retain_albums(full, &q);
+        (MainView::Library(LibraryView::NewMusic), FilterBackup::Albums(full)) => {
+            app.new_music = retain_albums(full, &q);
         }
         (MainView::Library(LibraryView::Tracks { .. }), FilterBackup::Tracks(full)) => {
             app.tracks = retain_tracks(full, &q);
@@ -198,8 +198,8 @@ pub fn clear(app: &mut App) {
             app.recent_artists = v
         }
         (MainView::Library(LibraryView::Albums { .. }), FilterBackup::Albums(v)) => app.albums = v,
-        (MainView::Library(LibraryView::PopularAlbums), FilterBackup::Albums(v)) => {
-            app.popular_albums = v
+        (MainView::Library(LibraryView::NewMusic), FilterBackup::Albums(v)) => {
+            app.new_music = v
         }
         (MainView::Library(LibraryView::Tracks { .. }), FilterBackup::Tracks(v)) => app.tracks = v,
         (MainView::Queue, FilterBackup::Tracks(v)) => app.queue = v,

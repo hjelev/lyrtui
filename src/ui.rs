@@ -861,7 +861,7 @@ fn my_music_entry_display(
             ("\u{F017}", "Recently Played Artists", "artists you played lately") // nf-fa-clock-o
         }
         MyMusicEntry::Albums => ("\u{EDE9}", "Albums", "all albums"), // nf-cod-disc
-        MyMusicEntry::PopularAlbums => ("\u{f490}", "Popular Albums", "most recently added albums"), // md-fire
+        MyMusicEntry::NewMusic => ("\u{F1741}", "New Music", "recently added albums"),
         MyMusicEntry::Tracks => ("\u{F025}", "Tracks", "all tracks"), // nf-fa-headphones
         MyMusicEntry::Playlists => ("\u{F0C9}", "Playlists", "saved playlists"), // nf-fa-list
         MyMusicEntry::Folders => ("\u{F07B}", "Folders", "browse by folder"), // nf-fa-folder
@@ -1218,11 +1218,11 @@ fn draw_library(
                 }
             }, app.is_loading, state, thumbnails);
         }
-        LibraryView::PopularAlbums => {
-            let total = app.popular_albums.len();
-            let title = format!(" Popular Albums ({}) ", total);
+        LibraryView::NewMusic => {
+            let total = app.new_music.len();
+            let title = format!(" New Music ({}) ", total);
             render_two_row_view(f, app, area, &title, total, |i| {
-                let a = &app.popular_albums[i];
+                let a = &app.new_music[i];
                 let sub = a.artist.as_deref().unwrap_or("Unknown Artist");
                 RowItem {
                     thumb_url: Some(a.cover_url(base)),

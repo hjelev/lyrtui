@@ -31,7 +31,7 @@ pub enum LibraryView {
     Folder { folder_id: Option<u32> },
     Playlists,
     RecentlyPlayedArtists,
-    PopularAlbums,
+    NewMusic,
 }
 
 /// The entries of the "My Music" landing menu, in display order. `ALL` is the single source of
@@ -45,7 +45,7 @@ pub enum MyMusicEntry {
     AlbumArtists,
     RecentlyPlayedArtists,
     Albums,
-    PopularAlbums,
+    NewMusic,
     Tracks,
     Playlists,
     Folders,
@@ -57,7 +57,7 @@ impl MyMusicEntry {
         MyMusicEntry::AlbumArtists,
         MyMusicEntry::RecentlyPlayedArtists,
         MyMusicEntry::Albums,
-        MyMusicEntry::PopularAlbums,
+        MyMusicEntry::NewMusic,
         MyMusicEntry::Tracks,
         MyMusicEntry::Playlists,
         MyMusicEntry::Folders,
@@ -356,7 +356,7 @@ pub struct App {
     pub tracks: Vec<Track>,
     pub playlists: Vec<Playlist>,
     pub recent_artists: Vec<Artist>,
-    pub popular_albums: Vec<Album>,
+    pub new_music: Vec<Album>,
     /// Lazily resolved per-artist cover art: artist_id → resolved cover URL. A present key with
     /// `None` means "resolved, but the artist has no art" (so we stop retrying); an absent key
     /// means "not yet resolved". See [`crate::api::LmsClient::get_artist_artwork`].
@@ -490,7 +490,7 @@ impl App {
             tracks: vec![],
             playlists: vec![],
             recent_artists: vec![],
-            popular_albums: vec![],
+            new_music: vec![],
             artist_artwork: HashMap::new(),
             folder_artwork: HashMap::new(),
             radio_items: vec![],
@@ -621,7 +621,7 @@ pub enum AppMsg {
     AlbumsLoaded(Vec<Album>),
     TracksLoaded(Vec<Track>),
     RecentArtistsLoaded(Vec<Artist>),
-    PopularAlbumsLoaded(Vec<Album>),
+    NewMusicLoaded(Vec<Album>),
     RadioItemsLoaded(Vec<RadioItem>),
     AppItemsLoaded(Vec<RadioItem>),
     FavItemsLoaded(Vec<RadioItem>),
