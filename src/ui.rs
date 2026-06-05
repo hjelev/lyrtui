@@ -1147,41 +1147,37 @@ fn draw_library(
             let title = format!(" {} ({}) ", breadcrumb, total);
             render_two_row_view(f, app, area, &title, total, |i| {
                 let item = &app.folder_items[i];
-                let is_track = item.item_type == FolderItemType::Track;
-                let (icon, fg) = if is_track {
-                    (
+                let (icon, fg, thumb_url, label, duration) = match item.item_type {
+                    FolderItemType::Track => (
                         if app.use_nerd_icons { "\u{F001} " } else { "▶ " },
                         focus_border_color(app.effective_accent()),
-                    )
-                } else {
-                    (
+                        Some(crate::utils::music_image_url(base, item.id, "cover.jpg")),
+                        String::new(),
+                        item.duration.map(format_duration),
+                    ),
+                    FolderItemType::Folder => (
                         if app.use_nerd_icons { "\u{F07B} " } else { "▸ " },
                         Color::White,
-                    )
+                        app.folder_artwork.get(&item.id).cloned().flatten(),
+                        "folder".to_string(),
+                        None,
+                    ),
+                    FolderItemType::Playlist => (
+                        if app.use_nerd_icons { "\u{F0C9} " } else { "≡ " },
+                        focus_border_color(app.effective_accent()),
+                        None,
+                        "playlist".to_string(),
+                        None,
+                    ),
                 };
                 RowItem {
-                    thumb_url: if is_track {
-                        Some(crate::utils::music_image_url(base, item.id, "cover.jpg"))
-                    } else {
-                        app.folder_artwork.get(&item.id).cloned().flatten()
-                    },
+                    thumb_url,
                     line1: Line::from(Span::styled(
                         format!("{}{}", icon, strip_wide_chars(&item.filename)),
                         Style::default().fg(fg),
                     )),
-                    line2: Line::from(Span::styled(
-                        if is_track {
-                            String::new()
-                        } else {
-                            "folder".to_string()
-                        },
-                        Style::default().fg(mid),
-                    )),
-                    duration: if is_track {
-                        item.duration.map(format_duration)
-                    } else {
-                        None
-                    },
+                    line2: Line::from(Span::styled(label, Style::default().fg(mid))),
+                    duration,
                 }
             }, app.is_loading, state, thumbnails);
         }

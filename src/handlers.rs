@@ -2457,6 +2457,17 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                             });
                         }
                     }
+                    FolderItemType::Playlist => {
+                        if let (Some(pid), Some(url)) = (app.active_pid(), item.url.clone()) {
+                            let name = item.filename.clone();
+                            spawn_status(
+                                client,
+                                tx,
+                                format!("Playing \"{}\"", name),
+                                move |c| async move { c.play_url_with_title(&pid, &url, &name).await },
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -2975,6 +2986,7 @@ fn current_queue_target(app: &App) -> Option<QueueTarget> {
                     name,
                 }),
                 FolderItemType::Folder => Some(QueueTarget::FolderFolder { id: item.id, name }),
+                FolderItemType::Playlist => item.url.clone().map(|url| QueueTarget::Url { url, name }),
             }
         }
         MainView::Radio => url_target(app.radio_items.get(app.main_selected)),

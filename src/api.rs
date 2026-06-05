@@ -90,6 +90,7 @@ pub struct Artist {
 pub enum FolderItemType {
     Folder,
     Track,
+    Playlist,
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +99,7 @@ pub struct FolderItem {
     pub filename: String,
     pub item_type: FolderItemType,
     pub duration: Option<f64>,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -720,7 +722,7 @@ impl LmsClient {
             json!("musicfolder"),
             json!(0),
             json!(LIMIT_FULL),
-            json!("tags:dlt"),
+            json!("tags:dltu"),
         ];
         if let Some(id) = folder_id {
             params.push(json!(format!("folder_id:{}", id)));
@@ -737,14 +739,17 @@ impl LmsClient {
                 let filename = v["filename"].as_str()?.to_string();
                 let item_type = match v["type"].as_str() {
                     Some("track") => FolderItemType::Track,
+                    Some("playlist") => FolderItemType::Playlist,
                     _ => FolderItemType::Folder,
                 };
                 let duration = v["duration"].as_f64().filter(|&d| d > 0.0);
+                let url = v["url"].as_str().map(str::to_string);
                 Some(FolderItem {
                     id,
                     filename,
                     item_type,
                     duration,
+                    url,
                 })
             })
             .collect())
