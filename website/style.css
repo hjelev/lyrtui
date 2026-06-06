@@ -1,0 +1,288 @@
+/* lyrtui — landing page styles
+   Palette taken from the app itself:
+   navy background, olive/sage logo green, orange playback accent. */
+
+:root {
+  --bg:        #0d1320;   /* deep navy, app background */
+  --bg-2:      #141d2e;   /* panel */
+  --bg-3:      #1b2638;   /* raised card */
+  --border:    #2a3a52;
+  --text:      #d7dee9;
+  --muted:     #8a98ac;
+  --olive:     #a3a86b;   /* logo green */
+  --olive-dim: #7f8456;
+  --orange:    #e8843c;   /* progress bar / accent */
+  --orange-2:  #f0a05a;
+  --radius:    14px;
+  --max:       1100px;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* subtle vignette so the navy isn't flat */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(1100px 600px at 50% -10%, rgba(232,132,60,0.10), transparent 60%),
+    radial-gradient(900px 500px at 100% 100%, rgba(163,168,107,0.07), transparent 60%);
+}
+
+a { color: var(--orange-2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code, pre, kbd { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace; }
+
+/* ---------- Header ---------- */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 1.4rem;
+  background: rgba(13,19,32,0.82);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.brand img { height: 30px; display: block; }
+.top-nav { display: flex; gap: 1.4rem; align-items: center; flex-wrap: wrap; }
+.top-nav a { color: var(--muted); font-size: 0.95rem; }
+.top-nav a:hover { color: var(--text); text-decoration: none; }
+.top-nav a.gh {
+  color: var(--olive);
+  border: 1px solid var(--olive-dim);
+  padding: 0.25rem 0.7rem;
+  border-radius: 8px;
+}
+.top-nav a.gh:hover { background: rgba(163,168,107,0.12); color: var(--text); }
+
+/* ---------- Hero ---------- */
+.hero { padding: 5rem 1.4rem 2rem; text-align: center; }
+.hero-inner { max-width: 820px; margin: 0 auto; }
+.hero-logo { width: min(440px, 78vw); height: auto; }
+.tagline {
+  font-size: clamp(1.5rem, 3.4vw, 2.3rem);
+  font-weight: 700;
+  margin: 1.4rem 0 0.4rem;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.subtitle { font-size: 1.1rem; color: var(--muted); margin: 0.6rem auto 1.6rem; max-width: 640px; }
+
+.badges {
+  display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center;
+  margin: 0 auto 1.8rem;
+}
+.badges img { height: 20px; }
+
+.cta-row { display: flex; gap: 0.8rem; justify-content: center; flex-wrap: wrap; }
+.btn {
+  display: inline-block;
+  padding: 0.7rem 1.5rem;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 1rem;
+  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.btn:hover { text-decoration: none; transform: translateY(-1px); }
+.btn-primary { background: var(--orange); color: #1a0f06; }
+.btn-primary:hover { background: var(--orange-2); }
+.btn-ghost { border: 1px solid var(--olive-dim); color: var(--olive); }
+.btn-ghost:hover { background: rgba(163,168,107,0.12); color: var(--text); }
+
+/* ---------- Demo frame ---------- */
+.demo { padding: 1rem 1.4rem 3rem; }
+.frame {
+  max-width: var(--max);
+  margin: 0 auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+}
+.frame-bar {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+}
+.dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.dot.red { background: #ec6a5e; }
+.dot.yellow { background: #f4bf4f; }
+.dot.green { background: #61c454; }
+.frame-title { margin-left: 0.5rem; color: var(--muted); font-size: 0.85rem; font-family: ui-monospace, monospace; }
+.frame img { display: block; width: 100%; height: auto; }
+
+/* ---------- Sections ---------- */
+.section { max-width: var(--max); margin: 0 auto; padding: 4rem 1.4rem; }
+.section h2 {
+  font-size: clamp(1.6rem, 3vw, 2.1rem);
+  text-align: center;
+  margin: 0 0 0.6rem;
+  letter-spacing: -0.01em;
+}
+.section h2::after {
+  content: "";
+  display: block;
+  width: 56px; height: 3px;
+  margin: 0.7rem auto 0;
+  background: var(--orange);
+  border-radius: 3px;
+}
+.section-lead {
+  text-align: center;
+  color: var(--muted);
+  max-width: 680px;
+  margin: 1rem auto 2.4rem;
+}
+
+/* ---------- Feature grid ---------- */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.1rem;
+}
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.4rem;
+  transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.card:hover { transform: translateY(-3px); border-color: var(--olive-dim); background: var(--bg-3); }
+.card .ico { font-size: 1.7rem; margin-bottom: 0.5rem; }
+.card h3 { margin: 0 0 0.4rem; font-size: 1.15rem; color: var(--olive); }
+.card p { margin: 0; color: var(--muted); font-size: 0.97rem; }
+
+/* ---------- Screenshots ---------- */
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+.shot {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-2);
+  transition: transform 0.12s ease, border-color 0.15s ease;
+}
+.shot:hover { transform: scale(1.01); border-color: var(--orange); text-decoration: none; }
+.shot img { display: block; width: 100%; height: auto; }
+
+/* ---------- Install ---------- */
+.install-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.1rem;
+}
+.install-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.3rem;
+}
+.install-card h3 { margin: 0 0 0.7rem; font-size: 1.05rem; color: var(--olive); }
+.install-card pre {
+  background: #0a0f1a;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  margin: 0;
+  overflow-x: auto;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--text);
+}
+.install-card pre .c { color: var(--olive); }
+.install-note { margin: 0; color: var(--muted); font-size: 0.97rem; }
+.run-line { text-align: center; color: var(--muted); margin: 2rem auto 0; max-width: 700px; }
+code {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.08em 0.4em;
+  font-size: 0.88em;
+  color: var(--orange-2);
+}
+
+/* ---------- Keyboard shortcuts ---------- */
+.keys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.5rem 1.6rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.keyrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.keyrow > span:last-child { color: var(--muted); text-align: right; }
+.keys { display: inline-flex; gap: 0.3rem; flex-wrap: wrap; }
+kbd {
+  display: inline-block;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.1em 0.5em;
+  font-size: 0.82rem;
+  color: var(--text);
+  min-width: 1.3em;
+  text-align: center;
+}
+
+/* ---------- Footer ---------- */
+.site-footer {
+  text-align: center;
+  padding: 3rem 1.4rem;
+  border-top: 1px solid var(--border);
+  margin-top: 2rem;
+  color: var(--muted);
+}
+.footer-logo { height: 34px; opacity: 0.85; margin-bottom: 0.8rem; }
+.site-footer p { margin: 0.3rem 0; }
+.site-footer .muted { font-size: 0.85rem; opacity: 0.7; }
+
+/* ---------- GLightbox theme overrides ---------- */
+.glightbox-clean .gslide-description { background: var(--bg-2); }
+.glightbox-clean .gslide-title {
+  color: var(--olive);
+  font-family: inherit;
+  font-weight: 600;
+}
+.glightbox-clean .gslide-media { box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
+.gbtn.gclose svg, .gnext svg, .gprev svg { color: var(--text); }
+.gbtn:hover svg { color: var(--orange); }
+.goverlay { background: rgba(7,11,20,0.92); }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 600px) {
+  .top-nav { gap: 0.9rem; }
+  .top-nav a:not(.gh) { display: none; }
+  .hero { padding-top: 3rem; }
+  .keyrow > span:last-child { text-align: right; font-size: 0.92rem; }
+}

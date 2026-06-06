@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>lyrtui — Lyrion Music Server in your terminal</title>
+  <meta name="description" content="A fast, keyboard and mouse driven terminal UI for Lyrion Music Server, written in Rust. Browse your library, internet radio and streaming apps with inline album art." />
+  <meta property="og:title" content="lyrtui — Lyrion Music Server in your terminal" />
+  <meta property="og:description" content="A fast, keyboard and mouse driven terminal UI for Lyrion Music Server, written in Rust." />
+  <meta property="og:image" content="assets/screenshot.png" />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/png" href="assets/logo_tr.png" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/glightbox/dist/css/glightbox.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="site-header">
+    <a class="brand" href="#top">
+      <img src="assets/logo_tr.png" alt="lyrtui" />
+    </a>
+    <nav class="top-nav">
+      <a href="#features">Features</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#install">Install</a>
+      <a href="#keys">Shortcuts</a>
+      <a class="gh" href="https://github.com/hjelev/lyrtui" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+  </header>
+
+  <main id="top">
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-inner">
+        <img class="hero-logo" src="assets/logo_tr.png" alt="lyrtui - lyrion music server in your terminal" />
+        <p class="tagline">
+          Lyrion Music Server in your terminal.
+        </p>
+        <p class="subtitle">
+          A fast, keyboard&nbsp;&amp;&nbsp;mouse driven terminal UI for
+          <a href="https://lyrion.org/" target="_blank" rel="noopener">Lyrion Music Server</a>,
+          written in Rust. Browse and search your music library, internet radio and
+          streaming apps — with inline album art and an adaptive accent color.
+        </p>
+
+        <div class="badges">
+          <a href="https://github.com/hjelev/lyrtui/actions"><img src="https://github.com/hjelev/lyrtui/actions/workflows/release.yml/badge.svg" alt="Build Status"></a>
+          <a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/v/lyrtui.svg" alt="Crates.io Version"></a>
+          <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+          <a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/d/lyrtui.svg?label=crates%20downloads" alt="Crates.io Downloads"></a>
+          <a href="https://github.com/hjelev/lyrtui/releases"><img src="https://img.shields.io/github/downloads/hjelev/lyrtui/total?color=2ea44f&label=github%20downloads" alt="GitHub Downloads"></a>
+        </div>
+
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#install">Install lyrtui</a>
+          <a class="btn btn-ghost" href="https://github.com/hjelev/lyrtui" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- DEMO GIF -->
+    <section class="demo">
+      <div class="frame">
+        <div class="frame-bar">
+          <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
+          <span class="frame-title">lyrtui</span>
+        </div>
+        <img src="assets/lyrtui.gif" alt="lyrtui demo" loading="lazy" />
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features" class="section">
+      <h2>Everything, in the terminal</h2>
+      <p class="section-lead">
+        Control playback across multiple players with sync and global-volume support,
+        and enjoy a now-playing panel with inline album art that adapts the UI's accent
+        color to the current cover. Full mouse support throughout — while every action
+        also has a keyboard shortcut.
+      </p>
+
+      <div class="feature-grid">
+        <div class="card">
+          <div class="ico">🎵</div>
+          <h3>Browse your library</h3>
+          <p>Artists → Albums → Tracks, or jump straight to All Tracks. Recently Played Artists and New Music for quick access.</p>
+        </div>
+        <div class="card">
+          <div class="ico">🖼️</div>
+          <h3>Cover-art thumbnails</h3>
+          <p>Real album covers in every list. Artists show a representative cover; folders show their first track's art, descending through subfolders.</p>
+        </div>
+        <div class="card">
+          <div class="ico">🔍</div>
+          <h3>Search &amp; local filter</h3>
+          <p>Search artists, albums, tracks and playlists. Hit <kbd>/</kbd> to instantly narrow whatever list you're already viewing.</p>
+        </div>
+        <div class="card">
+          <div class="ico">📻</div>
+          <h3>Radio &amp; streaming apps</h3>
+          <p>Browse and play internet radio (TuneIn) and installed Lyrion apps — Spotify, Deezer, Bandcamp — with full hierarchical navigation.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⇄</div>
+          <h3>Multi-player &amp; sync</h3>
+          <p>Switch between players, toggle power, and open a sync modal to join or leave sync groups. Global volume adjusts every player at once.</p>
+        </div>
+        <div class="card">
+          <div class="ico">🎨</div>
+          <h3>Adaptive theme</h3>
+          <p>The accent color is auto-generated from the current track's album art and applied to the progress bar, borders and scrollbars.</p>
+        </div>
+        <div class="card">
+          <div class="ico">🖱️</div>
+          <h3>Full mouse support</h3>
+          <p>Click to navigate, play, seek the progress bar, adjust volume, manage queues, sync players and edit settings — all clickable.</p>
+        </div>
+        <div class="card">
+          <div class="ico">📡</div>
+          <h3>Auto-discovery</h3>
+          <p>Finds your Lyrion server on the local network via UDP broadcast on startup, and reconnects gracefully when it goes away.</p>
+        </div>
+        <div class="card">
+          <div class="ico">⚡</div>
+          <h3>Fast on huge libraries</h3>
+          <p>Only visible rows are built each frame and thumbnails are pre-encoded off the draw path — navigation stays fluid on thousands of tracks.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREENSHOTS -->
+    <section id="screenshots" class="section">
+      <h2>Screenshots</h2>
+      <p class="section-lead">Click any image to open the gallery — use the arrows, swipe, or ← / → keys.</p>
+      <div class="shots">
+        <a class="shot glightbox" data-gallery="shots" data-title="My Music — library browser"      href="assets/screenshot.png"><img src="assets/screenshot.png"   alt="lyrtui screenshot 1" loading="lazy" /></a>
+        <a class="shot glightbox" data-gallery="shots" data-title="Browsing the music library"        href="assets/screenshot-1.png"><img src="assets/screenshot-1.png" alt="lyrtui screenshot 2" loading="lazy" /></a>
+        <a class="shot glightbox" data-gallery="shots" data-title="Albums with cover-art thumbnails"   href="assets/screenshot-2.png"><img src="assets/screenshot-2.png" alt="lyrtui screenshot 3" loading="lazy" /></a>
+        <a class="shot glightbox" data-gallery="shots" data-title="Tracks &amp; now playing"           href="assets/screenshot-3.png"><img src="assets/screenshot-3.png" alt="lyrtui screenshot 4" loading="lazy" /></a>
+        <a class="shot glightbox" data-gallery="shots" data-title="Search results"                     href="assets/screenshot-4.png"><img src="assets/screenshot-4.png" alt="lyrtui screenshot 5" loading="lazy" /></a>
+        <a class="shot glightbox" data-gallery="shots" data-title="Radio &amp; streaming apps"          href="assets/screenshot-5.png"><img src="assets/screenshot-5.png" alt="lyrtui screenshot 6" loading="lazy" /></a>
+        <a class="shot glightbox" data-gallery="shots" data-title="Players &amp; sync"                  href="assets/screenshot-6.png"><img src="assets/screenshot-6.png" alt="lyrtui screenshot 7" loading="lazy" /></a>
+        <a class="shot glightbox" data-gallery="shots" data-title="Big Art Mode"                        href="assets/screenshot-7.png"><img src="assets/screenshot-7.png" alt="lyrtui screenshot 8" loading="lazy" /></a>
+      </div>
+    </section>
+
+    <!-- INSTALL -->
+    <section id="install" class="section">
+      <h2>Install</h2>
+      <p class="section-lead">A running Lyrion Music Server (default <code>localhost:9000</code>) is all you need. A Nerd Font and an image-capable terminal are optional bonuses.</p>
+
+      <div class="install-grid">
+        <div class="install-card">
+          <h3>cargo</h3>
+          <pre><code><span class="c">cargo</span> install lyrtui</code></pre>
+        </div>
+        <div class="install-card">
+          <h3>Homebrew</h3>
+          <pre><code><span class="c">brew</span> install hjelev/tap/lyrtui</code></pre>
+        </div>
+        <div class="install-card">
+          <h3>From source</h3>
+          <pre><code><span class="c">git</span> clone https://github.com/hjelev/lyrtui
+<span class="c">cd</span> lyrtui
+<span class="c">cargo</span> build --release</code></pre>
+        </div>
+        <div class="install-card">
+          <h3>Releases</h3>
+          <p class="install-note">Grab a prebuilt binary or the installer from the
+          <a href="https://github.com/hjelev/lyrtui/releases" target="_blank" rel="noopener">releases page</a> — it drops <code>lyrtui</code> into your PATH.</p>
+        </div>
+      </div>
+
+      <p class="run-line">Then just run <code>lyrtui</code>. On first launch it broadcasts a UDP discovery packet to find your server; press <kbd>c</kbd> any time to configure host, port and more.</p>
+    </section>
+
+    <!-- KEYBOARD SHORTCUTS -->
+    <section id="keys" class="section">
+      <h2>Keyboard shortcuts</h2>
+      <div class="keys-grid">
+        <div class="keyrow"><span class="keys"><kbd>j</kbd><kbd>↓</kbd></span><span>Move down</span></div>
+        <div class="keyrow"><span class="keys"><kbd>k</kbd><kbd>↑</kbd></span><span>Move up</span></div>
+        <div class="keyrow"><span class="keys"><kbd>Enter</kbd><kbd>l</kbd></span><span>Select / open action menu</span></div>
+        <div class="keyrow"><span class="keys"><kbd>Esc</kbd><kbd>h</kbd></span><span>Back / focus sidebar</span></div>
+        <div class="keyrow"><span class="keys"><kbd>Space</kbd></span><span>Play / pause</span></div>
+        <div class="keyrow"><span class="keys"><kbd>n</kbd><kbd>p</kbd></span><span>Next / previous track</span></div>
+        <div class="keyrow"><span class="keys"><kbd>+</kbd><kbd>-</kbd></span><span>Volume up / down</span></div>
+        <div class="keyrow"><span class="keys"><kbd>s</kbd></span><span>Toggle shuffle</span></div>
+        <div class="keyrow"><span class="keys"><kbd>r</kbd></span><span>Cycle repeat mode</span></div>
+        <div class="keyrow"><span class="keys"><kbd>a</kbd></span><span>Add selected item to queue</span></div>
+        <div class="keyrow"><span class="keys"><kbd>d</kbd><kbd>Del</kbd></span><span>Remove from queue</span></div>
+        <div class="keyrow"><span class="keys"><kbd>x</kbd></span><span>Clear queue</span></div>
+        <div class="keyrow"><span class="keys"><kbd>/</kbd></span><span>Filter the current list</span></div>
+        <div class="keyrow"><span class="keys"><kbd>m</kbd></span><span>Mute / unmute</span></div>
+        <div class="keyrow"><span class="keys"><kbd>t</kbd></span><span>Toggle player power</span></div>
+        <div class="keyrow"><span class="keys"><kbd>1</kbd>–<kbd>9</kbd></span><span>Jump to sidebar section</span></div>
+        <div class="keyrow"><span class="keys"><kbd>c</kbd></span><span>Open server configuration</span></div>
+        <div class="keyrow"><span class="keys"><kbd>`</kbd></span><span>Toggle Big Art Mode</span></div>
+        <div class="keyrow"><span class="keys"><kbd>q</kbd><kbd>Ctrl-c</kbd></span><span>Quit</span></div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <img class="footer-logo" src="assets/logo_tr.png" alt="lyrtui" />
+    <p>
+      lyrtui — by <a href="https://github.com/hjelev" target="_blank" rel="noopener">Hristo Jelev</a> ·
+      <a href="https://github.com/hjelev/lyrtui" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="https://crates.io/crates/lyrtui" target="_blank" rel="noopener">crates.io</a> ·
+      MIT License
+    </p>
+    <p class="muted">Not affiliated with Lyrion Music Server / Logitech.</p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/glightbox/dist/js/glightbox.min.js"></script>
+  <script>
+    GLightbox({
+      selector: '.glightbox',
+      touchNavigation: true,
+      loop: true,
+      zoomable: true,
+      openEffect: 'zoom',
+      closeEffect: 'fade',
+      slideEffect: 'slide'
+    });
+  </script>
+</body>
+</html>
