@@ -8,6 +8,12 @@ ___
 <a href="https://github.com/hjelev/lyrtui/actions"><img src="https://github.com/hjelev/lyrtui/actions/workflows/release.yml/badge.svg" alt="Build Status"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/v/lyrtui.svg" alt="Crates.io Version"></a>&nbsp;<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>&nbsp;<a href="https://crates.io/crates/lyrtui"><img src="https://img.shields.io/crates/d/lyrtui.svg?label=crates%20downloads" alt="Crates.io Downloads"></a>&nbsp;<a href="https://github.com/hjelev/lyrtui/releases"><img src="https://img.shields.io/github/downloads/hjelev/lyrtui/total?color=2ea44f&label=github%20downloads" alt="GitHub Downloads"></a>
 </p>
 
+<p align="center">
+<img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">&nbsp;<img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">&nbsp;<img src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
+</p>
+
+<p align="center"><strong>Runs on Linux, macOS, and Windows.</strong></p>
+
 ![lyrtui Demo](screenshots/lyrtui.gif)
 
 <details>
@@ -53,6 +59,7 @@ Browse and search your music library, internet radio, and installed streaming ap
 - Add any selected track, album, artist, or radio stream to the queue with `a` (non-destructive append)
 - In-app help screen listing all keyboard shortcuts
 - Graceful reconnection when the server is unreachable
+- **Cross-platform** — runs natively on Linux, macOS, and Windows
 
 <details>
 <summary><strong>Requirements</strong></summary>

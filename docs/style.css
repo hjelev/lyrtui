@@ -130,6 +130,39 @@ code, pre, kbd { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", 
 .frame-title { margin-left: 0.5rem; color: var(--muted); font-size: 0.85rem; font-family: ui-monospace, monospace; }
 .frame img { display: block; width: 100%; height: auto; }
 
+/* ---------- Platforms ---------- */
+.platforms {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 0 1.4rem 1rem;
+  text-align: center;
+}
+.platforms-lead {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 0 0 1.2rem;
+}
+.os-row {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 2.6rem;
+}
+.os {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--muted);
+  transition: color 0.15s ease, transform 0.12s ease;
+}
+.os:hover { color: var(--olive); transform: translateY(-2px); }
+.os-logo { width: 38px; height: 38px; display: block; }
+.os span { font-size: 0.95rem; font-weight: 600; letter-spacing: 0.01em; }
+
 /* ---------- Sections ---------- */
 .section { max-width: var(--max); margin: 0 auto; padding: 4rem 1.4rem; }
 .section h2 {
@@ -207,10 +240,12 @@ code, pre, kbd { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", 
   top: 0.5rem;
   right: 0.5rem;
   z-index: 2;
-  padding: 0.28rem 0.7rem;
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   color: var(--muted);
   background: var(--bg-3);
   border: 1px solid var(--border);
@@ -219,14 +254,14 @@ code, pre, kbd { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", 
   opacity: 0;
   transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
+.copy-btn svg { display: block; }
 .code-block:hover .copy-btn,
 .copy-btn:focus-visible { opacity: 1; }
 .copy-btn:hover { color: var(--text); border-color: var(--olive-dim); background: var(--bg-2); }
 .copy-btn.copied {
   opacity: 1;
-  color: #1a0f06;
-  background: var(--olive);
-  border-color: var(--olive);
+  color: var(--olive);
+  border-color: var(--olive-dim);
 }
 @media (hover: none) {
   .copy-btn { opacity: 1; }   /* always visible on touch devices */
