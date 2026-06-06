@@ -153,17 +153,26 @@
       <div class="install-grid">
         <div class="install-card">
           <h3>cargo</h3>
-          <pre><code><span class="c">cargo</span> install lyrtui</code></pre>
+          <div class="code-block">
+            <button class="copy-btn" type="button" aria-label="Copy to clipboard" data-copy="cargo install lyrtui">Copy</button>
+            <pre><code><span class="c">cargo</span> install lyrtui</code></pre>
+          </div>
         </div>
         <div class="install-card">
           <h3>Homebrew</h3>
-          <pre><code><span class="c">brew</span> install hjelev/tap/lyrtui</code></pre>
+          <div class="code-block">
+            <button class="copy-btn" type="button" aria-label="Copy to clipboard" data-copy="brew install hjelev/tap/lyrtui">Copy</button>
+            <pre><code><span class="c">brew</span> install hjelev/tap/lyrtui</code></pre>
+          </div>
         </div>
         <div class="install-card">
           <h3>From source</h3>
-          <pre><code><span class="c">git</span> clone https://github.com/hjelev/lyrtui
+          <div class="code-block">
+            <button class="copy-btn" type="button" aria-label="Copy to clipboard" data-copy="git clone https://github.com/hjelev/lyrtui&#10;cd lyrtui&#10;cargo build --release">Copy</button>
+            <pre><code><span class="c">git</span> clone https://github.com/hjelev/lyrtui
 <span class="c">cd</span> lyrtui
 <span class="c">cargo</span> build --release</code></pre>
+          </div>
         </div>
         <div class="install-card">
           <h3>Releases</h3>
@@ -224,6 +233,36 @@
       openEffect: 'zoom',
       closeEffect: 'fade',
       slideEffect: 'slide'
+    });
+
+    // Copy-to-clipboard for install snippets
+    document.querySelectorAll('.copy-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var text = btn.getAttribute('data-copy');
+        var done = function () {
+          btn.classList.add('copied');
+          btn.textContent = 'Copied!';
+          setTimeout(function () {
+            btn.classList.remove('copied');
+            btn.textContent = 'Copy';
+          }, 1600);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(fallback);
+        } else {
+          fallback();
+        }
+        function fallback() {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); done(); } catch (e) {}
+          document.body.removeChild(ta);
+        }
+      });
     });
   </script>
 </body>

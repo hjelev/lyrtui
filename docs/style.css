@@ -201,6 +201,36 @@ code, pre, kbd { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", 
   padding: 1.3rem;
 }
 .install-card h3 { margin: 0 0 0.7rem; font-size: 1.05rem; color: var(--olive); }
+.code-block { position: relative; }
+.copy-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  padding: 0.28rem 0.7rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.code-block:hover .copy-btn,
+.copy-btn:focus-visible { opacity: 1; }
+.copy-btn:hover { color: var(--text); border-color: var(--olive-dim); background: var(--bg-2); }
+.copy-btn.copied {
+  opacity: 1;
+  color: #1a0f06;
+  background: var(--olive);
+  border-color: var(--olive);
+}
+@media (hover: none) {
+  .copy-btn { opacity: 1; }   /* always visible on touch devices */
+}
 .install-card pre {
   background: #0a0f1a;
   border: 1px solid var(--border);
