@@ -12,7 +12,7 @@ ___
 <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux">&nbsp;<img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS">&nbsp;<img src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows">
 </p>
 
-<p align="center"><strong>Runs on Linux, macOS, and Windows.</strong></p>
+<p align="center"><strong>Runs on Linux, macOS and Windows.</strong></p>
 
 ![lyrtui Demo](screenshots/lyrtui.gif)
 
