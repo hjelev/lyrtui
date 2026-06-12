@@ -13,6 +13,8 @@
   --olive-dim: #7f8456;
   --orange:    #e8843c;   /* progress bar / accent */
   --orange-2:  #f0a05a;
+  --header-bg: rgba(13,19,32,0.82);
+  --code-bg:   #0a0f1a;
   --radius:    14px;
   --max:       1100px;
 }
@@ -56,7 +58,7 @@ code, pre, kbd { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", 
   justify-content: space-between;
   gap: 1rem;
   padding: 0.6rem 1.4rem;
-  background: rgba(13,19,32,0.82);
+  background: var(--header-bg);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
@@ -267,7 +269,7 @@ code, pre, kbd { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", 
   .copy-btn { opacity: 1; }   /* always visible on touch devices */
 }
 .install-card pre {
-  background: #0a0f1a;
+  background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.9rem 1rem;
@@ -350,4 +352,22 @@ kbd {
   .top-nav a:not(.gh) { display: none; }
   .hero { padding-top: 3rem; }
   .keyrow > span:last-child { text-align: right; font-size: 0.92rem; }
+}
+
+/* ---------- Light mode ---------- */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:        #f5f7fb;   /* page background */
+    --bg-2:      #ffffff;   /* panels / cards */
+    --bg-3:      #eef1f7;   /* raised card */
+    --border:    #d6dde8;
+    --text:      #1b2433;
+    --muted:     #5a6678;
+    --olive:     #6c7138;   /* darker so headings stay legible on light bg */
+    --olive-dim: #8a8f55;
+    --orange:    #e8843c;   /* accent unchanged — reads on both */
+    --orange-2:  #c2611c;   /* links: darker orange for contrast on white */
+    --header-bg: rgba(255,255,255,0.82);
+    --code-bg:   #0f1626;   /* keep code snippets dark even in light mode */
+  }
 }
