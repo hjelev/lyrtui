@@ -85,6 +85,13 @@ cargo install lyrtui
 brew install hjelev/tap/lyrtui
 ```
 
+### Nix
+
+You can run directly using the flake from this repo:
+```sh
+nix run github:hjelev/lyrtui
+```
+
 ### Build from source
 ```sh
 git clone https://github.com/hjelev/lyrtui
@@ -189,7 +196,7 @@ use_nerd_icons = false       # set to true if your terminal uses a Nerd Font
 auto_discover = true         # broadcast UDP to find LMS on startup
 broadcast_mask = "255.255.255.255"  # subnet for discovery broadcast
 global_volume_control = true # enable global volume control (globe icon in status panel when active)
-full_art_mode = false        # start in big art mode 
+full_art_mode = false        # start in big art mode
 disable_auto_colors = false  # disable adaptive theme colors extracted from album art
 username = ""                # optional: LMS HTTP basic auth username
 password = ""                # optional: LMS HTTP basic auth password
