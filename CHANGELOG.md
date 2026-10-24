@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Clear "Authentication failed" message when the server rejects your username/password, instead of a generic "Disconnected"
+- CI workflow running clippy, tests and a release build on pushes and pull requests
+- Unit tests for the config, local filter, helpers and API response parsing
+
+### Changed
+- Playing or adding a radio/app folder now starts playback after the first item instead of waiting for the whole list to be queued
+- Cover-art thumbnail cache is now bounded, keeping memory flat while browsing large libraries; failed thumbnails are retried after reconnecting
+- The config file is written with owner-only (`0600`) permissions since it can contain a password
+- Updated `toml` to 1.x and `dirs` to 7
+
+### Fixed
+- Add to queue / replace queue did nothing in the *Recently Played Artists* and *New Music* views
+
 ## [0.2.12] - 2026-06-14
 
 ### Added

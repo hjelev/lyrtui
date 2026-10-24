@@ -191,6 +191,7 @@ async fn run(
     let mut thumbnail_images: HashMap<String, image::DynamicImage> = HashMap::new();
     let mut pending_thumbs: HashSet<String> = HashSet::new();
     let mut failed_thumbs: HashSet<String> = HashSet::new();
+    let mut thumb_lru = artwork::ThumbLru::default();
     // Artist ids whose representative cover art is currently being resolved (see resolution loop).
     let mut pending_artist_art: HashSet<String> = HashSet::new();
     // Folder ids whose representative cover art is currently being resolved.
@@ -237,8 +238,13 @@ async fn run(
                             }
                         }
                     }
-                    Err(_) => {
-                        let _ = t.send(AppMsg::Disconnected).await;
+                    Err(e) => {
+                        let msg = if e.is::<api::AuthError>() {
+                            AppMsg::AuthFailed
+                        } else {
+                            AppMsg::Disconnected
+                        };
+                        let _ = t.send(msg).await;
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(2)).await;
@@ -328,8 +334,13 @@ async fn run(
                 }
                 AppMsg::ThumbnailLoaded(url, img, proto) => {
                     pending_thumbs.remove(&url);
+                    thumb_lru.touch(&url);
                     thumbnail_images.insert(url.clone(), img);
                     thumbnails.insert(url, proto);
+                    for old in thumb_lru.evict(artwork::MAX_THUMBS) {
+                        thumbnails.remove(&old);
+                        thumbnail_images.remove(&old);
+                    }
                 }
                 AppMsg::ThumbnailFailed(url) => {
                     pending_thumbs.remove(&url);
@@ -348,6 +359,11 @@ async fn run(
                 AppMsg::FolderArtworkResolved(folder_id, url) => {
                     pending_folder_art.remove(&folder_id);
                     app.folder_artwork.insert(folder_id, url);
+                }
+                AppMsg::Connected if app.connection != app::ConnectionState::Connected => {
+                    // Thumbnails that failed while the server was unreachable deserve a retry.
+                    failed_thumbs.clear();
+                    handle_msg(&mut app, AppMsg::Connected, &client, &tx).await;
                 }
                 other => handle_msg(&mut app, other, &client, &tx).await,
             }
@@ -387,9 +403,10 @@ async fn run(
         {
             let base = client.server_base_url();
             for idx in utils::thumb_range(term_h, &main_state, &app) {
-                if let Some(url) = utils::thumbnail_url_for(&app, idx, &base)
-                    && !thumbnails.contains_key(&url)
-                    && !pending_thumbs.contains(&url)
+                let Some(url) = utils::thumbnail_url_for(&app, idx, &base) else { continue };
+                if thumbnails.contains_key(&url) {
+                    thumb_lru.touch(&url);
+                } else if !pending_thumbs.contains(&url)
                     && !failed_thumbs.contains(&url)
                 {
                     pending_thumbs.insert(url.clone());
@@ -621,6 +638,7 @@ async fn handle_msg(
             }
         }
         AppMsg::Disconnected => app.connection = ConnectionState::Disconnected,
+        AppMsg::AuthFailed => app.connection = ConnectionState::AuthFailed,
         AppMsg::PlayersLoaded(players) => {
             let new_pid = if let Some(pid) = app.active_player.clone() {
                 if players.iter().any(|p| p.playerid == pid) {

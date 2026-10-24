@@ -106,3 +106,59 @@ pub fn rebuild_all_thumbnails(
         .map(|(url, img)| (url.clone(), picker.new_resize_protocol(img.clone())))
         .collect()
 }
+
+/// Upper bound on cached thumbnails; past this the least-recently-visible entries are dropped.
+pub const MAX_THUMBS: usize = 300;
+
+/// Tracks when each cached thumbnail URL was last on screen so the thumbnail maps can be
+/// trimmed to `MAX_THUMBS` by evicting the least-recently-used entries.
+#[derive(Default)]
+pub struct ThumbLru {
+    last_used: HashMap<String, u64>,
+    clock: u64,
+}
+
+impl ThumbLru {
+    /// Mark `url` as just used (call for every visible cached thumbnail and on insert).
+    pub fn touch(&mut self, url: &str) {
+        self.clock += 1;
+        match self.last_used.get_mut(url) {
+            Some(t) => *t = self.clock,
+            None => {
+                self.last_used.insert(url.to_string(), self.clock);
+            }
+        }
+    }
+
+    /// Evict least-recently-used URLs until at most `max` remain; returns the evicted URLs.
+    pub fn evict(&mut self, max: usize) -> Vec<String> {
+        let excess = self.last_used.len().saturating_sub(max);
+        if excess == 0 {
+            return Vec::new();
+        }
+        let mut by_age: Vec<(u64, String)> =
+            self.last_used.iter().map(|(u, t)| (*t, u.clone())).collect();
+        by_age.sort_unstable();
+        let evicted: Vec<String> = by_age.into_iter().take(excess).map(|(_, u)| u).collect();
+        for u in &evicted {
+            self.last_used.remove(u);
+        }
+        evicted
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lru_evicts_oldest_first() {
+        let mut lru = ThumbLru::default();
+        for u in ["a", "b", "c", "d"] {
+            lru.touch(u);
+        }
+        lru.touch("a"); // a is now newest
+        assert_eq!(lru.evict(2), vec!["b".to_string(), "c".to_string()]);
+        assert!(lru.evict(2).is_empty());
+    }
+}

@@ -4,6 +4,27 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{sync::RwLock, time::Duration};
 
+/// Returned when the server rejects the request with HTTP 401 (bad or missing credentials).
+#[derive(Debug)]
+pub struct AuthError;
+
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("authentication failed")
+    }
+}
+
+impl std::error::Error for AuthError {}
+
+/// Map HTTP 401 to `AuthError` and any other non-success status to a generic error.
+fn check_status(resp: reqwest::Response) -> Result<reqwest::Response> {
+    match resp.status() {
+        reqwest::StatusCode::UNAUTHORIZED => Err(AuthError.into()),
+        s if !s.is_success() => Err(anyhow!("HTTP {}", s)),
+        _ => Ok(resp),
+    }
+}
+
 const LIMIT_PLAYERS: u64 = 100;
 const LIMIT_FULL: u64 = 10_000;
 const LIMIT_BROWSE: u64 = 200;
@@ -214,7 +235,7 @@ impl LmsClient {
         if let Some((user, pass)) = creds {
             req = req.basic_auth(user, Some(pass));
         }
-        let resp = req.send().await?.json::<Value>().await?;
+        let resp = check_status(req.send().await?)?.json::<Value>().await?;
         Ok(resp["result"].clone())
     }
 
@@ -1006,7 +1027,7 @@ impl LmsClient {
         if let Some((user, pass)) = creds {
             req = req.basic_auth(user, Some(pass));
         }
-        let bytes = req.send().await?.bytes().await?;
+        let bytes = check_status(req.send().await?)?.bytes().await?;
         Ok(bytes.to_vec())
     }
 
@@ -1161,5 +1182,81 @@ fn resolve_image_url(v: &Value, base: &str) -> Option<String> {
     } else {
         // relative path without leading slash (e.g. plugin icons like "plugins/Foo/icon.png")
         Some(format!("{}/{}", base, raw))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BASE: &str = "http://lms:9000";
+
+    #[test]
+    fn browse_item_parses_fields_and_defaults() {
+        let v = json!({
+            "name": "BBC", "type": "audio", "url": "http://s/1", "id": 7,
+            "hasitems": 0, "isaudio": 1, "image": "/imageproxy/x.png"
+        });
+        let item = parse_browse_item(&v, BASE, "radio");
+        assert_eq!(item.name, "BBC");
+        assert_eq!(item.cmd.as_deref(), Some("radio"));
+        assert_eq!(item.item_id.as_deref(), Some("7"));
+        assert_eq!(item.artwork_url.as_deref(), Some("http://lms:9000/imageproxy/x.png"));
+        assert!(item.is_audio && !item.has_items);
+
+        let bare = parse_browse_item(&json!({}), BASE, "apps");
+        assert_eq!(bare.item_type, "link");
+        assert_eq!(bare.item_id, None);
+        assert_eq!(bare.artwork_url, None);
+    }
+
+    #[test]
+    fn image_urls_resolve_against_base() {
+        assert_eq!(
+            resolve_image_url(&json!({"icon": "plugins/Foo/icon.png"}), BASE).as_deref(),
+            Some("http://lms:9000/plugins/Foo/icon.png")
+        );
+        assert_eq!(
+            resolve_image_url(&json!({"image": "https://cdn/x.jpg"}), BASE).as_deref(),
+            Some("https://cdn/x.jpg")
+        );
+        assert_eq!(resolve_image_url(&json!({"image": ""}), BASE), None);
+    }
+
+    #[test]
+    fn xmlbrowse_params_append_optional_tags() {
+        let p = xmlbrowse_params("tunein", Some("1.2"), Some("jazz"));
+        assert_eq!(p[0], json!("tunein"));
+        assert_eq!(p[3], json!(LIMIT_BROWSE));
+        assert!(p.contains(&json!("search:jazz")));
+        assert!(p.contains(&json!("item_id:1.2")));
+        assert_eq!(xmlbrowse_params("tunein", None, None).len(), 5);
+    }
+
+    #[test]
+    fn browse_loop_accepts_either_key() {
+        assert_eq!(browse_loop(&json!({"item_loop": [1, 2]})).len(), 2);
+        assert_eq!(browse_loop(&json!({"loop_loop": [1]})).len(), 1);
+        assert!(browse_loop(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn loose_u64_and_take_array() {
+        assert_eq!(as_u64_loose(&json!("42")), Some(42));
+        assert_eq!(as_u64_loose(&json!(3)), Some(3));
+        assert_eq!(as_u64_loose(&json!("x")), None);
+        let mut v = json!({"a": [1, 2, 3]});
+        assert_eq!(take_array(&mut v, "a").len(), 3);
+        assert!(take_array(&mut v, "missing").is_empty());
+    }
+
+    #[test]
+    fn album_cover_prefers_coverid() {
+        let a: Album =
+            serde_json::from_value(json!({"id": 5, "album": "A", "artwork_track_id": "abc"}))
+                .unwrap();
+        assert_eq!(a.cover_url(BASE), "http://lms:9000/music/abc/cover.jpg");
+        let b: Album = serde_json::from_value(json!({"id": 5, "album": "A"})).unwrap();
+        assert_eq!(b.cover_url(BASE), "http://lms:9000/music/5/cover.jpg");
     }
 }

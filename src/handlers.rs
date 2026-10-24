@@ -1422,6 +1422,184 @@ fn adjust_volume(app: &mut App, vol_sync_tx: &mpsc::Sender<(String, u8)>, delta:
     }
 }
 
+/// ↑/k: move the selection (or scroll/focus) up within the focused pane.
+fn nav_up(app: &mut App) {
+    if app.full_art_mode {
+        app.main_selected = app.main_selected.saturating_sub(1);
+    } else if app.focus_sidebar {
+        app.sidebar_selected = app.sidebar_selected.saturating_sub(1);
+    } else if let MainView::Help = &app.main_view {
+        app.help_scroll = app.help_scroll.saturating_sub(1);
+    } else if let MainView::Players = &app.main_view {
+        if !app.players_focus_global && app.main_selected == 0 {
+            app.players_focus_global = true;
+        } else if !app.players_focus_global {
+            app.main_selected -= 1;
+        }
+    } else if matches!(app.main_view, MainView::Search)
+        && !app.search_input_active
+        && app.main_selected == 0
+    {
+        app.search_input_active = true;
+    } else if matches!(app.main_view, MainView::AppSearch { .. })
+        && !app.app_search_input_active
+        && app.main_selected == 0
+    {
+        app.app_search_input_active = true;
+    } else if app.local_filter.as_ref().is_some_and(|f| !f.editing)
+        && app.main_selected == 0
+    {
+        // At the top of a filtered list, ↑/k re-enters the filter input box.
+        if let Some(f) = &mut app.local_filter {
+            f.editing = true;
+        }
+    } else {
+        app.main_selected = app.main_selected.saturating_sub(1);
+    }
+}
+
+/// ↓/j: move the selection (or scroll/focus) down within the focused pane.
+fn nav_down(app: &mut App) {
+    if app.full_art_mode {
+        let max = app.queue.len().saturating_sub(1);
+        if app.main_selected < max {
+            app.main_selected += 1;
+        }
+    } else if app.focus_sidebar {
+        let max = app.sidebar_items.len().saturating_sub(1);
+        if app.sidebar_selected < max {
+            app.sidebar_selected += 1;
+        }
+    } else if let MainView::Help = &app.main_view {
+        app.help_scroll = app.help_scroll.saturating_add(1).min(help_max_scroll(app));
+    } else if let MainView::Players = &app.main_view {
+        if app.players_focus_global {
+            app.players_focus_global = false;
+            app.main_selected = 0;
+        } else {
+            let max = utils::main_list_len(app).saturating_sub(1);
+            if app.main_selected < max {
+                app.main_selected += 1;
+            }
+        }
+    } else {
+        let max = utils::main_list_len(app).saturating_sub(1);
+        if app.main_selected < max {
+            app.main_selected += 1;
+        }
+    }
+}
+
+/// Esc/Backspace: clear an active filter, else pop one level of navigation for the current view.
+fn navigate_back(app: &mut App) {
+    if app.local_filter.is_some() {
+        // While a local filter is applied (and not editing — those keys are routed to
+        // handle_local_filter_key upstream), Back/Esc/Backspace clears the filter and
+        // stays on the same view rather than navigating away.
+        filter::clear(app);
+    } else if !app.focus_sidebar {
+        match &app.main_view.clone() {
+            MainView::Library(LibraryView::Tracks { album_id: Some(_) }) => {
+                if let Some(prev) = app.previous_view.take() {
+                    app.main_view = prev;
+                } else {
+                    app.main_view =
+                        MainView::Library(LibraryView::Albums { artist_id: None });
+                    app.main_selected = 0;
+                }
+            }
+            MainView::Library(LibraryView::Albums { artist_id: Some(_) }) => {
+                if let Some(prev) = app.previous_view.take() {
+                    app.main_view = prev;
+                } else {
+                    app.main_view = MainView::Library(LibraryView::Artists);
+                    app.main_selected = 0;
+                }
+            }
+            MainView::Library(LibraryView::Folder { .. }) => {
+                if let Some(prev) = app.folder_nav_stack.pop() {
+                    app.folder_items = prev.items;
+                    app.main_selected = prev.selected;
+                    app.folder_title = prev.title;
+                    app.main_view = MainView::Library(LibraryView::Folder {
+                        folder_id: prev.folder_id,
+                    });
+                } else {
+                    app.main_view = MainView::MyMusic;
+                    app.main_selected = 0;
+                }
+            }
+            MainView::Library(LibraryView::Artists)
+            | MainView::Library(LibraryView::AlbumArtists)
+            | MainView::Library(LibraryView::Albums { artist_id: None })
+            | MainView::Library(LibraryView::Tracks { album_id: None })
+            | MainView::Library(LibraryView::Playlists)
+            | MainView::Library(LibraryView::RecentlyPlayedArtists)
+            | MainView::Library(LibraryView::NewMusic) => {
+                if let Some(prev) = app.previous_view.take() {
+                    app.main_view = prev;
+                } else {
+                    app.main_view = MainView::MyMusic;
+                    app.main_selected = 0;
+                }
+            }
+            MainView::MyMusic => {
+                app.focus_sidebar = true;
+                app.players_focus_global = false;
+            }
+            MainView::Radio => {
+                if let Some(prev) = app.radio_nav_stack.pop() {
+                    app.radio_items = prev.items;
+                    app.main_selected = prev.selected;
+                    app.radio_title = prev.title;
+                } else if let Some(prev) = app.previous_view.take() {
+                    app.main_view = prev;
+                } else {
+                    app.focus_sidebar = true;
+                }
+            }
+            MainView::Apps => {
+                if let Some(prev) = app.app_nav_stack.pop() {
+                    app.app_items = prev.items;
+                    app.main_selected = prev.selected;
+                    app.app_title = prev.title;
+                } else if let Some(prev) = app.previous_view.take() {
+                    app.main_view = prev;
+                } else {
+                    app.focus_sidebar = true;
+                }
+            }
+            MainView::Favourites => {
+                if let Some(prev) = app.fav_nav_stack.pop() {
+                    app.fav_items = prev.items;
+                    app.main_selected = prev.selected;
+                    app.fav_title = prev.title;
+                } else {
+                    app.focus_sidebar = true;
+                }
+            }
+            MainView::Search => {
+                app.focus_sidebar = true;
+                app.search_input_active = false;
+            }
+            MainView::AppSearch { .. } => {
+                if app.app_search_input_active {
+                    app.app_search_input_active = false;
+                } else {
+                    app.main_view = MainView::Apps;
+                    app.app_search_query = String::new();
+                    app.app_search_cursor_pos = 0;
+                    app.app_search_results = vec![];
+                }
+            }
+            _ => {
+                app.focus_sidebar = true;
+                app.players_focus_global = false;
+            }
+        }
+    }
+}
+
 /// Returns true if the app should quit.
 pub async fn handle_action(
     app: &mut App,
@@ -1469,71 +1647,9 @@ pub async fn handle_action(
             }
         }
 
-        Action::NavUp => {
-            if app.full_art_mode {
-                app.main_selected = app.main_selected.saturating_sub(1);
-            } else if app.focus_sidebar {
-                app.sidebar_selected = app.sidebar_selected.saturating_sub(1);
-            } else if let MainView::Help = &app.main_view {
-                app.help_scroll = app.help_scroll.saturating_sub(1);
-            } else if let MainView::Players = &app.main_view {
-                if !app.players_focus_global && app.main_selected == 0 {
-                    app.players_focus_global = true;
-                } else if !app.players_focus_global {
-                    app.main_selected -= 1;
-                }
-            } else if matches!(app.main_view, MainView::Search)
-                && !app.search_input_active
-                && app.main_selected == 0
-            {
-                app.search_input_active = true;
-            } else if matches!(app.main_view, MainView::AppSearch { .. })
-                && !app.app_search_input_active
-                && app.main_selected == 0
-            {
-                app.app_search_input_active = true;
-            } else if app.local_filter.as_ref().is_some_and(|f| !f.editing)
-                && app.main_selected == 0
-            {
-                // At the top of a filtered list, ↑/k re-enters the filter input box.
-                if let Some(f) = &mut app.local_filter {
-                    f.editing = true;
-                }
-            } else {
-                app.main_selected = app.main_selected.saturating_sub(1);
-            }
-        }
+        Action::NavUp => nav_up(app),
 
-        Action::NavDown => {
-            if app.full_art_mode {
-                let max = app.queue.len().saturating_sub(1);
-                if app.main_selected < max {
-                    app.main_selected += 1;
-                }
-            } else if app.focus_sidebar {
-                let max = app.sidebar_items.len().saturating_sub(1);
-                if app.sidebar_selected < max {
-                    app.sidebar_selected += 1;
-                }
-            } else if let MainView::Help = &app.main_view {
-                app.help_scroll = app.help_scroll.saturating_add(1).min(help_max_scroll(app));
-            } else if let MainView::Players = &app.main_view {
-                if app.players_focus_global {
-                    app.players_focus_global = false;
-                    app.main_selected = 0;
-                } else {
-                    let max = utils::main_list_len(app).saturating_sub(1);
-                    if app.main_selected < max {
-                        app.main_selected += 1;
-                    }
-                }
-            } else {
-                let max = utils::main_list_len(app).saturating_sub(1);
-                if app.main_selected < max {
-                    app.main_selected += 1;
-                }
-            }
-        }
+        Action::NavDown => nav_down(app),
 
         Action::PageUp => {
             if !app.focus_sidebar {
@@ -1594,114 +1710,7 @@ pub async fn handle_action(
             }
         }
 
-        Action::Back => {
-            if app.local_filter.is_some() {
-                // While a local filter is applied (and not editing — those keys are routed to
-                // handle_local_filter_key upstream), Back/Esc/Backspace clears the filter and
-                // stays on the same view rather than navigating away.
-                filter::clear(app);
-            } else if !app.focus_sidebar {
-                match &app.main_view.clone() {
-                    MainView::Library(LibraryView::Tracks { album_id: Some(_) }) => {
-                        if let Some(prev) = app.previous_view.take() {
-                            app.main_view = prev;
-                        } else {
-                            app.main_view =
-                                MainView::Library(LibraryView::Albums { artist_id: None });
-                            app.main_selected = 0;
-                        }
-                    }
-                    MainView::Library(LibraryView::Albums { artist_id: Some(_) }) => {
-                        if let Some(prev) = app.previous_view.take() {
-                            app.main_view = prev;
-                        } else {
-                            app.main_view = MainView::Library(LibraryView::Artists);
-                            app.main_selected = 0;
-                        }
-                    }
-                    MainView::Library(LibraryView::Folder { .. }) => {
-                        if let Some(prev) = app.folder_nav_stack.pop() {
-                            app.folder_items = prev.items;
-                            app.main_selected = prev.selected;
-                            app.folder_title = prev.title;
-                            app.main_view = MainView::Library(LibraryView::Folder {
-                                folder_id: prev.folder_id,
-                            });
-                        } else {
-                            app.main_view = MainView::MyMusic;
-                            app.main_selected = 0;
-                        }
-                    }
-                    MainView::Library(LibraryView::Artists)
-                    | MainView::Library(LibraryView::AlbumArtists)
-                    | MainView::Library(LibraryView::Albums { artist_id: None })
-                    | MainView::Library(LibraryView::Tracks { album_id: None })
-                    | MainView::Library(LibraryView::Playlists)
-                    | MainView::Library(LibraryView::RecentlyPlayedArtists)
-                    | MainView::Library(LibraryView::NewMusic) => {
-                        if let Some(prev) = app.previous_view.take() {
-                            app.main_view = prev;
-                        } else {
-                            app.main_view = MainView::MyMusic;
-                            app.main_selected = 0;
-                        }
-                    }
-                    MainView::MyMusic => {
-                        app.focus_sidebar = true;
-                        app.players_focus_global = false;
-                    }
-                    MainView::Radio => {
-                        if let Some(prev) = app.radio_nav_stack.pop() {
-                            app.radio_items = prev.items;
-                            app.main_selected = prev.selected;
-                            app.radio_title = prev.title;
-                        } else if let Some(prev) = app.previous_view.take() {
-                            app.main_view = prev;
-                        } else {
-                            app.focus_sidebar = true;
-                        }
-                    }
-                    MainView::Apps => {
-                        if let Some(prev) = app.app_nav_stack.pop() {
-                            app.app_items = prev.items;
-                            app.main_selected = prev.selected;
-                            app.app_title = prev.title;
-                        } else if let Some(prev) = app.previous_view.take() {
-                            app.main_view = prev;
-                        } else {
-                            app.focus_sidebar = true;
-                        }
-                    }
-                    MainView::Favourites => {
-                        if let Some(prev) = app.fav_nav_stack.pop() {
-                            app.fav_items = prev.items;
-                            app.main_selected = prev.selected;
-                            app.fav_title = prev.title;
-                        } else {
-                            app.focus_sidebar = true;
-                        }
-                    }
-                    MainView::Search => {
-                        app.focus_sidebar = true;
-                        app.search_input_active = false;
-                    }
-                    MainView::AppSearch { .. } => {
-                        if app.app_search_input_active {
-                            app.app_search_input_active = false;
-                        } else {
-                            app.main_view = MainView::Apps;
-                            app.app_search_query = String::new();
-                            app.app_search_cursor_pos = 0;
-                            app.app_search_results = vec![];
-                        }
-                    }
-                    _ => {
-                        app.focus_sidebar = true;
-                        app.players_focus_global = false;
-                    }
-                }
-            }
-        }
+        Action::Back => navigate_back(app),
 
         Action::PlayPause => {
             if let Some(pid) = app.active_pid() {
@@ -2346,74 +2355,205 @@ pub fn handle_config_key(
     }
 }
 
-pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
-    match app.main_view.clone() {
-        MainView::MyMusic => {
-            // Map the selected row through the shared MyMusicEntry order (single source of truth
-            // with ui::draw_my_music) rather than matching raw indices.
-            let Some(&entry) = MyMusicEntry::ALL.get(app.main_selected) else {
-                return;
-            };
-            match entry {
-                MyMusicEntry::Artists => {
-                    app.main_view = MainView::Library(LibraryView::Artists);
-                    app.main_selected = 0;
+/// Enter on a My Music menu row: open the corresponding library view and start its load.
+fn select_my_music(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
+    // Map the selected row through the shared MyMusicEntry order (single source of truth
+    // with ui::draw_my_music) rather than matching raw indices.
+    let Some(&entry) = MyMusicEntry::ALL.get(app.main_selected) else {
+        return;
+    };
+    match entry {
+        MyMusicEntry::Artists => {
+            app.main_view = MainView::Library(LibraryView::Artists);
+            app.main_selected = 0;
+        }
+        MyMusicEntry::AlbumArtists => {
+            app.main_view = MainView::Library(LibraryView::AlbumArtists);
+            app.main_selected = 0;
+        }
+        MyMusicEntry::RecentlyPlayedArtists => {
+            app.is_loading = true;
+            background::load_recent_artists(50, client.clone(), tx.clone());
+            app.main_view = MainView::Library(LibraryView::RecentlyPlayedArtists);
+            app.main_selected = 0;
+        }
+        MyMusicEntry::Albums => {
+            app.is_loading = true;
+            background::load_albums(None, client.clone(), tx.clone());
+            app.main_view = MainView::Library(LibraryView::Albums { artist_id: None });
+            app.main_selected = 0;
+        }
+        MyMusicEntry::NewMusic => {
+            app.is_loading = true;
+            background::load_new_music(50, client.clone(), tx.clone());
+            app.main_view = MainView::Library(LibraryView::NewMusic);
+            app.main_selected = 0;
+        }
+        MyMusicEntry::Tracks => {
+            app.is_loading = true;
+            background::load_all_tracks(client.clone(), tx.clone());
+            app.main_view = MainView::Library(LibraryView::Tracks { album_id: None });
+            app.main_selected = 0;
+        }
+        MyMusicEntry::Playlists => {
+            app.is_loading = true;
+            background::load_playlists(client.clone(), tx.clone());
+            app.main_view = MainView::Library(LibraryView::Playlists);
+            app.main_selected = 0;
+        }
+        MyMusicEntry::Folders => {
+            app.folder_items = vec![];
+            app.folder_nav_stack = vec![];
+            app.folder_title = "Folders".to_string();
+            app.main_view = MainView::Library(LibraryView::Folder { folder_id: None });
+            app.main_selected = 0;
+            app.is_loading = true;
+            background::load_folder_items(None, client.clone(), tx.clone());
+        }
+    }
+}
+
+/// Enter in the Folders view: descend into a sub-folder, or play a track/playlist file.
+fn select_folder_item(
+    app: &mut App,
+    folder_id: Option<u32>,
+    client: &Arc<LmsClient>,
+    tx: &mpsc::Sender<AppMsg>,
+) {
+    if let Some(item) = app.folder_items.get(app.main_selected).cloned() {
+        match item.item_type {
+            FolderItemType::Folder => {
+                let nav = FolderNav {
+                    folder_id,
+                    title: app.folder_title.clone(),
+                    items: std::mem::take(&mut app.folder_items),
+                    selected: app.main_selected,
+                };
+                app.folder_nav_stack.push(nav);
+                app.folder_title = item.filename.clone();
+                app.main_view = MainView::Library(LibraryView::Folder {
+                    folder_id: Some(item.id),
+                });
+                app.main_selected = 0;
+                app.is_loading = true;
+                background::load_folder_items(Some(item.id), client.clone(), tx.clone());
+            }
+            FolderItemType::Track => {
+                if let Some(pid) = app.active_pid() {
+                    let track_id = item.id.to_string();
+                    spawn_fire(client, move |c| async move {
+                        c.play_track(&pid, &track_id).await
+                    });
                 }
-                MyMusicEntry::AlbumArtists => {
-                    app.main_view = MainView::Library(LibraryView::AlbumArtists);
-                    app.main_selected = 0;
-                }
-                MyMusicEntry::RecentlyPlayedArtists => {
-                    app.is_loading = true;
-                    background::load_recent_artists(50, client.clone(), tx.clone());
-                    app.main_view = MainView::Library(LibraryView::RecentlyPlayedArtists);
-                    app.main_selected = 0;
-                }
-                MyMusicEntry::Albums => {
-                    app.is_loading = true;
-                    background::load_albums(None, client.clone(), tx.clone());
-                    app.main_view = MainView::Library(LibraryView::Albums { artist_id: None });
-                    app.main_selected = 0;
-                }
-                MyMusicEntry::NewMusic => {
-                    app.is_loading = true;
-                    background::load_new_music(50, client.clone(), tx.clone());
-                    app.main_view = MainView::Library(LibraryView::NewMusic);
-                    app.main_selected = 0;
-                }
-                MyMusicEntry::Tracks => {
-                    app.is_loading = true;
-                    background::load_all_tracks(client.clone(), tx.clone());
-                    app.main_view = MainView::Library(LibraryView::Tracks { album_id: None });
-                    app.main_selected = 0;
-                }
-                MyMusicEntry::Playlists => {
-                    app.is_loading = true;
-                    background::load_playlists(client.clone(), tx.clone());
-                    app.main_view = MainView::Library(LibraryView::Playlists);
-                    app.main_selected = 0;
-                }
-                MyMusicEntry::Folders => {
-                    app.folder_items = vec![];
-                    app.folder_nav_stack = vec![];
-                    app.folder_title = "Folders".to_string();
-                    app.main_view = MainView::Library(LibraryView::Folder { folder_id: None });
-                    app.main_selected = 0;
-                    app.is_loading = true;
-                    background::load_folder_items(None, client.clone(), tx.clone());
+            }
+            FolderItemType::Playlist => {
+                if let (Some(pid), Some(url)) = (app.active_pid(), item.url.clone()) {
+                    let name = item.filename.clone();
+                    spawn_status(
+                        client,
+                        tx,
+                        format!("Playing \"{}\"", name),
+                        move |c| async move { c.play_url_with_title(&pid, &url, &name).await },
+                    );
                 }
             }
         }
-        // Both artist lists drill into the same Albums view; they differ only in source vec.
-        MainView::Library(view @ (LibraryView::Artists | LibraryView::AlbumArtists)) => {
-            let artist = if matches!(view, LibraryView::AlbumArtists) {
-                app.album_artists.get(app.main_selected)
-            } else {
-                app.artists.get(app.main_selected)
-            };
-            if let Some(artist) = artist {
+    }
+}
+
+/// Enter on a global search result: drill into artists/albums, play tracks/playlists/items.
+fn select_search_result(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
+    let Some(item) = app.search_results.get(app.main_selected).cloned() else {
+        return;
+    };
+    match item {
+        SearchResultItem::Artist(a) => {
+            let id = utils::json_id_to_string(&a.id);
+            background::load_albums(Some(id.clone()), client.clone(), tx.clone());
+            app.previous_view = Some(MainView::Search);
+            app.main_view = MainView::Library(LibraryView::Albums {
+                artist_id: Some(id),
+            });
+            app.main_selected = 0;
+        }
+        SearchResultItem::Album(alb) => {
+            let id = utils::json_id_to_string(&alb.id);
+            background::load_tracks(id.clone(), client.clone(), tx.clone());
+            app.previous_view = Some(MainView::Search);
+            app.main_view = MainView::Library(LibraryView::Tracks { album_id: Some(id) });
+            app.main_selected = 0;
+        }
+        SearchResultItem::Track(t) => {
+            if let Some(pid) = app.active_pid() {
+                let track_id = utils::extract_id(t.id.as_ref());
+                spawn_fire(client, move |c| async move {
+                    c.play_track(&pid, &track_id).await
+                });
+            }
+        }
+        SearchResultItem::Playlist(pl) => {
+            if let Some(pid) = app.active_pid() {
+                let playlist_id = utils::json_id_to_string(&pl.id);
+                spawn_fire(client, move |c| async move {
+                    c.play_playlist(&pid, &playlist_id).await
+                });
+            }
+        }
+        SearchResultItem::AppItem(item) => {
+            if let Some(cmd) = item.cmd {
+                let item_id = item.item_id.clone();
+                let pid = app.active_pid().unwrap_or_default();
+                app.app_items = vec![];
+                app.app_nav_stack = vec![];
+                app.app_title = item.name.clone();
+                app.previous_view = Some(MainView::Search);
+                app.main_view = MainView::Apps;
+                app.main_selected = 0;
+                background::load_app_items(pid, cmd, item_id, client.clone(), tx.clone());
+            }
+        }
+        SearchResultItem::RadioItem(item) => {
+            if item.is_navigable()
+                && let Some(cmd) = item.cmd
+            {
+                let item_id = item.item_id.clone();
+                let pid = app.active_pid().unwrap_or_default();
+                app.radio_items = vec![];
+                app.radio_nav_stack = vec![];
+                app.radio_title = item.name.clone();
+                app.previous_view = Some(MainView::Search);
+                app.main_view = MainView::Radio;
+                app.main_selected = 0;
+                app.is_loading = true;
+                background::load_radio_items(pid, cmd, item_id, client.clone(), tx.clone());
+            } else if item.is_playable()
+                && let (Some(pid), Some(url)) = (app.active_pid(), item.url)
+            {
+                let name = item.name.clone();
+                spawn_fire(client, move |c| async move {
+                    c.play_url_with_title(&pid, &url, &name).await
+                });
+            }
+        }
+    }
+}
+
+pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mpsc::Sender<AppMsg>) {
+    match app.main_view.clone() {
+        MainView::MyMusic => select_my_music(app, client, tx),
+        // Every artist list drills into the same Albums view; they differ only in source vec.
+        MainView::Library(
+            view @ (LibraryView::Artists
+            | LibraryView::AlbumArtists
+            | LibraryView::RecentlyPlayedArtists),
+        ) => {
+            if let Some(artist) = app.view_artists().and_then(|l| l.get(app.main_selected)) {
                 let id = utils::json_id_to_string(&artist.id);
                 app.is_loading = true;
+                // Recently Played isn't Albums' natural parent, so remember where to go back to.
+                if view == LibraryView::RecentlyPlayedArtists {
+                    app.previous_view = Some(MainView::Library(view));
+                }
                 background::load_albums(Some(id.clone()), client.clone(), tx.clone());
                 app.main_view = MainView::Library(LibraryView::Albums {
                     artist_id: Some(id),
@@ -2431,45 +2571,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
             }
         }
         MainView::Library(LibraryView::Folder { folder_id }) => {
-            if let Some(item) = app.folder_items.get(app.main_selected).cloned() {
-                match item.item_type {
-                    FolderItemType::Folder => {
-                        let nav = FolderNav {
-                            folder_id,
-                            title: app.folder_title.clone(),
-                            items: std::mem::take(&mut app.folder_items),
-                            selected: app.main_selected,
-                        };
-                        app.folder_nav_stack.push(nav);
-                        app.folder_title = item.filename.clone();
-                        app.main_view = MainView::Library(LibraryView::Folder {
-                            folder_id: Some(item.id),
-                        });
-                        app.main_selected = 0;
-                        app.is_loading = true;
-                        background::load_folder_items(Some(item.id), client.clone(), tx.clone());
-                    }
-                    FolderItemType::Track => {
-                        if let Some(pid) = app.active_pid() {
-                            let track_id = item.id.to_string();
-                            spawn_fire(client, move |c| async move {
-                                c.play_track(&pid, &track_id).await
-                            });
-                        }
-                    }
-                    FolderItemType::Playlist => {
-                        if let (Some(pid), Some(url)) = (app.active_pid(), item.url.clone()) {
-                            let name = item.filename.clone();
-                            spawn_status(
-                                client,
-                                tx,
-                                format!("Playing \"{}\"", name),
-                                move |c| async move { c.play_url_with_title(&pid, &url, &name).await },
-                            );
-                        }
-                    }
-                }
-            }
+            select_folder_item(app, folder_id, client, tx)
         }
         MainView::Library(LibraryView::Playlists) => {
             if let Some(pid) = app.active_pid()
@@ -2483,19 +2585,6 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
                     format!("Playing \"{}\"", name),
                     move |c| async move { c.play_playlist(&pid, &id).await },
                 );
-            }
-        }
-        MainView::Library(LibraryView::RecentlyPlayedArtists) => {
-            if let Some(artist) = app.recent_artists.get(app.main_selected) {
-                let id = utils::json_id_to_string(&artist.id);
-                app.is_loading = true;
-                app.previous_view =
-                    Some(MainView::Library(LibraryView::RecentlyPlayedArtists));
-                background::load_albums(Some(id.clone()), client.clone(), tx.clone());
-                app.main_view = MainView::Library(LibraryView::Albums {
-                    artist_id: Some(id),
-                });
-                app.main_selected = 0;
             }
         }
         MainView::Library(LibraryView::NewMusic) => {
@@ -2684,81 +2773,7 @@ pub async fn handle_main_select(app: &mut App, client: &Arc<LmsClient>, tx: &mps
             }
         }
         MainView::Help => {}
-        MainView::Search => {
-            let Some(item) = app.search_results.get(app.main_selected).cloned() else {
-                return;
-            };
-            match item {
-                SearchResultItem::Artist(a) => {
-                    let id = utils::json_id_to_string(&a.id);
-                    background::load_albums(Some(id.clone()), client.clone(), tx.clone());
-                    app.previous_view = Some(MainView::Search);
-                    app.main_view = MainView::Library(LibraryView::Albums {
-                        artist_id: Some(id),
-                    });
-                    app.main_selected = 0;
-                }
-                SearchResultItem::Album(alb) => {
-                    let id = utils::json_id_to_string(&alb.id);
-                    background::load_tracks(id.clone(), client.clone(), tx.clone());
-                    app.previous_view = Some(MainView::Search);
-                    app.main_view = MainView::Library(LibraryView::Tracks { album_id: Some(id) });
-                    app.main_selected = 0;
-                }
-                SearchResultItem::Track(t) => {
-                    if let Some(pid) = app.active_pid() {
-                        let track_id = utils::extract_id(t.id.as_ref());
-                        spawn_fire(client, move |c| async move {
-                            c.play_track(&pid, &track_id).await
-                        });
-                    }
-                }
-                SearchResultItem::Playlist(pl) => {
-                    if let Some(pid) = app.active_pid() {
-                        let playlist_id = utils::json_id_to_string(&pl.id);
-                        spawn_fire(client, move |c| async move {
-                            c.play_playlist(&pid, &playlist_id).await
-                        });
-                    }
-                }
-                SearchResultItem::AppItem(item) => {
-                    if let Some(cmd) = item.cmd {
-                        let item_id = item.item_id.clone();
-                        let pid = app.active_pid().unwrap_or_default();
-                        app.app_items = vec![];
-                        app.app_nav_stack = vec![];
-                        app.app_title = item.name.clone();
-                        app.previous_view = Some(MainView::Search);
-                        app.main_view = MainView::Apps;
-                        app.main_selected = 0;
-                        background::load_app_items(pid, cmd, item_id, client.clone(), tx.clone());
-                    }
-                }
-                SearchResultItem::RadioItem(item) => {
-                    if item.is_navigable()
-                        && let Some(cmd) = item.cmd
-                    {
-                        let item_id = item.item_id.clone();
-                        let pid = app.active_pid().unwrap_or_default();
-                        app.radio_items = vec![];
-                        app.radio_nav_stack = vec![];
-                        app.radio_title = item.name.clone();
-                        app.previous_view = Some(MainView::Search);
-                        app.main_view = MainView::Radio;
-                        app.main_selected = 0;
-                        app.is_loading = true;
-                        background::load_radio_items(pid, cmd, item_id, client.clone(), tx.clone());
-                    } else if item.is_playable()
-                        && let (Some(pid), Some(url)) = (app.active_pid(), item.url)
-                    {
-                        let name = item.name.clone();
-                        spawn_fire(client, move |c| async move {
-                            c.play_url_with_title(&pid, &url, &name).await
-                        });
-                    }
-                }
-            }
-        }
+        MainView::Search => select_search_result(app, client, tx),
     }
 }
 
@@ -2778,6 +2793,8 @@ fn spawn_add_url_folder(
     tx: mpsc::Sender<AppMsg>,
 ) {
     tokio::spawn(async move {
+        // LMS has no batch add for URLs, so items go one round-trip each. Start playback right
+        // after the first success instead of waiting for the whole list.
         let mut added = 0usize;
         for (name, url) in &items {
             if client
@@ -2786,12 +2803,12 @@ fn spawn_add_url_folder(
                 .is_ok()
             {
                 added += 1;
+                if added == 1 && queue_was_empty {
+                    let _ = client.play(&pid).await;
+                }
             }
         }
         if added > 0 {
-            if queue_was_empty {
-                let _ = client.play(&pid).await;
-            }
             let _ = tx
                 .send(AppMsg::StatusMsg(format!(
                     "Added {} items from \"{}\" to queue",
@@ -2810,24 +2827,25 @@ fn spawn_replace_with_url_folder(
     tx: mpsc::Sender<AppMsg>,
 ) {
     tokio::spawn(async move {
-        if client.clear_queue(&pid).await.is_ok() {
-            let mut added = 0usize;
-            for (name, url) in &items {
-                if client
-                    .add_url_with_title_to_queue(&pid, url, name)
-                    .await
-                    .is_ok()
-                {
-                    added += 1;
-                }
-            }
-            if added > 0 {
-                let _ = client.play(&pid).await;
-                let _ = tx
-                    .send(AppMsg::StatusMsg(format!("Playing \"{}\" folder", title)))
-                    .await;
+        // `playlist play <url>` replaces the queue and starts the first item in one call, so
+        // music begins immediately; the rest are appended behind it.
+        let mut rest = items.iter();
+        let mut started = false;
+        for (name, url) in rest.by_ref() {
+            if client.play_url_with_title(&pid, url, name).await.is_ok() {
+                started = true;
+                break;
             }
         }
+        if !started {
+            return;
+        }
+        for (name, url) in rest {
+            let _ = client.add_url_with_title_to_queue(&pid, url, name).await;
+        }
+        let _ = tx
+            .send(AppMsg::StatusMsg(format!("Playing \"{}\" folder", title)))
+            .await;
     });
 }
 
@@ -2944,20 +2962,17 @@ fn current_queue_target(app: &App) -> Option<QueueTarget> {
         })
     };
     match app.main_view.clone() {
-        MainView::Library(LibraryView::Artists | LibraryView::AlbumArtists) => {
-            let list = if matches!(app.main_view, MainView::Library(LibraryView::Artists)) {
-                &app.artists
-            } else {
-                &app.album_artists
-            };
-            let artist = list.get(app.main_selected)?;
+        MainView::Library(
+            LibraryView::Artists | LibraryView::AlbumArtists | LibraryView::RecentlyPlayedArtists,
+        ) => {
+            let artist = app.view_artists()?.get(app.main_selected)?;
             Some(QueueTarget::Artist {
                 id: utils::json_id_to_string(&artist.id),
                 name: artist.artist.clone(),
             })
         }
-        MainView::Library(LibraryView::Albums { .. }) => {
-            let album = app.albums.get(app.main_selected)?;
+        MainView::Library(LibraryView::Albums { .. } | LibraryView::NewMusic) => {
+            let album = app.view_albums()?.get(app.main_selected)?;
             Some(QueueTarget::Album {
                 id: utils::json_id_to_string(&album.id),
                 name: album.album.clone(),

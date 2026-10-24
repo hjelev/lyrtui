@@ -2712,10 +2712,12 @@ fn draw_disconnected_overlay(f: &mut Frame, area: Rect, state: &ConnectionState)
     let msg = match state {
         ConnectionState::Disconnected => " Disconnected from Lyrion server ",
         ConnectionState::Reconnecting => " Reconnecting to Lyrion server... ",
+        ConnectionState::AuthFailed => " Authentication failed — press c to edit config ",
         ConnectionState::Connected => return,
     };
 
-    let popup_area = centered_rect(40, 3, area);
+    let w = (msg.chars().count() as u16 + 2).max(area.width * 40 / 100);
+    let popup_area = centered_rect_abs(w, 3, area);
     f.render_widget(Clear, popup_area);
     let p = Paragraph::new(msg)
         .block(
@@ -2985,13 +2987,6 @@ fn format_duration(secs: f64) -> String {
     } else {
         format!("{}:{:02}", m, s % 60)
     }
-}
-
-fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
-    let w = area.width * percent_x / 100;
-    let x = area.x + (area.width - w) / 2;
-    let y = area.y + (area.height - height) / 2;
-    Rect::new(x, y, w, height)
 }
 
 /// Returns the queue widget rect in full art mode (right column, below the Now Playing block).
@@ -3762,11 +3757,65 @@ pub fn compute_delete_queue_button_rects(area: Rect) -> (Rect, [Rect; 5]) {
     (popup, rects)
 }
 
+// Right-align every config-modal field label to this width so all colons share one column.
+const CONFIG_LABEL_W: usize = 19; // == "Disable auto colors".len(), the longest label
+
+/// Label style shared by config-modal rows: bright when the row is selected, mid otherwise.
+fn config_label_style(is_selected: bool, accent_bright: Color, accent_mid: Color) -> Style {
+    Style::default().fg(if is_selected { accent_bright } else { accent_mid })
+}
+
+/// Value style for a selected (bold accent) or unselected (plain white) config-modal row.
+fn config_value_style(is_selected: bool, accent_bright: Color) -> Style {
+    if is_selected {
+        Style::default().fg(accent_bright).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    }
+}
+
+/// A `Label: value` text-input row of the config modal; the value is inverted while editing.
+fn config_text_line(
+    label: &str,
+    value: &str,
+    is_selected: bool,
+    is_editing: bool,
+    accent_bright: Color,
+    accent_mid: Color,
+) -> Line<'static> {
+    let val_style = if is_editing {
+        Style::default().fg(Color::Black).bg(accent_bright)
+    } else {
+        config_value_style(is_selected, accent_bright)
+    };
+    Line::from(vec![
+        Span::styled(
+            format!("  {:>w$}: ", label, w = CONFIG_LABEL_W),
+            config_label_style(is_selected, accent_bright, accent_mid),
+        ),
+        Span::styled(value.to_string(), val_style),
+    ])
+}
+
+/// A `Label: < value >` spinner/selector row of the config modal; arrows show only when selected.
+fn config_spinner_line(
+    label: &str,
+    value: String,
+    is_selected: bool,
+    accent_bright: Color,
+    accent_mid: Color,
+) -> Line<'static> {
+    let lbl_style = config_label_style(is_selected, accent_bright, accent_mid);
+    Line::from(vec![
+        Span::styled(format!("  {:>w$}: ", label, w = CONFIG_LABEL_W), lbl_style),
+        Span::styled(if is_selected { "< " } else { "  " }, lbl_style),
+        Span::styled(value, config_value_style(is_selected, accent_bright)),
+        Span::styled(if is_selected { " >" } else { "  " }, lbl_style),
+    ])
+}
+
 fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>, nerd: bool) {
     use crate::app::FieldKind;
-
-    // Right-align every field label to this width so all colons share one column.
-    const CONFIG_LABEL_W: usize = 19; // == "Disable auto colors".len(), the longest label
 
     let area = f.area();
     let n_servers = modal.discovered_servers.len();
@@ -3848,28 +3897,8 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     ];
     for (i, (label, value, idx)) in text_fields.iter().enumerate() {
         let is_selected = modal.selected_field == *idx;
-        let is_editing = is_selected && modal.editing;
-
-        let val_style = if is_editing {
-            Style::default().fg(Color::Black).bg(accent_bright)
-        } else if is_selected {
-            Style::default()
-                .fg(accent_bright)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-
-        let label_style = if is_selected {
-            Style::default().fg(accent_bright)
-        } else {
-            Style::default().fg(accent_mid)
-        };
-
-        let line = Line::from(vec![
-            Span::styled(format!("  {:>w$}: ", label, w = CONFIG_LABEL_W), label_style),
-            Span::styled(value.to_string(), val_style),
-        ]);
+        let editing = is_selected && modal.editing;
+        let line = config_text_line(label, value, is_selected, editing, accent_bright, accent_mid);
         f.render_widget(Paragraph::new(line), rows[i + 1]);
     }
 
@@ -3939,28 +3968,9 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     // Broadcast mask text field
     {
         let is_selected = modal.field_kind(modal.selected_field) == FieldKind::TextMask;
-        let is_editing = is_selected && modal.editing;
-        let val_style = if is_editing {
-            Style::default().fg(Color::Black).bg(accent_bright)
-        } else if is_selected {
-            Style::default()
-                .fg(accent_bright)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-        let lbl_style = if is_selected {
-            Style::default().fg(accent_bright)
-        } else {
-            Style::default().fg(accent_mid)
-        };
-        let line = Line::from(vec![
-            Span::styled(
-                format!("  {:>w$}: ", "Bcast mask", w = CONFIG_LABEL_W),
-                lbl_style,
-            ),
-            Span::styled(modal.broadcast_mask.clone(), val_style),
-        ]);
+        let editing = is_selected && modal.editing;
+        let mask = &modal.broadcast_mask;
+        let line = config_text_line("Bcast mask", mask, is_selected, editing, accent_bright, accent_mid);
         f.render_widget(Paragraph::new(line), rows[row_mask]);
     }
 
@@ -4039,61 +4049,17 @@ fn draw_config_modal(f: &mut Frame, modal: &ConfigModal, accent: Option<[u8; 3]>
     );
 
     // Accent lightness spinner: < NN% >
-    {
-        let is_selected =
-            modal.field_kind(modal.selected_field) == FieldKind::SpinnerLightness;
-        let val_style = if is_selected {
-            Style::default()
-                .fg(accent_bright)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-        let lbl_style = if is_selected {
-            Style::default().fg(accent_bright)
-        } else {
-            Style::default().fg(accent_mid)
-        };
-        let val_str = format!("{}%", modal.accent_lightness);
-        let line = Line::from(vec![
-            Span::styled(
-                format!("  {:>w$}: ", "Accent lightness", w = CONFIG_LABEL_W),
-                lbl_style,
-            ),
-            Span::styled(if is_selected { "< " } else { "  " }, lbl_style),
-            Span::styled(val_str, val_style),
-            Span::styled(if is_selected { " >" } else { "  " }, lbl_style),
-        ]);
-        f.render_widget(Paragraph::new(line), rows[row_lightness]);
-    }
+    let is_selected = modal.field_kind(modal.selected_field) == FieldKind::SpinnerLightness;
+    let pct = format!("{}%", modal.accent_lightness);
+    let line = config_spinner_line("Accent lightness", pct, is_selected, accent_bright, accent_mid);
+    f.render_widget(Paragraph::new(line), rows[row_lightness]);
 
     // Image protocol selector: < protocol >
-    {
-        let is_selected = modal.field_kind(modal.selected_field) == FieldKind::SelectorProtocol;
-        let proto_name = IMAGE_PROTOCOLS[modal.image_protocol_idx];
-        let val_style = if is_selected {
-            Style::default()
-                .fg(accent_bright)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::White)
-        };
-        let lbl_style = if is_selected {
-            Style::default().fg(accent_bright)
-        } else {
-            Style::default().fg(accent_mid)
-        };
-        let line = Line::from(vec![
-            Span::styled(
-                format!("  {:>w$}: ", "Image protocol", w = CONFIG_LABEL_W),
-                lbl_style,
-            ),
-            Span::styled(if is_selected { "< " } else { "  " }, lbl_style),
-            Span::styled(proto_name, val_style),
-            Span::styled(if is_selected { " >" } else { "  " }, lbl_style),
-        ]);
-        f.render_widget(Paragraph::new(line), rows[row_proto]);
-    }
+    let is_selected = modal.field_kind(modal.selected_field) == FieldKind::SelectorProtocol;
+    let proto_name = IMAGE_PROTOCOLS[modal.image_protocol_idx].to_string();
+    let line =
+        config_spinner_line("Image protocol", proto_name, is_selected, accent_bright, accent_mid);
+    f.render_widget(Paragraph::new(line), rows[row_proto]);
 
     if let Some(err) = &modal.error {
         let p = Paragraph::new(err.as_str())

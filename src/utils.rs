@@ -1,5 +1,5 @@
 use crate::api::FolderItemType;
-use crate::app::{App, LibraryView, MainView, SearchResultItem};
+use crate::app::{App, LibraryView, MainView, MyMusicEntry, SearchResultItem};
 use ratatui::widgets::ListState;
 
 /// Extracts a string id from an `Option<&Value>`, falling back to an empty string for `None`/`Null`.
@@ -45,25 +45,13 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
     if app.full_art_mode {
         return app.queue.get(idx).and_then(|t| t.artwork_url.clone());
     }
+    if let Some(artists) = app.view_artists() {
+        return artists.get(idx).and_then(|a| artist_artwork_url(app, &a.id));
+    }
+    if let Some(albums) = app.view_albums() {
+        return albums.get(idx).map(|a| a.cover_url(base));
+    }
     match &app.main_view {
-        MainView::Library(LibraryView::Artists) => app
-            .artists
-            .get(idx)
-            .and_then(|a| artist_artwork_url(app, &a.id)),
-        MainView::Library(LibraryView::AlbumArtists) => app
-            .album_artists
-            .get(idx)
-            .and_then(|a| artist_artwork_url(app, &a.id)),
-        MainView::Library(LibraryView::Albums { .. }) => {
-            app.albums.get(idx).map(|a| a.cover_url(base))
-        }
-        MainView::Library(LibraryView::NewMusic) => {
-            app.new_music.get(idx).map(|a| a.cover_url(base))
-        }
-        MainView::Library(LibraryView::RecentlyPlayedArtists) => app
-            .recent_artists
-            .get(idx)
-            .and_then(|a| artist_artwork_url(app, &a.id)),
         MainView::Library(LibraryView::Tracks { .. }) => app.tracks.get(idx).and_then(|t| {
             t.id.as_ref()
                 .map(|id| music_image_url(base, json_id_to_string(id), "cover.jpg"))
@@ -108,19 +96,13 @@ pub fn thumbnail_url_for(app: &App, idx: usize, base: &str) -> Option<String> {
 /// The artist id at `idx` for views that list artists (so the prefetch loop can lazily resolve
 /// their cover art). Returns `None` for non-artist views or out-of-range indices.
 pub fn artist_id_at(app: &App, idx: usize) -> Option<String> {
-    let list = match &app.main_view {
-        MainView::Library(LibraryView::Artists) => &app.artists,
-        MainView::Library(LibraryView::AlbumArtists) => &app.album_artists,
-        MainView::Library(LibraryView::RecentlyPlayedArtists) => &app.recent_artists,
-        MainView::Search => {
-            return match app.search_results.get(idx) {
-                Some(SearchResultItem::Artist(a)) => Some(json_id_to_string(&a.id)),
-                _ => None,
-            };
-        }
-        _ => return None,
-    };
-    list.get(idx).map(|a| json_id_to_string(&a.id))
+    if let Some(artists) = app.view_artists() {
+        return artists.get(idx).map(|a| json_id_to_string(&a.id));
+    }
+    match (&app.main_view, app.search_results.get(idx)) {
+        (MainView::Search, Some(SearchResultItem::Artist(a))) => Some(json_id_to_string(&a.id)),
+        _ => None,
+    }
 }
 
 /// The folder id at `idx` for directory (non-track) rows in the Folders view, so the prefetch
@@ -312,15 +294,16 @@ pub fn main_list_len(app: &App) -> usize {
         return app.queue.len();
     }
     match &app.main_view {
-        MainView::MyMusic => 8,
-        MainView::Library(LibraryView::Artists) => app.artists.len(),
-        MainView::Library(LibraryView::AlbumArtists) => app.album_artists.len(),
-        MainView::Library(LibraryView::Albums { .. }) => app.albums.len(),
+        MainView::MyMusic => MyMusicEntry::ALL.len(),
+        MainView::Library(
+            LibraryView::Artists | LibraryView::AlbumArtists | LibraryView::RecentlyPlayedArtists,
+        ) => app.view_artists().map_or(0, <[_]>::len),
+        MainView::Library(LibraryView::Albums { .. } | LibraryView::NewMusic) => {
+            app.view_albums().map_or(0, <[_]>::len)
+        }
         MainView::Library(LibraryView::Tracks { .. }) => app.tracks.len(),
         MainView::Library(LibraryView::Folder { .. }) => app.folder_items.len(),
         MainView::Library(LibraryView::Playlists) => app.playlists.len(),
-        MainView::Library(LibraryView::RecentlyPlayedArtists) => app.recent_artists.len(),
-        MainView::Library(LibraryView::NewMusic) => app.new_music.len(),
         MainView::Queue => app.queue.len(),
         MainView::Players => app.players.len(),
         MainView::Radio => app.radio_items.len(),
@@ -329,5 +312,77 @@ pub fn main_list_len(app: &App) -> usize {
         MainView::Help => 0,
         MainView::Search => app.search_results.len(),
         MainView::AppSearch { .. } => app.app_search_results.len(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::FolderItem;
+    use serde_json::json;
+
+    fn folder(id: u32, t: FolderItemType) -> FolderItem {
+        FolderItem { id, filename: format!("f{id}"), item_type: t, duration: None, url: None }
+    }
+
+    #[test]
+    fn json_ids_normalize() {
+        assert_eq!(json_id_to_string(&json!("ab")), "ab");
+        assert_eq!(json_id_to_string(&json!(12)), "12");
+        assert_eq!(json_id_to_opt_string(&json!(3.0)), Some("3".into()));
+        assert_eq!(json_id_to_opt_string(&json!(null)), None);
+        assert_eq!(extract_id(None), "null");
+    }
+
+    #[test]
+    fn music_image_url_format() {
+        let url = music_image_url("http://h:9000", 42, "cover.jpg");
+        assert_eq!(url, "http://h:9000/music/42/cover.jpg");
+    }
+
+    #[test]
+    fn folder_id_only_for_non_track_rows() {
+        let mut app = App::new(None);
+        app.main_view = MainView::Library(LibraryView::Folder { folder_id: None });
+        app.folder_items =
+            vec![folder(1, FolderItemType::Folder), folder(2, FolderItemType::Track)];
+        assert_eq!(folder_id_at(&app, 0), Some(1));
+        assert_eq!(folder_id_at(&app, 1), None);
+        assert_eq!(folder_id_at(&app, 9), None);
+        assert_eq!(main_list_len(&app), 2);
+    }
+
+    #[test]
+    fn main_list_len_follows_view_and_full_art_mode() {
+        let mut app = App::new(None);
+        app.main_view = MainView::MyMusic;
+        assert_eq!(main_list_len(&app), 8);
+        app.main_view = MainView::Help;
+        assert_eq!(main_list_len(&app), 0);
+        app.queue = vec![serde_json::from_value(json!({"title": "t"})).unwrap()];
+        app.full_art_mode = true;
+        assert_eq!(main_list_len(&app), 1);
+    }
+
+    #[test]
+    fn artist_and_album_views_share_accessors() {
+        let mut app = App::new(None);
+        app.recent_artists = vec![serde_json::from_value(json!({"id": 9, "artist": "X"})).unwrap()];
+        app.new_music = vec![serde_json::from_value(json!({"id": 4, "album": "Y"})).unwrap()];
+        app.main_view = MainView::Library(LibraryView::RecentlyPlayedArtists);
+        assert_eq!(main_list_len(&app), 1);
+        assert_eq!(artist_id_at(&app, 0).as_deref(), Some("9"));
+        app.main_view = MainView::Library(LibraryView::NewMusic);
+        assert_eq!(main_list_len(&app), 1);
+        let thumb = thumbnail_url_for(&app, 0, "http://h");
+        assert_eq!(thumb.as_deref(), Some("http://h/music/4/cover.jpg"));
+        assert_eq!(artist_id_at(&app, 0), None);
+    }
+
+    #[test]
+    fn accent_normalization_hits_target_lightness() {
+        let [r, g, b] = normalize_accent_lightness([200, 30, 30], 50);
+        let (_, _, l) = rgb_to_hsl(r, g, b);
+        assert!((l - 0.5).abs() < 0.02);
     }
 }

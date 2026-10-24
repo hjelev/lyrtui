@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
@@ -76,23 +76,36 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let path = config_path();
+        Self::load_from(&config_path())
+    }
+
+    fn load_from(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
         let text =
-            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+            fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = config_path();
+        self.save_to(&config_path())
+    }
+
+    fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("creating config dir {}", parent.display()))?;
         }
         let text = toml::to_string_pretty(self).with_context(|| "serializing config")?;
-        fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+        fs::write(path, text).with_context(|| format!("writing {}", path.display()))?;
+        // The file may hold a plaintext password — keep it owner-only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("setting permissions on {}", path.display()))?;
+        }
         Ok(())
     }
 
@@ -114,4 +127,63 @@ pub fn config_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("lyrtui")
         .join("config.toml")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        std::env::temp_dir()
+            .join(format!("lyrtui-test-{}-{}", std::process::id(), name))
+            .join("config.toml")
+    }
+
+    #[test]
+    fn missing_file_yields_defaults() {
+        let cfg = Config::load_from(&temp_path("missing")).unwrap();
+        assert_eq!(cfg.host, default_host());
+        assert_eq!(cfg.port, default_port());
+    }
+
+    #[test]
+    fn partial_file_fills_defaults() {
+        let path = temp_path("partial");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "host = \"lms.local\"\n").unwrap();
+        let cfg = Config::load_from(&path).unwrap();
+        assert_eq!(cfg.host, "lms.local");
+        assert_eq!(cfg.port, default_port());
+        assert_eq!(cfg.image_protocol, default_image_protocol());
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn save_load_round_trip_and_private_perms() {
+        let path = temp_path("roundtrip");
+        let cfg = Config {
+            host: "10.0.0.5".into(),
+            port: 9001,
+            username: Some("u".into()),
+            password: Some("p".into()),
+            ..Config::default()
+        };
+        cfg.save_to(&path).unwrap();
+        let back = Config::load_from(&path).unwrap();
+        assert_eq!(back.base_url(), "http://10.0.0.5:9001/jsonrpc.js");
+        assert_eq!(back.credentials(), Some(("u".into(), "p".into())));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn credentials_need_both_fields() {
+        let cfg = Config { username: Some("u".into()), ..Config::default() };
+        assert_eq!(cfg.credentials(), None);
+    }
 }

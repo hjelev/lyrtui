@@ -199,6 +199,8 @@ image_protocol = ""          # override image protocol: "kitty", "sixel", "iterm
 
 You can edit this file directly or use the in-app config menu (`c`). Inside the menu, move between fields with the arrow keys (`↑`/`↓` or `←`/`→`) or `Tab`, press `Enter` to edit a field or toggle a setting, and click any field with the mouse. On the image-protocol selector, `←`/`→` cycle the value.
 
+The config file is saved with owner-only permissions (`0600`) on Unix because it may contain your password in plain text.
+
 #### Auto-discovery
 
 When `auto_discover = true` (the default), lyrtui sends a SLIM-protocol UDP broadcast on port 3483 at startup. The first responding server's IP is used automatically, overriding the configured `host`. Set `broadcast_mask` to a subnet address (e.g. `192.168.1.255`) if your server is on a different interface.
@@ -212,6 +214,8 @@ Set `use_nerd_icons = true` to enable Nerd Font glyphs in the sidebar, now-playi
 lyrtui extracts a dominant color from the current track's album art and uses it as the accent color for the progress bar, UI borders, and scrollbars. No configuration required — it updates automatically when the track changes.
 
 #### Troubleshooting
+
+If the server rejects your credentials (HTTP 401), lyrtui shows **"Authentication failed — press c to edit config"** instead of a generic "Disconnected" message. Set `username`/`password` in the config menu.
 
 If the input stream floods with events lyrtui can't act on (e.g. a detached terminal/SSH
 session or garbled escape sequences), the app exits cleanly rather than spinning a CPU core.
@@ -238,6 +242,8 @@ utils.rs      — shared helpers
 
 Network I/O runs in background `tokio` tasks and communicates with the UI via `mpsc` channels. The render loop never blocks on I/O.
 
+Cover-art thumbnails are kept in a bounded cache (300 entries, least-recently-shown evicted first), so browsing a large library doesn't keep growing memory. Thumbnails that failed to load while the server was unreachable are retried after reconnecting.
+
 Large lists (e.g. *All Tracks* with thousands of entries) stay fluid because navigation cost is independent of both list length and image-load state: each frame builds only the rows in the visible window (not the whole list), and cover-art thumbnails are fully resized **and** encoded for the terminal in the background task before being handed to the UI — so the draw call never blocks waiting for an image to encode.
 
 </details>
@@ -250,5 +256,7 @@ cargo run           # run with debug build
 cargo test          # run tests
 cargo clippy -- -D warnings   # lint (warnings are errors)
 ```
+
+CI (`.github/workflows/ci.yml`) runs clippy, the test suite and a release build on every push to `main` and on pull requests.
 
 </details>

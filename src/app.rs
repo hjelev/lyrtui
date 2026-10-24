@@ -8,6 +8,8 @@ pub enum ConnectionState {
     Connected,
     Disconnected,
     Reconnecting,
+    /// Server answered HTTP 401 — credentials missing or wrong.
+    AuthFailed,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -467,6 +469,25 @@ pub struct App {
 }
 
 impl App {
+    /// The artist list backing the current view, for every view that lists artists.
+    pub fn view_artists(&self) -> Option<&[Artist]> {
+        match &self.main_view {
+            MainView::Library(LibraryView::Artists) => Some(&self.artists),
+            MainView::Library(LibraryView::AlbumArtists) => Some(&self.album_artists),
+            MainView::Library(LibraryView::RecentlyPlayedArtists) => Some(&self.recent_artists),
+            _ => None,
+        }
+    }
+
+    /// The album list backing the current view, for every view that lists albums.
+    pub fn view_albums(&self) -> Option<&[Album]> {
+        match &self.main_view {
+            MainView::Library(LibraryView::Albums { .. }) => Some(&self.albums),
+            MainView::Library(LibraryView::NewMusic) => Some(&self.new_music),
+            _ => None,
+        }
+    }
+
     /// Copy the user-configurable settings from `cfg` onto the running app state. Called at
     /// startup so there is a single place to keep in sync when a new setting is added.
     pub fn apply_config(&mut self, cfg: &crate::config::Config) {
@@ -613,6 +634,7 @@ impl App {
 pub enum AppMsg {
     Connected,
     Disconnected,
+    AuthFailed,
     PlayersLoaded(Vec<Player>),
     NowPlayingUpdated(String, NowPlaying), // player_id, data
     QueueLoaded(String, Vec<Track>),       // player_id, data

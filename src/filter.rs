@@ -241,3 +241,74 @@ pub fn clear_if_view_changed(app: &mut App) {
         clear(app);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::Track;
+    use serde_json::json;
+
+    fn track(title: &str, artist: &str) -> Track {
+        serde_json::from_value(json!({"title": title, "artist": artist})).unwrap()
+    }
+
+    fn queue_app() -> App {
+        let mut app = App::new(None);
+        app.main_view = MainView::Queue;
+        app.queue = vec![
+            track("So What", "Miles Davis"),
+            track("Naima", "Coltrane"),
+            track("Blue in Green", "Miles Davis"),
+        ];
+        app
+    }
+
+    #[test]
+    fn filter_matches_title_or_artist_and_restores() {
+        let mut app = queue_app();
+        open(&mut app);
+        app.local_filter.as_mut().unwrap().query = "MILES".into();
+        recompute(&mut app);
+        assert_eq!(app.queue.len(), 2);
+        app.local_filter.as_mut().unwrap().query = "naima".into();
+        recompute(&mut app);
+        assert_eq!(app.queue.len(), 1);
+        clear(&mut app);
+        assert_eq!(app.queue.len(), 3);
+        assert!(app.local_filter.is_none());
+    }
+
+    #[test]
+    fn recompute_clamps_selection() {
+        let mut app = queue_app();
+        app.main_selected = 2;
+        open(&mut app);
+        app.local_filter.as_mut().unwrap().query = "naima".into();
+        recompute(&mut app);
+        assert_eq!(app.main_selected, 0);
+    }
+
+    #[test]
+    fn reload_keeps_filter_and_navigation_clears_it() {
+        let mut app = queue_app();
+        open(&mut app);
+        app.local_filter.as_mut().unwrap().query = "miles".into();
+        recompute(&mut app);
+        // A periodic queue refresh replaces the Vec with a new full list.
+        app.queue.push(track("Freddie Freeloader", "Miles Davis"));
+        app.queue.insert(0, track("So What", "Miles Davis"));
+        reapply_if_active(&mut app, &MainView::Queue);
+        assert!(app.queue.iter().all(|t| t.artist.as_deref() == Some("Miles Davis")));
+        app.main_view = MainView::Radio;
+        clear_if_view_changed(&mut app);
+        assert!(app.local_filter.is_none());
+    }
+
+    #[test]
+    fn non_filterable_view_is_noop() {
+        let mut app = App::new(None);
+        app.main_view = MainView::Help;
+        open(&mut app);
+        assert!(app.local_filter.is_none());
+    }
+}
