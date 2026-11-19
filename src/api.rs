@@ -459,6 +459,9 @@ impl LmsClient {
                 json!(0),
                 json!(LIMIT_FULL),
                 json!(format!("album_id:{}", album_id)),
+                // `titles` defaults to sort:title (alphabetical), so ask for disc/track
+                // order explicitly or the album view lists its tracks alphabetically.
+                json!("sort:tracknum"),
                 json!("tags:adlt"),
             ],
             "titles_loop",
