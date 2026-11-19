@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `toml` to 1.x and `dirs` to 7
 
 ### Fixed
+- Album tracklists are listed in disc/track order instead of alphabetically (affected albums opened from search results and from the library)
 - Add to queue / replace queue did nothing in the *Recently Played Artists* and *New Music* views
 
 ## [0.2.12] - 2026-06-14
